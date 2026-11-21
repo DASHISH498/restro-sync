@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
@@ -57,7 +57,7 @@ interface ActiveOrder {
   }[];
 }
 
-export default function CustomerOrderPage() {
+function CustomerOrderContent() {
   const params = useParams();
   const restaurantId = params.restaurantId as string;
   const tableNumber = Number(params.tableNumber);
@@ -830,5 +830,19 @@ export default function CustomerOrderPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function CustomerOrderPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-slate-50">
+          <p className="text-slate-500 font-medium">Loading Digital Menu...</p>
+        </div>
+      }
+    >
+      <CustomerOrderContent />
+    </Suspense>
   );
 }
