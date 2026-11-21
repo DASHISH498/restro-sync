@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import {
@@ -15,6 +14,11 @@ import {
   Receipt,
   Plus,
   Building2,
+  Phone,
+  KeyRound,
+  CheckCircle2,
+  MapPin,
+  Hash,
 } from 'lucide-react';
 
 interface Restaurant {
@@ -24,6 +28,7 @@ interface Restaurant {
   total_tables: number;
   owner_pin: string;
   staff_pin?: string | null;
+  owner_phone?: string | null;
 }
 
 export default function HomePage() {
@@ -39,17 +44,36 @@ export default function HomePage() {
   const [verifying, setVerifying] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
+  // Forgot PIN States
+  const [isForgotMode, setIsForgotMode] = useState(false);
+  const [recoveryPhone, setRecoveryPhone] = useState('');
+  const [newOwnerPin, setNewOwnerPin] = useState('');
+  const [resettingPin, setResettingPin] = useState(false);
+  const [resetSuccessMsg, setResetSuccessMsg] = useState('');
+
+  // Register Restaurant Modal States
+  const [showRegisterModal, setShowRegisterModal] = useState(false);
+  const [regName, setRegName] = useState('');
+  const [regCity, setRegCity] = useState('');
+  const [regPhone, setRegPhone] = useState('');
+  const [regTables, setRegTables] = useState(10);
+  const [regOwnerPin, setRegOwnerPin] = useState('');
+  const [regStaffPin, setRegStaffPin] = useState('');
+  const [registering, setRegistering] = useState(false);
+  const [regError, setRegError] = useState('');
+
   useEffect(() => {
-    // Logout ke baad home page aane par saare modal aur PIN states reset rakhein
     setSelectedRestaurant(null);
     setPin('');
     setVerifying(false);
     setErrorMsg('');
+    setIsForgotMode(false);
+    setShowRegisterModal(false);
 
     const fetchRestaurants = async () => {
       const { data } = await supabase
         .from('restaurants')
-        .select('id, name, city, total_tables, owner_pin, staff_pin')
+        .select('id, name, city, total_tables, owner_pin, staff_pin, owner_phone')
         .order('created_at', { ascending: false });
 
       if (data) {
@@ -61,18 +85,27 @@ export default function HomePage() {
     fetchRestaurants();
   }, []);
 
+  // --- LOGIN & FORGOT PIN HANDLERS ---
   const handleOpenPinModal = (rest: Restaurant) => {
     setSelectedRestaurant(rest);
     setPin('');
     setErrorMsg('');
     setVerifying(false);
+    setIsForgotMode(false);
+    setRecoveryPhone('');
+    setNewOwnerPin('');
+    setResetSuccessMsg('');
   };
 
-  const handleCloseModal = () => {
+  const handleClosePinModal = () => {
     setSelectedRestaurant(null);
     setPin('');
     setErrorMsg('');
     setVerifying(false);
+    setIsForgotMode(false);
+    setRecoveryPhone('');
+    setNewOwnerPin('');
+    setResetSuccessMsg('');
   };
 
   const handlePinLogin = async (e?: React.FormEvent, enteredPin?: string) => {
@@ -116,6 +149,139 @@ export default function HomePage() {
     }
   };
 
+  const handleResetOwnerPin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedRestaurant) return;
+    setErrorMsg('');
+    setResetSuccessMsg('');
+
+    const cleanPhone = recoveryPhone.replace(/\D/g, '');
+    if (cleanPhone.length !== 10) {
+      setErrorMsg('Kripya 10-digit registered mobile number dalein.');
+      return;
+    }
+    if (newOwnerPin.length !== 4) {
+      setErrorMsg('Naya 4-digit Owner PIN dalein.');
+      return;
+    }
+
+    if (!selectedRestaurant.owner_phone) {
+      setErrorMsg(
+        'Is restaurant ke saath koi mobile number linked nahi hai. Admin se sampark karein.'
+      );
+      return;
+    }
+
+    if (cleanPhone !== selectedRestaurant.owner_phone) {
+      setErrorMsg('Mobile number match nahi hua! Registered owner number dalein.');
+      return;
+    }
+
+    setResettingPin(true);
+
+    const { error } = await supabase
+      .from('restaurants')
+      .update({ owner_pin: newOwnerPin })
+      .eq('id', selectedRestaurant.id);
+
+    setResettingPin(false);
+
+    if (error) {
+      setErrorMsg('PIN update karne mein error aaya. Dubara try karein.');
+      return;
+    }
+
+    const updatedRest: Restaurant = {
+      ...selectedRestaurant,
+      owner_pin: newOwnerPin,
+    };
+    setSelectedRestaurant(updatedRest);
+    setRestaurants((prev) =>
+      prev.map((r) => (r.id === updatedRest.id ? updatedRest : r))
+    );
+
+    setResetSuccessMsg('Owner PIN reset ho gaya! Ab naye PIN se login karein.');
+    setTimeout(() => {
+      setIsForgotMode(false);
+      setPin('');
+      setRecoveryPhone('');
+      setNewOwnerPin('');
+      setResetSuccessMsg('');
+    }, 1500);
+  };
+
+  // --- REGISTER RESTAURANT HANDLER ---
+  const handleOpenRegisterModal = () => {
+    setRegName('');
+    setRegCity('');
+    setRegPhone('');
+    setRegTables(10);
+    setRegOwnerPin('');
+    setRegStaffPin('');
+    setRegError('');
+    setShowRegisterModal(true);
+  };
+
+  const handleRegisterRestaurant = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRegError('');
+
+    const cleanPhone = regPhone.replace(/\D/g, '');
+    if (!regName.trim() || !regCity.trim()) {
+      setRegError('Restaurant ka naam aur city zaroori hai.');
+      return;
+    }
+    if (cleanPhone.length !== 10) {
+      setRegError('Kripya sahi 10-digit Owner Mobile Number dalein.');
+      return;
+    }
+    if (regOwnerPin.length !== 4) {
+      setRegError('4-digit Owner PIN set karna zaroori hai.');
+      return;
+    }
+    if (regStaffPin && regStaffPin.length !== 4) {
+      setRegError('Staff PIN bhi 4-digit ka hona chahiye (ya khali chhodein).');
+      return;
+    }
+
+    setRegistering(true);
+
+    const { data, error } = await supabase
+      .from('restaurants')
+      .insert([
+        {
+          name: regName.trim(),
+          city: regCity.trim(),
+          owner_phone: cleanPhone,
+          total_tables: Number(regTables) || 10,
+          owner_pin: regOwnerPin,
+          staff_pin: regStaffPin || null,
+        },
+      ])
+      .select()
+      .single();
+
+    setRegistering(false);
+
+    if (error || !data) {
+      setRegError('Registration fail hua. Kripya dubara try karein.');
+      return;
+    }
+
+    localStorage.setItem(
+      'restro_session',
+      JSON.stringify({
+        restaurantId: data.id,
+        restaurantName: data.name,
+        city: data.city,
+        totalTables: data.total_tables,
+        role: 'owner',
+      })
+    );
+
+    router.push('/dashboard');
+  };
+
   const filteredRestaurants = restaurants.filter(
     (r) =>
       r.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -136,13 +302,14 @@ export default function HomePage() {
             </span>
           </div>
 
-          <Link
-            href="/register"
+          <button
+            type="button"
+            onClick={handleOpenRegisterModal}
             className="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 shadow-sm transition"
           >
             <Plus className="w-4 h-4" />
             <span>Register Restaurant</span>
-          </Link>
+          </button>
         </div>
       </header>
 
@@ -218,12 +385,13 @@ export default function HomePage() {
             )}
 
             <div className="mt-4">
-              <Link
-                href="/register"
+              <button
+                type="button"
+                onClick={handleOpenRegisterModal}
                 className="text-xs font-bold text-orange-600 hover:underline"
               >
                 Naya Restaurant hai? Yahan Free Register Karein &rarr;
-              </Link>
+              </button>
             </div>
           </div>
         </div>
@@ -275,20 +443,177 @@ export default function HomePage() {
         </section>
       </main>
 
-      {/* PIN Login Modal (Browser Autofill Disabled) */}
+      {/* REGISTER RESTAURANT MODAL (With Owner Mobile Number) */}
+      {showRegisterModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl relative max-h-[92vh] overflow-y-auto">
+            <button
+              type="button"
+              onClick={() => setShowRegisterModal(false)}
+              className="absolute right-4 top-4 p-2 rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="text-center mb-5">
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full mb-2">
+                <CheckCircle2 className="w-3.5 h-3.5" /> 14-Day Free Trial
+              </span>
+              <h3 className="text-xl font-extrabold text-slate-900">Register Restaurant</h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Details bharein aur turant apna POS & QR Menu shuru karein.
+              </p>
+            </div>
+
+            <form onSubmit={handleRegisterRestaurant} autoComplete="off" className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Restaurant / Cafe Name *
+                </label>
+                <div className="relative">
+                  <Building2 className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    required
+                    value={regName}
+                    onChange={(e) => setRegName(e.target.value)}
+                    placeholder="e.g. Spice Garden Cafe"
+                    className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">City *</label>
+                <div className="relative">
+                  <MapPin className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    required
+                    value={regCity}
+                    onChange={(e) => setRegCity(e.target.value)}
+                    placeholder="e.g. Jaipur"
+                    className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Owner Mobile Number (For Forgot PIN Recovery) *
+                </label>
+                <div className="relative">
+                  <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    maxLength={10}
+                    required
+                    value={regPhone}
+                    onChange={(e) =>
+                      setRegPhone(e.target.value.replace(/\D/g, '').slice(0, 10))
+                    }
+                    placeholder="10-digit mobile number"
+                    className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Number of Tables *
+                </label>
+                <div className="relative">
+                  <Hash className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    required
+                    value={regTables}
+                    onChange={(e) => setRegTables(Number(e.target.value))}
+                    className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Owner PIN (4-Digit) *
+                  </label>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      maxLength={4}
+                      required
+                      autoComplete="new-password"
+                      value={regOwnerPin}
+                      onChange={(e) =>
+                        setRegOwnerPin(e.target.value.replace(/\D/g, '').slice(0, 4))
+                      }
+                      placeholder="••••"
+                      className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm font-bold tracking-widest outline-none transition"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Staff PIN (Optional)
+                  </label>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      maxLength={4}
+                      autoComplete="new-password"
+                      value={regStaffPin}
+                      onChange={(e) =>
+                        setRegStaffPin(e.target.value.replace(/\D/g, '').slice(0, 4))
+                      }
+                      placeholder="••••"
+                      className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm font-bold tracking-widest outline-none transition"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {regError && (
+                <p className="text-xs font-bold text-red-600 bg-red-50 py-2 px-3 rounded-xl text-center">
+                  {regError}
+                </p>
+              )}
+
+              <button
+                type="submit"
+                disabled={registering}
+                className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-orange-300 text-white font-extrabold py-3.5 rounded-2xl text-sm shadow-md transition"
+              >
+                {registering ? 'Creating Restaurant...' : 'Create Restaurant & Launch POS →'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* PIN LOGIN & FORGOT PIN RESET MODAL */}
       {selectedRestaurant && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-3xl max-w-sm w-full p-7 shadow-2xl relative text-center">
             <button
               type="button"
-              onClick={handleCloseModal}
+              onClick={handleClosePinModal}
               className="absolute right-4 top-4 p-2 rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition"
             >
               <X className="w-5 h-5" />
             </button>
 
             <div className="w-12 h-12 rounded-2xl bg-orange-100 text-orange-600 flex items-center justify-center mx-auto mb-3">
-              <Lock className="w-6 h-6" />
+              {isForgotMode ? <KeyRound className="w-6 h-6" /> : <Lock className="w-6 h-6" />}
             </div>
 
             <h3 className="text-lg font-extrabold text-slate-900">
@@ -296,38 +621,139 @@ export default function HomePage() {
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">{selectedRestaurant.city}</p>
 
-            <form onSubmit={handlePinLogin} autoComplete="off" className="mt-6 space-y-4">
-              <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
-                Enter 4-Digit Owner or Staff PIN
-              </label>
+            {!isForgotMode ? (
+              <form onSubmit={handlePinLogin} autoComplete="off" className="mt-6 space-y-4">
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+                  Enter 4-Digit Owner or Staff PIN
+                </label>
 
-              <input
-                type="password"
-                inputMode="numeric"
-                maxLength={4}
-                autoFocus
-                autoComplete="new-password"
-                name="restro_pin_code"
-                value={pin}
-                onChange={(e) => handlePinChange(e.target.value)}
-                placeholder="••••"
-                className="w-full text-center text-2xl tracking-[0.75em] font-extrabold py-3.5 border-2 border-slate-200 focus:border-orange-500 rounded-2xl outline-none transition"
-              />
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={4}
+                  autoFocus
+                  autoComplete="new-password"
+                  name="restro_pin_code"
+                  value={pin}
+                  onChange={(e) => handlePinChange(e.target.value)}
+                  placeholder="••••"
+                  className="w-full text-center text-2xl tracking-[0.75em] font-extrabold py-3.5 border-2 border-slate-200 focus:border-orange-500 rounded-2xl outline-none transition"
+                />
 
-              {errorMsg && (
-                <p className="text-xs font-bold text-red-600 bg-red-50 py-2 px-3 rounded-xl">
-                  {errorMsg}
-                </p>
-              )}
+                {errorMsg && (
+                  <p className="text-xs font-bold text-red-600 bg-red-50 py-2 px-3 rounded-xl">
+                    {errorMsg}
+                  </p>
+                )}
 
-              <button
-                type="submit"
-                disabled={pin.length !== 4 || verifying}
-                className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-orange-300 text-white font-extrabold py-3.5 rounded-2xl text-sm shadow-md transition"
+                <button
+                  type="submit"
+                  disabled={pin.length !== 4 || verifying}
+                  className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-orange-300 text-white font-extrabold py-3.5 rounded-2xl text-sm shadow-md transition"
+                >
+                  {verifying ? 'Checking PIN...' : 'Unlock Dashboard'}
+                </button>
+
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsForgotMode(true);
+                      setErrorMsg('');
+                    }}
+                    className="text-xs font-bold text-slate-500 hover:text-orange-600 transition"
+                  >
+                    Forgot Owner PIN? Reset Here &rarr;
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <form
+                onSubmit={handleResetOwnerPin}
+                autoComplete="off"
+                className="mt-5 space-y-3.5 text-left"
               >
-                {verifying ? 'Checking PIN...' : 'Unlock Dashboard'}
-              </button>
-            </form>
+                <p className="text-xs text-slate-500 text-center">
+                  Registered <strong>Owner Mobile Number</strong> verify karke naya 4-digit PIN set karein.
+                </p>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                    Registered Owner Mobile Number
+                  </label>
+                  <div className="relative">
+                    <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="tel"
+                      inputMode="numeric"
+                      maxLength={10}
+                      required
+                      value={recoveryPhone}
+                      onChange={(e) =>
+                        setRecoveryPhone(e.target.value.replace(/\D/g, '').slice(0, 10))
+                      }
+                      placeholder="10-digit mobile number"
+                      className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                    Set New 4-Digit Owner PIN
+                  </label>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      maxLength={4}
+                      required
+                      autoComplete="new-password"
+                      value={newOwnerPin}
+                      onChange={(e) =>
+                        setNewOwnerPin(e.target.value.replace(/\D/g, '').slice(0, 4))
+                      }
+                      placeholder="••••"
+                      className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm font-bold tracking-widest outline-none transition"
+                    />
+                  </div>
+                </div>
+
+                {errorMsg && (
+                  <p className="text-xs font-bold text-red-600 bg-red-50 py-2 px-3 rounded-xl text-center">
+                    {errorMsg}
+                  </p>
+                )}
+
+                {resetSuccessMsg && (
+                  <p className="text-xs font-bold text-emerald-700 bg-emerald-50 py-2 px-3 rounded-xl flex items-center justify-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" /> {resetSuccessMsg}
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={resettingPin}
+                  className="w-full bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white font-extrabold py-3 rounded-2xl text-sm shadow-md transition"
+                >
+                  {resettingPin ? 'Updating PIN...' : 'Verify & Set New PIN'}
+                </button>
+
+                <div className="text-center pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsForgotMode(false);
+                      setErrorMsg('');
+                    }}
+                    className="text-xs font-bold text-slate-500 hover:text-slate-800 transition"
+                  >
+                    &larr; Back to PIN Login
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}

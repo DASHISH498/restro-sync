@@ -221,7 +221,7 @@ export default function MenuManagerPage() {
     <div className="min-h-screen bg-slate-50 pb-16">
       {/* Header */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
-        <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between gap-4">
+        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <Link
               href="/dashboard"
@@ -239,7 +239,7 @@ export default function MenuManagerPage() {
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-4 pt-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <main className="max-w-7xl mx-auto px-4 pt-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column: Add New Dish Form */}
         <section className="bg-white border border-slate-200 rounded-2xl p-5 h-fit shadow-sm">
           <h2 className="text-base font-extrabold text-slate-900 mb-4 flex items-center gap-2">
