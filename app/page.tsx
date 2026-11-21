@@ -19,6 +19,8 @@ import {
   CheckCircle2,
   MapPin,
   Hash,
+  Check,
+  Sparkles,
 } from 'lucide-react';
 
 interface Restaurant {
@@ -30,6 +32,84 @@ interface Restaurant {
   staff_pin?: string | null;
   owner_phone?: string | null;
 }
+
+const PRICING_PLANS = [
+  {
+    id: '1_month',
+    duration: '1 Month',
+    subtitle: 'Starter Monthly',
+    price: '₹599',
+    perMonth: '₹599 / month',
+    badge: null,
+    popular: false,
+    features: [
+      'Unlimited Table QR Menus',
+      'Live Kitchen Display (KDS)',
+      'Owner & Staff PIN Roles',
+      'Daily Sales & Billing History',
+    ],
+  },
+  {
+    id: '3_months',
+    duration: '3 Months',
+    subtitle: 'Quarterly Plan',
+    price: '₹1,699',
+    perMonth: '₹566 / month',
+    badge: 'Save ₹98',
+    popular: false,
+    features: [
+      'Everything in 1 Month Plan',
+      'Quick Dish Stock Toggle',
+      'Cash & UPI Payment Split',
+      'Priority WhatsApp Support',
+    ],
+  },
+  {
+    id: '6_months',
+    duration: '6 Months',
+    subtitle: 'Half-Yearly Plan',
+    price: '₹3,299',
+    perMonth: '₹550 / month',
+    badge: 'Save ₹295',
+    popular: false,
+    features: [
+      'Everything in 3 Months Plan',
+      'Custom Date Range Reports',
+      'Unlimited Tables & Dishes',
+      'Free Menu Setup Support',
+    ],
+  },
+  {
+    id: 'yearly',
+    duration: 'Yearly',
+    subtitle: '12 Months Pro',
+    price: '₹5,499',
+    perMonth: '₹458 / month',
+    badge: 'Save ₹1,689',
+    popular: true,
+    features: [
+      'Everything in 6 Months Plan',
+      'Best Annual Value (23% Off)',
+      'Dedicated Onboarding Call',
+      'All Future Updates Included',
+    ],
+  },
+  {
+    id: 'lifetime',
+    duration: 'Lifetime',
+    subtitle: 'One-Time Payment',
+    price: '₹19,999',
+    perMonth: 'Pay once, use forever',
+    badge: 'Zero Renewal',
+    popular: false,
+    features: [
+      'Lifetime POS & KDS Access',
+      'No Monthly or Yearly Fees',
+      'VIP Priority Support',
+      'All Future Pro Features Free',
+    ],
+  },
+];
 
 export default function HomePage() {
   const router = useRouter();
@@ -53,10 +133,11 @@ export default function HomePage() {
 
   // Register Restaurant Modal States
   const [showRegisterModal, setShowRegisterModal] = useState(false);
+  const [selectedPlanLabel, setSelectedPlanLabel] = useState<string>('Yearly (₹5,499)');
   const [regName, setRegName] = useState('');
   const [regCity, setRegCity] = useState('');
   const [regPhone, setRegPhone] = useState('');
-  const [regTables, setRegTables] = useState(10);
+  const [regTables, setRegTables] = useState<number>(10);
   const [regOwnerPin, setRegOwnerPin] = useState('');
   const [regStaffPin, setRegStaffPin] = useState('');
   const [registering, setRegistering] = useState(false);
@@ -210,8 +291,9 @@ export default function HomePage() {
     }, 1500);
   };
 
-  // --- REGISTER RESTAURANT HANDLER ---
-  const handleOpenRegisterModal = () => {
+  // --- REGISTER RESTAURANT HANDLER (WITH 14-DAY TRIAL & SELECTED PLAN) ---
+  const handleOpenRegisterModal = (planName = 'Yearly (₹5,499)') => {
+    setSelectedPlanLabel(planName);
     setRegName('');
     setRegCity('');
     setRegPhone('');
@@ -246,16 +328,24 @@ export default function HomePage() {
 
     setRegistering(true);
 
+    const finalTables = regTables > 0 ? regTables : 10;
+    const trialEnd = new Date();
+    trialEnd.setDate(trialEnd.getDate() + 14);
+
     const { data, error } = await supabase
       .from('restaurants')
       .insert([
         {
           name: regName.trim(),
           city: regCity.trim(),
+          phone: cleanPhone,
           owner_phone: cleanPhone,
-          total_tables: Number(regTables) || 10,
+          total_tables: finalTables,
           owner_pin: regOwnerPin,
           staff_pin: regStaffPin || null,
+          subscription_status: 'free_trial',
+          selected_plan: selectedPlanLabel,
+          trial_ends_at: trialEnd.toISOString(),
         },
       ])
       .select()
@@ -292,7 +382,7 @@ export default function HomePage() {
     <div className="min-h-screen bg-slate-50 text-slate-900">
       {/* Top Navbar */}
       <header className="bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-30">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="bg-orange-600 text-white p-2 rounded-xl shadow-sm">
               <UtensilsCrossed className="w-5 h-5" />
@@ -302,19 +392,28 @@ export default function HomePage() {
             </span>
           </div>
 
-          <button
-            type="button"
-            onClick={handleOpenRegisterModal}
-            className="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 shadow-sm transition"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Register Restaurant</span>
-          </button>
+          <div className="flex items-center gap-4">
+            <a
+              href="#pricing"
+              className="hidden sm:inline-block text-xs font-extrabold text-slate-600 hover:text-orange-600 transition"
+            >
+              Plans & Pricing
+            </a>
+
+            <button
+              type="button"
+              onClick={() => handleOpenRegisterModal('Yearly (₹5,499)')}
+              className="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 shadow-sm transition"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Register Restaurant</span>
+            </button>
+          </div>
         </div>
       </header>
 
       {/* Hero Section & Restaurant Search */}
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 pt-12 pb-20">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-12 pb-20">
         <div className="text-center max-w-2xl mx-auto">
           <span className="inline-block bg-orange-100 text-orange-700 text-xs font-bold px-3.5 py-1 rounded-full mb-4">
             14–Day Free Trial • No Hardware Needed
@@ -387,7 +486,7 @@ export default function HomePage() {
             <div className="mt-4">
               <button
                 type="button"
-                onClick={handleOpenRegisterModal}
+                onClick={() => handleOpenRegisterModal('Yearly (₹5,499)')}
                 className="text-xs font-bold text-orange-600 hover:underline"
               >
                 Naya Restaurant hai? Yahan Free Register Karein &rarr;
@@ -397,7 +496,7 @@ export default function HomePage() {
         </div>
 
         {/* Features Grid */}
-        <section className="mt-20">
+        <section className="mt-20 max-w-6xl mx-auto">
           <h2 className="text-center text-xl sm:text-2xl font-extrabold text-slate-900 mb-8">
             Ek Hi Portal Mein Sab Kuch
           </h2>
@@ -441,9 +540,112 @@ export default function HomePage() {
             </div>
           </div>
         </section>
+
+        {/* PRICING PLANS SECTION */}
+        <section id="pricing" className="mt-24 scroll-mt-24">
+          <div className="text-center max-w-2xl mx-auto mb-10">
+            <span className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-extrabold px-3.5 py-1 rounded-full mb-3">
+              <Sparkles className="w-3.5 h-3.5" /> Simple & Transparent Plans
+            </span>
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900">
+              Apne Restaurant Ke Liye Best Plan Chunein
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-500 mt-2">
+              Har plan ke saath pehle <strong>14 Din Bilkul Free Trial</strong> milega. Koi setup fee
+              ya hidden charge nahi.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            {PRICING_PLANS.map((plan) => (
+              <div
+                key={plan.id}
+                className={`rounded-3xl p-5 flex flex-col justify-between transition relative ${
+                  plan.popular
+                    ? 'bg-slate-900 text-white border-2 border-orange-500 shadow-xl'
+                    : plan.id === 'lifetime'
+                    ? 'bg-gradient-to-b from-amber-50/80 to-white text-slate-900 border-2 border-amber-300 shadow-sm'
+                    : 'bg-white text-slate-900 border border-slate-200 shadow-sm hover:border-orange-300'
+                }`}
+              >
+                {plan.popular && (
+                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-orange-600 text-white text-[10px] font-extrabold uppercase tracking-wider px-3 py-1 rounded-full shadow whitespace-nowrap">
+                    Most Popular
+                  </span>
+                )}
+
+                <div>
+                  <div className="flex items-center justify-between gap-1">
+                    <h3 className="text-base font-extrabold">{plan.duration}</h3>
+                    {plan.badge && (
+                      <span
+                        className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full whitespace-nowrap ${
+                          plan.popular
+                            ? 'bg-orange-500/20 text-orange-300'
+                            : plan.id === 'lifetime'
+                            ? 'bg-amber-200/70 text-amber-900'
+                            : 'bg-emerald-50 text-emerald-700'
+                        }`}
+                      >
+                        {plan.badge}
+                      </span>
+                    )}
+                  </div>
+                  <p
+                    className={`text-[11px] mt-0.5 ${
+                      plan.popular ? 'text-slate-400' : 'text-slate-500'
+                    }`}
+                  >
+                    {plan.subtitle}
+                  </p>
+
+                  <div className="mt-4 pb-4 border-b border-slate-200/30">
+                    <span className="text-2xl sm:text-3xl font-extrabold">{plan.price}</span>
+                    <span
+                      className={`block text-[11px] mt-1 ${
+                        plan.popular ? 'text-slate-400' : 'text-slate-500'
+                      }`}
+                    >
+                      {plan.perMonth}
+                    </span>
+                  </div>
+
+                  <ul className="mt-4 space-y-2 text-xs">
+                    {plan.features.map((feat) => (
+                      <li key={feat} className="flex items-start gap-2">
+                        <Check
+                          className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${
+                            plan.popular ? 'text-orange-400' : 'text-emerald-600'
+                          }`}
+                        />
+                        <span className={plan.popular ? 'text-slate-200' : 'text-slate-600'}>
+                          {feat}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleOpenRegisterModal(`${plan.duration} (${plan.price})`)}
+                  className={`mt-6 w-full py-2.5 rounded-2xl text-xs font-extrabold transition ${
+                    plan.popular
+                      ? 'bg-orange-600 hover:bg-orange-700 text-white shadow-md'
+                      : plan.id === 'lifetime'
+                      ? 'bg-amber-500 hover:bg-amber-600 text-slate-950'
+                      : 'bg-slate-900 hover:bg-slate-800 text-white'
+                  }`}
+                >
+                  Start Free Trial &rarr;
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
       </main>
 
-      {/* REGISTER RESTAURANT MODAL (With Owner Mobile Number) */}
+      {/* REGISTER RESTAURANT MODAL */}
       {showRegisterModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl relative max-h-[92vh] overflow-y-auto">
@@ -457,7 +659,7 @@ export default function HomePage() {
 
             <div className="text-center mb-5">
               <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full mb-2">
-                <CheckCircle2 className="w-3.5 h-3.5" /> 14-Day Free Trial
+                <CheckCircle2 className="w-3.5 h-3.5" /> 14-Day Trial • {selectedPlanLabel}
               </span>
               <h3 className="text-xl font-extrabold text-slate-900">Register Restaurant</h3>
               <p className="text-xs text-slate-500 mt-0.5">
@@ -530,8 +732,8 @@ export default function HomePage() {
                     min={1}
                     max={100}
                     required
-                    value={regTables}
-                    onChange={(e) => setRegTables(Number(e.target.value))}
+                    value={regTables || ''}
+                    onChange={(e) => setRegTables(parseInt(e.target.value, 10) || 0)}
                     className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
                   />
                 </div>

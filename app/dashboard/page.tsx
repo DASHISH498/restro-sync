@@ -1,9 +1,9 @@
-"use client";
+'use client';
 
-import React, { useState, useEffect, useCallback } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import React, { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
 import {
   UtensilsCrossed,
   LogOut,
@@ -27,20 +27,30 @@ import {
   Banknote,
   Smartphone,
   Calendar,
-} from "lucide-react";
+  Crown,
+  MessageCircle,
+  AlertTriangle,
+} from 'lucide-react';
 
 interface SessionData {
   restaurantId: string;
   restaurantName: string;
   city: string;
   totalTables: number;
-  role: "owner" | "staff";
+  role: 'owner' | 'staff';
+}
+
+interface SubscriptionInfo {
+  status: string;
+  selectedPlan: string;
+  daysLeft: number;
+  isExpired: boolean;
 }
 
 interface OrderRecord {
   id: string;
   table_number: number;
-  status: "pending" | "preparing" | "ready" | "served" | "completed";
+  status: 'pending' | 'preparing' | 'ready' | 'served' | 'completed';
   total_amount: number;
   payment_method: string;
   created_at: string;
@@ -61,18 +71,34 @@ interface MenuStockItem {
   is_available: boolean;
 }
 
+// Yahan apna WhatsApp number (91 + 10 digits) dalein
+const ADMIN_WHATSAPP = '919079083101';
+
+const UPGRADE_PLANS = [
+  { id: '1_month', name: '1 Month Plan', price: '₹599', tag: 'Monthly' },
+  { id: '3_months', name: '3 Months Plan', price: '₹1,699', tag: 'Save ₹98' },
+  { id: '6_months', name: '6 Months Plan', price: '₹3,299', tag: 'Save ₹295' },
+  { id: 'yearly', name: 'Yearly Plan (12 Months)', price: '₹5,499', tag: 'Most Popular' },
+  { id: 'lifetime', name: 'Lifetime License', price: '₹19,999', tag: 'One-Time Pay' },
+];
+
 export default function DashboardPage() {
   const router = useRouter();
 
   const [session, setSession] = useState<SessionData | null>(null);
   const [actualTablesCount, setActualTablesCount] = useState<number>(5);
+  const [subInfo, setSubInfo] = useState<SubscriptionInfo>({
+    status: 'free_trial',
+    selectedPlan: 'Yearly (₹5,499)',
+    daysLeft: 14,
+    isExpired: false,
+  });
+
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Table Action Modal
-  const [selectedTableModal, setSelectedTableModal] = useState<number | null>(
-    null,
-  );
+  const [selectedTableModal, setSelectedTableModal] = useState<number | null>(null);
   const [settling, setSettling] = useState(false);
 
   // Quick Stock Toggle Modal
@@ -87,15 +113,18 @@ export default function DashboardPage() {
   const [customFromDate, setCustomFromDate] = useState<string>('');
   const [customToDate, setCustomToDate] = useState<string>('');
 
+  // Owner Plan Upgrade Modal
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0];
     setTodayIso(today);
     setCustomFromDate(today);
     setCustomToDate(today);
 
-    const raw = localStorage.getItem("restro_session");
+    const raw = localStorage.getItem('restro_session');
     if (!raw) {
-      router.push("/");
+      router.push('/');
       return;
     }
     try {
@@ -105,7 +134,7 @@ export default function DashboardPage() {
         setActualTablesCount(parsed.totalTables);
       }
     } catch {
-      router.push("/");
+      router.push('/');
     }
   }, [router]);
 
@@ -114,21 +143,38 @@ export default function DashboardPage() {
 
     const [{ data: restData }, { data: ordersData }] = await Promise.all([
       supabase
-        .from("restaurants")
-        .select("name, city, total_tables")
-        .eq("id", session.restaurantId)
+        .from('restaurants')
+        .select('name, city, total_tables, subscription_status, selected_plan, trial_ends_at')
+        .eq('id', session.restaurantId)
         .single(),
       supabase
-        .from("orders")
+        .from('orders')
         .select(
-          "id, table_number, status, total_amount, payment_method, created_at, order_items(id, item_name, quantity, price, notes)",
+          'id, table_number, status, total_amount, payment_method, created_at, order_items(id, item_name, quantity, price, notes)'
         )
-        .eq("restaurant_id", session.restaurantId)
-        .order("created_at", { ascending: false }),
+        .eq('restaurant_id', session.restaurantId)
+        .order('created_at', { ascending: false }),
     ]);
 
-    if (restData?.total_tables) {
-      setActualTablesCount(Number(restData.total_tables));
+    if (restData) {
+      if (restData.total_tables) {
+        setActualTablesCount(Number(restData.total_tables));
+      }
+
+      const status = restData.subscription_status || 'free_trial';
+      const selectedPlan = restData.selected_plan || 'Yearly (₹5,499)';
+      let daysLeft = 14;
+      let isExpired = false;
+
+      if (restData.trial_ends_at) {
+        const diffMs = new Date(restData.trial_ends_at).getTime() - Date.now();
+        daysLeft = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+        if (status === 'free_trial' && diffMs <= 0) {
+          isExpired = true;
+        }
+      }
+
+      setSubInfo({ status, selectedPlan, daysLeft, isExpired });
     }
 
     if (ordersData) {
@@ -145,16 +191,16 @@ export default function DashboardPage() {
     const channel = supabase
       .channel(`dashboard-orders-${session.restaurantId}`)
       .on(
-        "postgres_changes",
+        'postgres_changes',
         {
-          event: "*",
-          schema: "public",
-          table: "orders",
+          event: '*',
+          schema: 'public',
+          table: 'orders',
           filter: `restaurant_id=eq.${session.restaurantId}`,
         },
         () => {
           fetchDashboardData();
-        },
+        }
       )
       .subscribe();
 
@@ -172,10 +218,10 @@ export default function DashboardPage() {
     setLoadingStock(true);
 
     const { data } = await supabase
-      .from("menu_items")
-      .select("id, name, category, is_veg, is_available")
-      .eq("restaurant_id", session.restaurantId)
-      .order("category", { ascending: true });
+      .from('menu_items')
+      .select('id, name, category, is_veg, is_available')
+      .eq('restaurant_id', session.restaurantId)
+      .order('category', { ascending: true });
 
     if (data) {
       setStockItems(data);
@@ -186,36 +232,33 @@ export default function DashboardPage() {
   const handleToggleStock = async (item: MenuStockItem) => {
     const nextVal = !item.is_available;
     setStockItems((prev) =>
-      prev.map((m) => (m.id === item.id ? { ...m, is_available: nextVal } : m)),
+      prev.map((m) => (m.id === item.id ? { ...m, is_available: nextVal } : m))
     );
 
     await supabase
-      .from("menu_items")
+      .from('menu_items')
       .update({ is_available: nextVal })
-      .eq("id", item.id);
+      .eq('id', item.id);
   };
 
   const handleLogout = () => {
-    localStorage.removeItem("restro_session");
-    router.push("/");
+    localStorage.removeItem('restro_session');
+    router.push('/');
   };
 
-  const handleSettleTable = async (
-    tableNum: number,
-    method: "cash" | "upi",
-  ) => {
-    if (!session?.restaurantId || session.role !== "owner") return;
+  const handleSettleTable = async (tableNum: number, method: 'cash' | 'upi') => {
+    if (!session?.restaurantId || session.role !== 'owner') return;
     setSettling(true);
 
     const activeIds = orders
-      .filter((o) => o.table_number === tableNum && o.status !== "completed")
+      .filter((o) => o.table_number === tableNum && o.status !== 'completed')
       .map((o) => o.id);
 
     if (activeIds.length > 0) {
       await supabase
-        .from("orders")
-        .update({ status: "completed", payment_method: method })
-        .in("id", activeIds);
+        .from('orders')
+        .update({ status: 'completed', payment_method: method })
+        .in('id', activeIds);
     }
 
     setSettling(false);
@@ -224,53 +267,52 @@ export default function DashboardPage() {
   };
 
   const handleMarkServed = async (orderId: string) => {
-    await supabase
-      .from("orders")
-      .update({ status: "served" })
-      .eq("id", orderId);
+    await supabase.from('orders').update({ status: 'served' }).eq('id', orderId);
     fetchDashboardData();
+  };
+
+  const handleWhatsAppUpgrade = (planName: string, price: string) => {
+    if (!session) return;
+    const msg = encodeURIComponent(
+      `Hi RestroSync! Mujhe apna POS plan activate karna hai:\n\n• Restaurant: ${session.restaurantName} (${session.city})\n• Selected Plan: ${planName} - ${price}\n• ID: ${session.restaurantId}\n\nPlease payment link / QR share karein.`
+    );
+    window.open(`https://wa.me/${ADMIN_WHATSAPP}?text=${msg}`, '_blank');
   };
 
   if (!session || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <p className="text-slate-500 font-semibold text-sm">
-          Loading RestroSync Console...
-        </p>
+        <p className="text-slate-500 font-semibold text-sm">Loading RestroSync Console...</p>
       </div>
     );
   }
 
-  const isOwner = session.role === "owner";
+  const isOwner = session.role === 'owner';
 
-  const activeOrders = orders.filter((o) => o.status !== "completed");
-  const completedOrders = orders.filter((o) => o.status === "completed");
+  const activeOrders = orders.filter((o) => o.status !== 'completed');
+  const completedOrders = orders.filter((o) => o.status === 'completed');
 
   const todayStr = new Date().toDateString();
   const todayCompleted = completedOrders.filter(
-    (o) => new Date(o.created_at).toDateString() === todayStr,
+    (o) => new Date(o.created_at).toDateString() === todayStr
   );
-  const todayRevenue = todayCompleted.reduce(
-    (sum, o) => sum + Number(o.total_amount),
-    0,
-  );
+  const todayRevenue = todayCompleted.reduce((sum, o) => sum + Number(o.total_amount), 0);
 
-  // Filtered Sales Data (Today, Last 7 Days, All Time, or Custom Date Range)
   const filteredSalesOrders = completedOrders.filter((ord) => {
     const ordDate = new Date(ord.created_at);
 
-    if (salesFilter === "today") {
+    if (salesFilter === 'today') {
       return ordDate.toDateString() === todayStr;
     }
 
-    if (salesFilter === "7days") {
+    if (salesFilter === '7days') {
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
       sevenDaysAgo.setHours(0, 0, 0, 0);
       return ordDate >= sevenDaysAgo;
     }
 
-    if (salesFilter === "custom") {
+    if (salesFilter === 'custom') {
       if (customFromDate) {
         const start = new Date(`${customFromDate}T00:00:00`);
         if (ordDate < start) return false;
@@ -287,35 +329,29 @@ export default function DashboardPage() {
 
   const filteredTotalSales = filteredSalesOrders.reduce(
     (sum, o) => sum + Number(o.total_amount),
-    0,
+    0
   );
   const filteredCashSales = filteredSalesOrders
-    .filter((o) => (o.payment_method || "").toLowerCase() === "cash")
+    .filter((o) => (o.payment_method || '').toLowerCase() === 'cash')
     .reduce((sum, o) => sum + Number(o.total_amount), 0);
   const filteredUpiSales = filteredSalesOrders
-    .filter((o) => (o.payment_method || "").toLowerCase() === "upi")
+    .filter((o) => (o.payment_method || '').toLowerCase() === 'upi')
     .reduce((sum, o) => sum + Number(o.total_amount), 0);
 
-  const occupiedTablesCount = new Set(activeOrders.map((o) => o.table_number))
-    .size;
+  const occupiedTablesCount = new Set(activeOrders.map((o) => o.table_number)).size;
   const cookingOrdersCount = activeOrders.filter(
-    (o) => o.status === "pending" || o.status === "preparing",
+    (o) => o.status === 'pending' || o.status === 'preparing'
   ).length;
-  const readyToServeCount = activeOrders.filter(
-    (o) => o.status === "ready",
-  ).length;
+  const readyToServeCount = activeOrders.filter((o) => o.status === 'ready').length;
 
-  const tablesArray = Array.from(
-    { length: actualTablesCount },
-    (_, i) => i + 1,
-  );
+  const tablesArray = Array.from({ length: actualTablesCount }, (_, i) => i + 1);
 
   const modalTableOrders = selectedTableModal
     ? activeOrders.filter((o) => o.table_number === selectedTableModal)
     : [];
   const modalTableTotal = modalTableOrders.reduce(
     (sum, o) => sum + Number(o.total_amount),
-    0,
+    0
   );
 
   return (
@@ -335,8 +371,8 @@ export default function DashboardPage() {
                 <span
                   className={`text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full flex items-center gap-1 ${
                     isOwner
-                      ? "bg-amber-100 text-amber-800 border border-amber-200"
-                      : "bg-blue-100 text-blue-700 border border-blue-200"
+                      ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                      : 'bg-blue-100 text-blue-700 border border-blue-200'
                   }`}
                 >
                   {isOwner ? (
@@ -416,10 +452,62 @@ export default function DashboardPage() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 space-y-6">
+        {/* OWNER SUBSCRIPTION / 14-DAY FREE TRIAL BANNER */}
+        {isOwner && subInfo.status !== 'active' && (
+          <section
+            className={`rounded-2xl p-4 border flex flex-wrap items-center justify-between gap-3 shadow-sm ${
+              subInfo.isExpired
+                ? 'bg-red-50 border-red-300 text-red-900'
+                : 'bg-gradient-to-r from-slate-900 to-slate-800 border-slate-700 text-white'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <div
+                className={`p-2.5 rounded-xl ${
+                  subInfo.isExpired
+                    ? 'bg-red-100 text-red-600'
+                    : 'bg-amber-400/20 text-amber-300'
+                }`}
+              >
+                {subInfo.isExpired ? (
+                  <AlertTriangle className="w-5 h-5" />
+                ) : (
+                  <Crown className="w-5 h-5" />
+                )}
+              </div>
+              <div>
+                <p className="text-xs sm:text-sm font-extrabold">
+                  {subInfo.isExpired
+                    ? 'Aapka 14-Day Free Trial Khatam Ho Gaya Hai!'
+                    : `Free Trial Active • ${subInfo.daysLeft} Day${
+                        subInfo.daysLeft === 1 ? '' : 's'
+                      } Left`}
+                </p>
+                <p
+                  className={`text-[11px] mt-0.5 ${
+                    subInfo.isExpired ? 'text-red-700' : 'text-slate-300'
+                  }`}
+                >
+                  Chosen Plan: <strong>{subInfo.selectedPlan}</strong> • Bina kisi rukawat ke
+                  POS chalane ke liye plan activate karein.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowUpgradeModal(true)}
+              className="bg-orange-600 hover:bg-orange-700 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center gap-1.5"
+            >
+              <Crown className="w-3.5 h-3.5" />
+              <span>Upgrade / Activate Plan</span>
+            </button>
+          </section>
+        )}
+
         {/* TOP KPI CARDS */}
         {isOwner ? (
           <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* CLICKABLE TODAY'S TOTAL SALE CARD */}
             <button
               type="button"
               onClick={() => setShowSalesModal(true)}
@@ -428,12 +516,11 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between text-slate-600 text-xs font-bold">
                 <span>Today&apos;s Total Sale</span>
                 <span className="flex items-center gap-1 text-emerald-600 font-extrabold">
-                  View History{" "}
-                  <ArrowUpRight className="w-4 h-4 group-hover:translate-x-0.5 transition" />
+                  View History <ArrowUpRight className="w-4 h-4 group-hover:translate-x-0.5 transition" />
                 </span>
               </div>
               <p className="text-2xl font-extrabold text-slate-900 mt-2">
-                ₹{todayRevenue.toLocaleString("en-IN")}
+                ₹{todayRevenue.toLocaleString('en-IN')}
               </p>
               <p className="text-[11px] text-emerald-700 font-semibold mt-1">
                 {todayCompleted.length} Bills Settled Today • Tap for Calendar
@@ -448,9 +535,7 @@ export default function DashboardPage() {
               <p className="text-2xl font-extrabold text-slate-900 mt-2">
                 {occupiedTablesCount} / {actualTablesCount}
               </p>
-              <p className="text-[11px] text-slate-500 mt-1">
-                Currently Occupied
-              </p>
+              <p className="text-[11px] text-slate-500 mt-1">Currently Occupied</p>
             </div>
 
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
@@ -458,12 +543,8 @@ export default function DashboardPage() {
                 <span>In Kitchen (Cooking)</span>
                 <ChefHat className="w-4 h-4 text-blue-600" />
               </div>
-              <p className="text-2xl font-extrabold text-slate-900 mt-2">
-                {cookingOrdersCount}
-              </p>
-              <p className="text-[11px] text-blue-600 font-semibold mt-1">
-                Live KOTs Active
-              </p>
+              <p className="text-2xl font-extrabold text-slate-900 mt-2">{cookingOrdersCount}</p>
+              <p className="text-[11px] text-blue-600 font-semibold mt-1">Live KOTs Active</p>
             </div>
 
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
@@ -471,12 +552,8 @@ export default function DashboardPage() {
                 <span>Ready to Serve</span>
                 <BellRing className="w-4 h-4 text-amber-600" />
               </div>
-              <p className="text-2xl font-extrabold text-slate-900 mt-2">
-                {readyToServeCount}
-              </p>
-              <p className="text-[11px] text-amber-600 font-semibold mt-1">
-                Pickup from Kitchen
-              </p>
+              <p className="text-2xl font-extrabold text-slate-900 mt-2">{readyToServeCount}</p>
+              <p className="text-[11px] text-amber-600 font-semibold mt-1">Pickup from Kitchen</p>
             </div>
           </section>
         ) : (
@@ -490,8 +567,7 @@ export default function DashboardPage() {
                 {occupiedTablesCount} / {actualTablesCount}
               </p>
               <p className="text-[11px] text-slate-500 mt-1">
-                {Math.max(0, actualTablesCount - occupiedTablesCount)} Tables
-                Free for Guests
+                {Math.max(0, actualTablesCount - occupiedTablesCount)} Tables Free for Guests
               </p>
             </div>
 
@@ -500,9 +576,7 @@ export default function DashboardPage() {
                 <span>Cooking in Kitchen</span>
                 <ChefHat className="w-4 h-4 text-blue-600" />
               </div>
-              <p className="text-2xl font-extrabold text-slate-900 mt-2">
-                {cookingOrdersCount}
-              </p>
+              <p className="text-2xl font-extrabold text-slate-900 mt-2">{cookingOrdersCount}</p>
               <p className="text-[11px] text-blue-600 font-semibold mt-1">
                 Orders Being Prepared
               </p>
@@ -532,18 +606,17 @@ export default function DashboardPage() {
               </div>
               <div>
                 <p className="font-extrabold text-sm">
-                  {readyToServeCount} Order{readyToServeCount > 1 ? "s" : ""}{" "}
-                  Ready in Kitchen!
+                  {readyToServeCount} Order{readyToServeCount > 1 ? 's' : ''} Ready in Kitchen!
                 </p>
                 <p className="text-xs text-emerald-100">
-                  Tables:{" "}
+                  Tables:{' '}
                   {Array.from(
                     new Set(
                       activeOrders
-                        .filter((o) => o.status === "ready")
-                        .map((o) => `Table ${o.table_number}`),
-                    ),
-                  ).join(", ")}
+                        .filter((o) => o.status === 'ready')
+                        .map((o) => `Table ${o.table_number}`)
+                    )
+                  ).join(', ')}
                 </p>
               </div>
             </div>
@@ -564,44 +637,34 @@ export default function DashboardPage() {
                 Live Floor & Table Status
               </h2>
               <p className="text-xs text-slate-500">
-                {isOwner
-                  ? "Kisi bhi table par click karke order punch karein ya bill settle karein."
-                  : "Kisi bhi table par click karke order punch karein ya running dishes dekhein."}
+                Free table par click karke direct order lein; Active table par click karke running
+                items ya bill dekhein.
               </p>
             </div>
 
             <div className="flex items-center gap-3 text-[11px] font-bold">
               <span className="flex items-center gap-1.5 text-slate-500">
-                <span className="w-2.5 h-2.5 rounded-full bg-slate-200"></span>{" "}
-                Free
+                <span className="w-2.5 h-2.5 rounded-full bg-slate-200"></span> Free
               </span>
               <span className="flex items-center gap-1.5 text-amber-700">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>{" "}
-                Active / Served
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span> Active / Served
               </span>
               <span className="flex items-center gap-1.5 text-emerald-700">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>{" "}
-                Ready
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Ready
               </span>
             </div>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3.5">
             {tablesArray.map((tableNum) => {
-              const tOrders = activeOrders.filter(
-                (o) => o.table_number === tableNum,
-              );
+              const tOrders = activeOrders.filter((o) => o.table_number === tableNum);
               const isOccupied = tOrders.length > 0;
-              const hasReady = tOrders.some((o) => o.status === "ready");
-              const tableTotal = tOrders.reduce(
-                (s, o) => s + Number(o.total_amount),
-                0,
-              );
+              const hasReady = tOrders.some((o) => o.status === 'ready');
+              const tableTotal = tOrders.reduce((s, o) => s + Number(o.total_amount), 0);
               const totalDishes = tOrders.reduce(
                 (s, o) =>
-                  s +
-                  (o.order_items?.reduce((sum, i) => sum + i.quantity, 0) || 0),
-                0,
+                  s + (o.order_items?.reduce((sum, i) => sum + i.quantity, 0) || 0),
+                0
               );
 
               return (
@@ -617,10 +680,10 @@ export default function DashboardPage() {
                   }}
                   className={`p-4 rounded-2xl border-2 text-left transition flex flex-col justify-between min-h-[120px] cursor-pointer hover:shadow-md ${
                     hasReady
-                      ? "bg-emerald-50/80 border-emerald-500 shadow-sm"
+                      ? 'bg-emerald-50/80 border-emerald-500 shadow-sm'
                       : isOccupied
-                        ? "bg-amber-50/70 border-amber-400 shadow-sm"
-                        : "bg-slate-50 border-slate-200/80 hover:border-orange-300"
+                      ? 'bg-amber-50/70 border-amber-400 shadow-sm'
+                      : 'bg-slate-50 border-slate-200/80 hover:border-orange-300'
                   }`}
                 >
                   <div className="flex items-center justify-between w-full">
@@ -630,20 +693,20 @@ export default function DashboardPage() {
                     <span
                       className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
                         hasReady
-                          ? "bg-emerald-600 text-white"
+                          ? 'bg-emerald-600 text-white'
                           : isOccupied
-                            ? "bg-amber-500 text-white"
-                            : "bg-slate-200 text-slate-600"
+                          ? 'bg-amber-500 text-white'
+                          : 'bg-slate-200 text-slate-600'
                       }`}
                     >
-                      {hasReady ? "Ready" : isOccupied ? "Active" : "Free"}
+                      {hasReady ? 'Ready' : isOccupied ? 'Active' : 'Free'}
                     </span>
                   </div>
 
                   {isOccupied ? (
                     <div className="mt-3">
                       <p className="text-xs font-bold text-slate-700">
-                        {totalDishes} Dish{totalDishes > 1 ? "es" : ""} Running
+                        {totalDishes} Dish{totalDishes > 1 ? 'es' : ''} Running
                       </p>
                       {isOwner ? (
                         <p className="text-base font-extrabold text-slate-900 mt-0.5">
@@ -658,9 +721,7 @@ export default function DashboardPage() {
                   ) : (
                     <div className="mt-4 flex items-center justify-between text-slate-400">
                       <span className="text-xs">Available</span>
-                      <span className="text-[11px] font-bold text-orange-600">
-                        + Order
-                      </span>
+                      <span className="text-[11px] font-bold text-orange-600">+ Order</span>
                     </div>
                   )}
                 </button>
@@ -673,8 +734,7 @@ export default function DashboardPage() {
         <section className="bg-white border border-slate-200 rounded-3xl p-5 sm:p-6 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
-              <Utensils className="w-4 h-4 text-orange-600" /> Live Kitchen &
-              Service Queue
+              <Utensils className="w-4 h-4 text-orange-600" /> Live Kitchen & Service Queue
             </h2>
             <span className="text-xs font-bold text-slate-400">
               {activeOrders.length} Active Ticket(s)
@@ -683,8 +743,7 @@ export default function DashboardPage() {
 
           {activeOrders.length === 0 ? (
             <p className="text-xs text-slate-400 py-6 text-center">
-              Abhi koi active order nahi hai. Naya order aate hi yahan live
-              dikhega.
+              Abhi koi active order nahi hai. Naya order aate hi yahan live dikhega.
             </p>
           ) : (
             <div className="divide-y divide-slate-100">
@@ -700,26 +759,26 @@ export default function DashboardPage() {
                     <span className="text-slate-700 font-medium">
                       {ord.order_items
                         ?.map((i) => `${i.quantity}× ${i.item_name}`)
-                        .join(", ")}
+                        .join(', ')}
                     </span>
                   </div>
 
                   <div className="flex items-center gap-2.5">
                     <span
                       className={`text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full ${
-                        ord.status === "ready"
-                          ? "bg-emerald-100 text-emerald-700"
-                          : ord.status === "served"
-                            ? "bg-purple-100 text-purple-700"
-                            : ord.status === "preparing"
-                              ? "bg-blue-100 text-blue-700"
-                              : "bg-amber-100 text-amber-800"
+                        ord.status === 'ready'
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : ord.status === 'served'
+                          ? 'bg-purple-100 text-purple-700'
+                          : ord.status === 'preparing'
+                          ? 'bg-blue-100 text-blue-700'
+                          : 'bg-amber-100 text-amber-800'
                       }`}
                     >
                       {ord.status}
                     </span>
 
-                    {ord.status === "ready" && (
+                    {ord.status === 'ready' && (
                       <button
                         type="button"
                         onClick={() => handleMarkServed(ord.id)}
@@ -740,8 +799,7 @@ export default function DashboardPage() {
           <section className="bg-white border border-slate-200 rounded-3xl p-5 sm:p-6 shadow-sm">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
-                <Receipt className="w-4 h-4 text-orange-600" /> Recent Settled
-                Bills
+                <Receipt className="w-4 h-4 text-orange-600" /> Recent Settled Bills
               </h2>
               <button
                 type="button"
@@ -749,10 +807,7 @@ export default function DashboardPage() {
                 className="text-xs font-extrabold text-orange-600 hover:underline flex items-center gap-1"
               >
                 <Calendar className="w-3.5 h-3.5" />
-                <span>
-                  Filter by Date / Custom Calendar ({completedOrders.length})
-                  &rarr;
-                </span>
+                <span>Filter by Date / Custom Calendar ({completedOrders.length}) &rarr;</span>
               </button>
             </div>
 
@@ -770,18 +825,18 @@ export default function DashboardPage() {
                     <div>
                       <span className="font-extrabold text-slate-900">
                         Table {ord.table_number}
-                      </span>{" "}
+                      </span>{' '}
                       <span className="text-slate-500">
-                        •{" "}
+                        •{' '}
                         {ord.order_items
                           ?.map((i) => `${i.quantity}× ${i.item_name}`)
-                          .join(", ")}
+                          .join(', ')}
                       </span>
                     </div>
 
                     <div className="flex items-center gap-3">
                       <span className="uppercase text-[10px] font-extrabold px-2 py-0.5 rounded bg-slate-100 text-slate-600">
-                        {ord.payment_method || "PAID"}
+                        {ord.payment_method || 'PAID'}
                       </span>
                       <span className="font-extrabold text-slate-900 text-sm">
                         ₹{ord.total_amount}
@@ -795,7 +850,69 @@ export default function DashboardPage() {
         )}
       </main>
 
-      {/* OWNER FULL SALES HISTORY MODAL WITH CALENDAR & CUSTOM DATE RANGE */}
+      {/* OWNER PLAN UPGRADE / ACTIVATION MODAL */}
+      {isOwner && showUpgradeModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-200">
+              <div>
+                <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
+                  <Crown className="w-5 h-5 text-orange-600" /> Activate RestroSync Plan
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Apna preferred plan chunein aur WhatsApp par instant activation link payein
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowUpgradeModal(false)}
+                className="p-2 rounded-full hover:bg-slate-100 text-slate-500"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="py-4 space-y-2.5">
+              {UPGRADE_PLANS.map((plan) => {
+                const isSelected = subInfo.selectedPlan.includes(plan.price);
+                return (
+                  <div
+                    key={plan.id}
+                    className={`p-3.5 rounded-2xl border-2 flex items-center justify-between gap-3 ${
+                      isSelected
+                        ? 'border-orange-500 bg-orange-50/50'
+                        : 'border-slate-200 bg-white'
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="font-extrabold text-sm text-slate-900">{plan.name}</p>
+                        <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
+                          {plan.tag}
+                        </span>
+                      </div>
+                      <p className="text-base font-extrabold text-orange-600 mt-0.5">
+                        {plan.price}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleWhatsAppUpgrade(plan.name, plan.price)}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs px-3.5 py-2.5 rounded-xl flex items-center gap-1.5 shadow-sm transition shrink-0"
+                    >
+                      <MessageCircle className="w-4 h-4" />
+                      <span>Activate</span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* OWNER FULL SALES HISTORY MODAL */}
       {isOwner && showSalesModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-3xl max-w-2xl w-full p-6 shadow-2xl max-h-[90vh] flex flex-col">
@@ -805,8 +922,7 @@ export default function DashboardPage() {
                   Sales & Billing History
                 </h3>
                 <p className="text-xs text-slate-500">
-                  {session.restaurantName} • Date-wise Revenue & Payment
-                  Breakdown
+                  {session.restaurantName} • Date-wise Revenue & Payment Breakdown
                 </p>
               </div>
               <button
@@ -818,14 +934,13 @@ export default function DashboardPage() {
               </button>
             </div>
 
-            {/* Filter Tabs (Today, Last 7 Days, All Time, Custom Calendar) */}
             <div className="flex flex-wrap items-center gap-2 pt-4">
               {(
                 [
-                  { id: "today", label: "Today" },
-                  { id: "7days", label: "Last 7 Days" },
-                  { id: "all", label: "All Time" },
-                  { id: "custom", label: "Custom Date" },
+                  { id: 'today', label: 'Today' },
+                  { id: '7days', label: 'Last 7 Days' },
+                  { id: 'all', label: 'All Time' },
+                  { id: 'custom', label: 'Custom Date' },
                 ] as const
               ).map((tab) => (
                 <button
@@ -834,18 +949,17 @@ export default function DashboardPage() {
                   onClick={() => setSalesFilter(tab.id)}
                   className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 ${
                     salesFilter === tab.id
-                      ? "bg-slate-900 text-white shadow-sm"
-                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   }`}
                 >
-                  {tab.id === "custom" && <Calendar className="w-3.5 h-3.5" />}
+                  {tab.id === 'custom' && <Calendar className="w-3.5 h-3.5" />}
                   <span>{tab.label}</span>
                 </button>
               ))}
             </div>
 
-            {/* CUSTOM DATE RANGE CALENDAR PICKERS */}
-            {salesFilter === "custom" && (
+            {salesFilter === 'custom' && (
               <div className="mt-3 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] font-bold text-slate-600 mb-1">
@@ -876,14 +990,11 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {/* Revenue Summary Cards (Total, Cash, UPI) */}
             <div className="grid grid-cols-3 gap-3 my-4">
               <div className="bg-emerald-50 border border-emerald-200 p-3.5 rounded-2xl">
-                <p className="text-[11px] font-bold text-emerald-700">
-                  Total Revenue
-                </p>
+                <p className="text-[11px] font-bold text-emerald-700">Total Revenue</p>
                 <p className="text-lg sm:text-xl font-extrabold text-emerald-900 mt-0.5">
-                  ₹{filteredTotalSales.toLocaleString("en-IN")}
+                  ₹{filteredTotalSales.toLocaleString('en-IN')}
                 </p>
                 <p className="text-[10px] text-emerald-700 mt-0.5">
                   {filteredSalesOrders.length} Bills
@@ -895,22 +1006,20 @@ export default function DashboardPage() {
                   <Banknote className="w-3.5 h-3.5 text-emerald-600" /> Cash
                 </p>
                 <p className="text-lg sm:text-xl font-extrabold text-slate-900 mt-0.5">
-                  ₹{filteredCashSales.toLocaleString("en-IN")}
+                  ₹{filteredCashSales.toLocaleString('en-IN')}
                 </p>
               </div>
 
               <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
                 <p className="text-[11px] font-bold text-slate-600 flex items-center gap-1">
-                  <Smartphone className="w-3.5 h-3.5 text-blue-600" /> UPI /
-                  Online
+                  <Smartphone className="w-3.5 h-3.5 text-blue-600" /> UPI / Online
                 </p>
                 <p className="text-lg sm:text-xl font-extrabold text-slate-900 mt-0.5">
-                  ₹{filteredUpiSales.toLocaleString("en-IN")}
+                  ₹{filteredUpiSales.toLocaleString('en-IN')}
                 </p>
               </div>
             </div>
 
-            {/* Detailed Bill List */}
             <div className="flex-1 overflow-y-auto divide-y divide-slate-100 border-t border-slate-100">
               {filteredSalesOrders.length === 0 ? (
                 <p className="text-xs text-slate-400 text-center py-10">
@@ -928,31 +1037,31 @@ export default function DashboardPage() {
                           Table {ord.table_number}
                         </span>
                         <span className="text-[11px] text-slate-400">
-                          {new Date(ord.created_at).toLocaleString("en-IN", {
-                            day: "2-digit",
-                            month: "short",
-                            year: "numeric",
-                            hour: "2-digit",
-                            minute: "2-digit",
+                          {new Date(ord.created_at).toLocaleString('en-IN', {
+                            day: '2-digit',
+                            month: 'short',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
                           })}
                         </span>
                       </div>
                       <p className="text-slate-600 mt-0.5">
                         {ord.order_items
                           ?.map((i) => `${i.quantity}× ${i.item_name}`)
-                          .join(", ")}
+                          .join(', ')}
                       </p>
                     </div>
 
                     <div className="flex items-center gap-3">
                       <span
                         className={`uppercase text-[10px] font-extrabold px-2.5 py-1 rounded-lg ${
-                          (ord.payment_method || "").toLowerCase() === "upi"
-                            ? "bg-blue-50 text-blue-700"
-                            : "bg-emerald-50 text-emerald-700"
+                          (ord.payment_method || '').toLowerCase() === 'upi'
+                            ? 'bg-blue-50 text-blue-700'
+                            : 'bg-emerald-50 text-emerald-700'
                         }`}
                       >
-                        {ord.payment_method || "CASH"}
+                        {ord.payment_method || 'CASH'}
                       </span>
                       <span className="font-extrabold text-slate-900 text-sm">
                         ₹{ord.total_amount}
@@ -966,7 +1075,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* TABLE ACTION MODAL */}
+      {/* TABLE ACTION MODAL (Active Tables Only) */}
       {selectedTableModal !== null && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl">
@@ -976,9 +1085,7 @@ export default function DashboardPage() {
                   Table {selectedTableModal}
                 </h3>
                 <p className="text-xs text-slate-500">
-                  {modalTableOrders.length > 0
-                    ? `${modalTableOrders.length} active order(s) running`
-                    : "Table abhi free hai"}
+                  {modalTableOrders.length} active order(s) running
                 </p>
               </div>
               <button
@@ -995,11 +1102,7 @@ export default function DashboardPage() {
                 className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-3 rounded-2xl text-xs flex items-center justify-center gap-2 shadow-sm transition"
               >
                 <PlusCircle className="w-4 h-4" />
-                <span>
-                  {modalTableOrders.length > 0
-                    ? `Add More Items to Table ${selectedTableModal}`
-                    : `Take New Order for Table ${selectedTableModal}`}
-                </span>
+                <span>Add More Items to Table {selectedTableModal}</span>
               </Link>
             </div>
 
@@ -1013,24 +1116,24 @@ export default function DashboardPage() {
                     <div className="flex items-center justify-between">
                       <span
                         className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full flex items-center gap-1 ${
-                          ord.status === "ready"
-                            ? "bg-emerald-100 text-emerald-700"
-                            : ord.status === "served"
-                              ? "bg-purple-100 text-purple-700"
-                              : ord.status === "preparing"
-                                ? "bg-blue-100 text-blue-700"
-                                : "bg-amber-100 text-amber-800"
+                          ord.status === 'ready'
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : ord.status === 'served'
+                            ? 'bg-purple-100 text-purple-700'
+                            : ord.status === 'preparing'
+                            ? 'bg-blue-100 text-blue-700'
+                            : 'bg-amber-100 text-amber-800'
                         }`}
                       >
-                        {ord.status === "ready" ? (
+                        {ord.status === 'ready' ? (
                           <>
                             <CheckCircle2 className="w-3 h-3" /> Ready
                           </>
-                        ) : ord.status === "served" ? (
+                        ) : ord.status === 'served' ? (
                           <>
                             <CheckCircle2 className="w-3 h-3" /> Served
                           </>
-                        ) : ord.status === "preparing" ? (
+                        ) : ord.status === 'preparing' ? (
                           <>
                             <ChefHat className="w-3 h-3" /> Cooking
                           </>
@@ -1041,7 +1144,7 @@ export default function DashboardPage() {
                         )}
                       </span>
 
-                      {ord.status === "ready" && (
+                      {ord.status === 'ready' && (
                         <button
                           onClick={() => handleMarkServed(ord.id)}
                           className="text-[11px] font-extrabold bg-emerald-600 text-white px-2.5 py-1 rounded-lg hover:bg-emerald-700 transition"
@@ -1066,9 +1169,7 @@ export default function DashboardPage() {
                             )}
                           </span>
                           {isOwner && (
-                            <span className="font-bold">
-                              ₹{item.price * item.quantity}
-                            </span>
+                            <span className="font-bold">₹{item.price * item.quantity}</span>
                           )}
                         </div>
                       ))}
@@ -1089,18 +1190,14 @@ export default function DashboardPage() {
                   <div className="grid grid-cols-2 gap-2.5">
                     <button
                       disabled={settling}
-                      onClick={() =>
-                        handleSettleTable(selectedTableModal, "cash")
-                      }
+                      onClick={() => handleSettleTable(selectedTableModal, 'cash')}
                       className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-3 rounded-xl text-xs transition"
                     >
                       Settle Cash ₹{modalTableTotal}
                     </button>
                     <button
                       disabled={settling}
-                      onClick={() =>
-                        handleSettleTable(selectedTableModal, "upi")
-                      }
+                      onClick={() => handleSettleTable(selectedTableModal, 'upi')}
                       className="bg-slate-900 hover:bg-slate-800 text-white font-extrabold py-3 rounded-xl text-xs transition"
                     >
                       Settle UPI ₹{modalTableTotal}
@@ -1110,8 +1207,8 @@ export default function DashboardPage() {
               ) : (
                 <div className="pt-3 border-t border-slate-200 text-center">
                   <p className="text-xs text-slate-500">
-                    Khana serve karne ke baad <strong>Mark Served ✓</strong>{" "}
-                    dabayein. Final billing Owner handle karega.
+                    Khana serve karne ke baad <strong>Mark Served ✓</strong> dabayein. Final
+                    billing Owner handle karega.
                   </p>
                 </div>
               ))}
@@ -1142,9 +1239,7 @@ export default function DashboardPage() {
 
             <div className="flex-1 overflow-y-auto py-3 divide-y divide-slate-100">
               {loadingStock ? (
-                <p className="text-xs text-slate-500 text-center py-8">
-                  Loading menu items...
-                </p>
+                <p className="text-xs text-slate-500 text-center py-8">Loading menu items...</p>
               ) : stockItems.length === 0 ? (
                 <p className="text-xs text-slate-500 text-center py-8">
                   Abhi menu mein koi item add nahi hai.
@@ -1156,12 +1251,8 @@ export default function DashboardPage() {
                     className="py-3 flex items-center justify-between gap-3"
                   >
                     <div>
-                      <p className="text-sm font-bold text-slate-900">
-                        {item.name}
-                      </p>
-                      <p className="text-[11px] text-slate-400">
-                        {item.category}
-                      </p>
+                      <p className="text-sm font-bold text-slate-900">{item.name}</p>
+                      <p className="text-[11px] text-slate-400">{item.category}</p>
                     </div>
 
                     <button
@@ -1169,11 +1260,11 @@ export default function DashboardPage() {
                       onClick={() => handleToggleStock(item)}
                       className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition ${
                         item.is_available
-                          ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
-                          : "bg-red-100 text-red-700 hover:bg-red-200"
+                          ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                          : 'bg-red-100 text-red-700 hover:bg-red-200'
                       }`}
                     >
-                      {item.is_available ? "In Stock ✓" : "Sold Out ✕"}
+                      {item.is_available ? 'In Stock ✓' : 'Sold Out ✕'}
                     </button>
                   </div>
                 ))
