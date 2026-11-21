@@ -88,6 +88,11 @@ export default function DashboardPage() {
   const [customToDate, setCustomToDate] = useState<string>('');
 
   useEffect(() => {
+    const today = new Date().toISOString().split('T')[0];
+    setTodayIso(today);
+    setCustomFromDate(today);
+    setCustomToDate(today);
+
     const raw = localStorage.getItem("restro_session");
     if (!raw) {
       router.push("/");
