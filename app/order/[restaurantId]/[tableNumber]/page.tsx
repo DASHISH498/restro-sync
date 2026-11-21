@@ -17,6 +17,9 @@ import {
   Sparkles,
   MessageSquarePlus,
   LayoutDashboard,
+  BookOpen,
+  Flame,
+  MapPin,
 } from 'lucide-react';
 
 interface RestaurantInfo {
@@ -302,28 +305,57 @@ export default function CustomerOrderPage() {
   );
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-28">
-      {/* Top Sticky Restaurant & Table Header */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
-        <div className="max-w-2xl mx-auto px-4 py-3.5 flex items-center justify-between gap-2">
-          {/* Logo & Restaurant Name Link -> Opens Dashboard */}
+    <div className="min-h-screen bg-slate-50 pb-28 lg:pb-16">
+      {/* Full-Width Top Sticky Header */}
+      <header className="bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-30">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
           <Link
             href="/dashboard"
             className="flex items-center gap-2.5 text-left group cursor-pointer"
             title="Go to Dashboard"
           >
-            <div className="bg-orange-600 group-hover:bg-orange-700 text-white p-2 rounded-xl transition">
+            <div className="bg-gradient-to-br from-orange-500 to-orange-600 text-white p-2.5 rounded-xl shadow-sm group-hover:scale-105 transition">
               <UtensilsCrossed className="w-5 h-5" />
             </div>
             <div>
-              <h1 className="text-base font-extrabold text-slate-900 leading-tight group-hover:text-orange-600 transition">
+              <h1 className="text-base sm:text-lg font-extrabold text-slate-900 leading-tight group-hover:text-orange-600 transition">
                 {restaurant.name}
               </h1>
-              <p className="text-[11px] text-slate-500">{restaurant.city}</p>
+              <p className="text-[11px] text-slate-500 flex items-center gap-1">
+                <MapPin className="w-3 h-3 text-slate-400" /> {restaurant.city}
+              </p>
             </div>
           </Link>
 
-          <div className="flex items-center gap-2">
+          {/* Search & Veg Filter Inline on Desktop */}
+          <div className="flex items-center gap-2 order-3 lg:order-2 w-full lg:w-auto lg:flex-1 lg:max-w-md">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search dishes, starters, drinks..."
+                className="w-full pl-9 pr-3 py-2 bg-slate-50 focus:bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-orange-500 transition"
+              />
+            </div>
+
+            <button
+              onClick={() => setVegOnly(!vegOnly)}
+              className={`px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 shrink-0 transition ${
+                vegOnly
+                  ? 'bg-emerald-50 border-emerald-500 text-emerald-700'
+                  : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <span className="w-3 h-3 border border-emerald-600 flex items-center justify-center">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+              </span>
+              Veg Only
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2 order-2 lg:order-3">
             {hasStaffSession && (
               <Link
                 href="/dashboard"
@@ -334,234 +366,388 @@ export default function CustomerOrderPage() {
               </Link>
             )}
 
-            <div className="bg-slate-900 text-white px-3.5 py-1.5 rounded-full text-xs font-extrabold tracking-wide">
+            <div className="bg-slate-900 text-white px-3.5 py-1.5 rounded-full text-xs font-extrabold tracking-wide shadow-sm">
               TABLE {tableNumber}
             </div>
           </div>
         </div>
 
-        {/* Search & Veg Filter Bar */}
-        <div className="max-w-2xl mx-auto px-4 pb-3 flex items-center gap-2">
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search dishes..."
-              className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:border-orange-500"
-            />
-          </div>
-
-          <button
-            onClick={() => setVegOnly(!vegOnly)}
-            className={`px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 shrink-0 transition ${
-              vegOnly
-                ? 'bg-emerald-50 border-emerald-500 text-emerald-700'
-                : 'bg-white border-slate-200 text-slate-600'
-            }`}
-          >
-            <span className="w-3 h-3 border border-emerald-600 flex items-center justify-center">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
-            </span>
-            Veg Only
-          </button>
-        </div>
-
         {/* Horizontal Category Pills */}
-        <div className="max-w-2xl mx-auto px-4 pb-3 flex gap-2 overflow-x-auto">
-          {categories.map((cat) => (
-            <button
-              key={cat}
-              onClick={() => setSelectedCategory(cat)}
-              className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition ${
-                selectedCategory === cat
-                  ? 'bg-orange-600 text-white'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              {cat}
-            </button>
-          ))}
-        </div>
+        {menuItems.length > 0 && (
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 pb-3 flex gap-2 overflow-x-auto">
+            {categories.map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setSelectedCategory(cat)}
+                className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition ${
+                  selectedCategory === cat
+                    ? 'bg-orange-600 text-white shadow-sm'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+        )}
       </header>
 
-      <main className="max-w-2xl mx-auto px-4 pt-4 space-y-5">
-        {/* Order Sent Toast */}
-        {orderSuccessToast && (
-          <div className="bg-emerald-600 text-white p-4 rounded-2xl shadow-lg flex items-center gap-3">
-            <CheckCircle2 className="w-6 h-6 shrink-0" />
+      {/* Main 2-Column Wide Layout (Left: Menu Grid | Right: Live Order & Cart Sidebar) */}
+      <main className="max-w-6xl mx-auto px-4 sm:px-6 pt-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* LEFT COLUMN (8 Cols on Desktop) */}
+        <div className="lg:col-span-8 space-y-5">
+          {/* Welcome Hero Banner */}
+          <section className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white rounded-2xl p-5 sm:p-6 shadow-md flex items-center justify-between gap-4">
             <div>
-              <p className="font-bold text-sm">Order Sent to Kitchen!</p>
-              <p className="text-xs text-emerald-100">
-                Chef ne aapka order receive kar liya hai. Niche live status dekhein.
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-orange-400 bg-orange-500/10 border border-orange-500/20 px-2.5 py-0.5 rounded-full mb-2">
+                <Flame className="w-3 h-3" /> Freshly Prepared • Table {tableNumber}
+              </span>
+              <h2 className="text-lg sm:text-xl font-extrabold leading-snug">
+                Welcome to {restaurant.name}
+              </h2>
+              <p className="text-xs text-slate-300 mt-1">
+                Apni pasandida dishes select karein aur seedha kitchen mein order bhejein.
               </p>
             </div>
-          </div>
-        )}
-
-        {/* Live Running Orders Status Card */}
-        {tableOrders.length > 0 && (
-          <section className="bg-white border-2 border-orange-200 rounded-2xl p-4 shadow-sm">
-            <div className="flex items-center justify-between mb-2.5">
-              <span className="text-xs font-extrabold uppercase tracking-wider text-orange-600 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5" /> Your Active Orders (Table {tableNumber})
-              </span>
-              <span className="text-xs font-bold text-slate-500">
-                {tableOrders.length} Order(s)
-              </span>
-            </div>
-
-            <div className="space-y-2.5">
-              {tableOrders.map((ord) => (
-                <div
-                  key={ord.id}
-                  className="bg-slate-50 p-3 rounded-xl flex items-center justify-between gap-3"
-                >
-                  <div className="text-xs text-slate-700">
-                    {ord.order_items?.map((i) => `${i.quantity}x ${i.item_name}`).join(', ')}
-                    <p className="font-extrabold text-slate-900 mt-1">₹{ord.total_amount}</p>
-                  </div>
-
-                  <span
-                    className={`px-2.5 py-1 rounded-full text-[11px] font-extrabold uppercase flex items-center gap-1 shrink-0 ${
-                      ord.status === 'ready'
-                        ? 'bg-emerald-100 text-emerald-700'
-                        : ord.status === 'preparing'
-                        ? 'bg-blue-100 text-blue-700'
-                        : 'bg-amber-100 text-amber-800'
-                    }`}
-                  >
-                    {ord.status === 'ready' ? (
-                      <>
-                        <CheckCircle2 className="w-3 h-3" /> Ready
-                      </>
-                    ) : ord.status === 'preparing' ? (
-                      <>
-                        <ChefHat className="w-3 h-3" /> Cooking
-                      </>
-                    ) : (
-                      <>
-                        <Clock className="w-3 h-3" /> Sent
-                      </>
-                    )}
-                  </span>
-                </div>
-              ))}
+            <div className="hidden sm:flex w-14 h-14 rounded-2xl bg-orange-500/20 text-orange-400 items-center justify-center shrink-0">
+              <UtensilsCrossed className="w-7 h-7" />
             </div>
           </section>
-        )}
 
-        {/* Menu Items List */}
-        <section className="space-y-3">
-          {filteredItems.length === 0 ? (
+          {/* Order Sent Toast */}
+          {orderSuccessToast && (
+            <div className="bg-emerald-600 text-white p-4 rounded-2xl shadow-lg flex items-center gap-3">
+              <CheckCircle2 className="w-6 h-6 shrink-0" />
+              <div>
+                <p className="font-bold text-sm">Order Sent to Kitchen!</p>
+                <p className="text-xs text-emerald-100">
+                  Chef ne aapka order receive kar liya hai. Live status tracker dekhein.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Menu Items 2-Column Grid OR Smart Empty State */}
+          {menuItems.length === 0 ? (
+            <div className="bg-white rounded-3xl p-10 sm:p-14 text-center border border-slate-200 shadow-sm">
+              <div className="w-14 h-14 rounded-2xl bg-orange-100 text-orange-600 flex items-center justify-center mx-auto mb-3">
+                <BookOpen className="w-7 h-7" />
+              </div>
+              <h3 className="text-base font-extrabold text-slate-900">
+                {restaurant.name} ka Menu Abhi Khali Hai
+              </h3>
+              <p className="text-xs text-slate-500 mt-1.5 max-w-md mx-auto leading-relaxed">
+                {hasStaffSession
+                  ? 'Abhi tak is restaurant mein koi dish add nahi hui hai. Neeche button par click karke apni dishes aur prices add karein.'
+                  : 'Digital menu abhi update ho raha hai. Kripya order ke liye staff se sampark karein.'}
+              </p>
+
+              {hasStaffSession && (
+                <Link
+                  href="/dashboard/menu"
+                  className="mt-5 inline-flex items-center gap-2 bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs px-5 py-3 rounded-xl shadow-sm transition"
+                >
+                  <Plus className="w-4 h-4" /> Add Dishes to Menu
+                </Link>
+              )}
+            </div>
+          ) : filteredItems.length === 0 ? (
             <div className="bg-white rounded-2xl p-10 text-center border border-slate-200">
-              <p className="text-sm text-slate-500">Koi dish nahi mili.</p>
+              <p className="text-sm font-semibold text-slate-600">
+                Is filter ya search se koi dish nahi mili.
+              </p>
+              <button
+                onClick={() => {
+                  setSearchQuery('');
+                  setVegOnly(false);
+                  setSelectedCategory('All');
+                }}
+                className="mt-3 text-xs font-bold text-orange-600 hover:underline"
+              >
+                Reset Filters
+              </button>
             </div>
           ) : (
-            filteredItems.map((item) => {
-              const inCart = cart[item.id];
+            <section className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+              {filteredItems.map((item) => {
+                const inCart = cart[item.id];
 
-              return (
-                <div
-                  key={item.id}
-                  className={`bg-white p-4 rounded-2xl border border-slate-200 flex items-center justify-between gap-4 ${
-                    !item.is_available ? 'opacity-55' : ''
-                  }`}
-                >
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span
-                        className={`w-3.5 h-3.5 border flex items-center justify-center shrink-0 ${
-                          item.is_veg ? 'border-emerald-600' : 'border-red-600'
-                        }`}
-                      >
+                return (
+                  <div
+                    key={item.id}
+                    className={`bg-white p-4 rounded-2xl border border-slate-200 hover:border-orange-200 shadow-sm flex items-center justify-between gap-3 transition ${
+                      !item.is_available ? 'opacity-55' : ''
+                    }`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
                         <span
-                          className={`w-1.5 h-1.5 rounded-full ${
-                            item.is_veg ? 'bg-emerald-600' : 'bg-red-600'
+                          className={`w-3.5 h-3.5 border flex items-center justify-center shrink-0 ${
+                            item.is_veg ? 'border-emerald-600' : 'border-red-600'
                           }`}
-                        ></span>
-                      </span>
-                      <span className="text-[10px] font-bold uppercase text-slate-400">
-                        {item.category}
-                      </span>
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              item.is_veg ? 'bg-emerald-600' : 'bg-red-600'
+                            }`}
+                          ></span>
+                        </span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-slate-100 px-2 py-0.5 rounded truncate">
+                          {item.category}
+                        </span>
+                      </div>
+
+                      <h3 className="font-bold text-slate-900 text-base truncate">{item.name}</h3>
+                      <p className="font-extrabold text-orange-600 text-sm mt-0.5">₹{item.price}</p>
+                      {item.description && (
+                        <p className="text-xs text-slate-500 mt-1 line-clamp-2 leading-relaxed">
+                          {item.description}
+                        </p>
+                      )}
                     </div>
 
-                    <h3 className="font-bold text-slate-900 text-base">{item.name}</h3>
-                    <p className="font-extrabold text-slate-900 text-sm mt-0.5">₹{item.price}</p>
-                    {item.description && (
-                      <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                        {item.description}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="shrink-0">
-                    {!item.is_available ? (
-                      <span className="text-xs font-bold text-slate-400 bg-slate-100 px-3 py-1.5 rounded-xl">
-                        Sold Out
-                      </span>
-                    ) : inCart ? (
-                      <div className="flex items-center bg-orange-600 text-white rounded-xl overflow-hidden shadow-sm">
-                        <button
-                          onClick={() => removeFromCart(item.id)}
-                          className="p-2 hover:bg-orange-700 transition"
-                        >
-                          <Minus className="w-4 h-4" />
-                        </button>
-                        <span className="px-2.5 font-extrabold text-sm">{inCart.quantity}</span>
+                    {/* Add / Quantity Controls */}
+                    <div className="shrink-0">
+                      {!item.is_available ? (
+                        <span className="text-xs font-bold text-slate-400 bg-slate-100 px-3 py-1.5 rounded-xl">
+                          Sold Out
+                        </span>
+                      ) : inCart ? (
+                        <div className="flex items-center bg-orange-600 text-white rounded-xl overflow-hidden shadow-sm">
+                          <button
+                            onClick={() => removeFromCart(item.id)}
+                            className="p-2 hover:bg-orange-700 transition"
+                          >
+                            <Minus className="w-4 h-4" />
+                          </button>
+                          <span className="px-2.5 font-extrabold text-sm">{inCart.quantity}</span>
+                          <button
+                            onClick={() => addToCart(item)}
+                            className="p-2 hover:bg-orange-700 transition"
+                          >
+                            <Plus className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
                         <button
                           onClick={() => addToCart(item)}
-                          className="p-2 hover:bg-orange-700 transition"
+                          className="px-4 py-2 rounded-xl border-2 border-orange-600 text-orange-600 hover:bg-orange-600 hover:text-white font-extrabold text-xs transition"
                         >
-                          <Plus className="w-4 h-4" />
+                          + ADD
                         </button>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => addToCart(item)}
-                        className="px-4 py-2 rounded-xl border-2 border-orange-600 text-orange-600 hover:bg-orange-600 hover:text-white font-extrabold text-xs transition"
-                      >
-                        + ADD
-                      </button>
-                    )}
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
-            })
+                );
+              })}
+            </section>
           )}
-        </section>
-      </main>
+        </div>
 
-      {/* Sticky Bottom Cart Bar */}
-      {totalCartItems > 0 && (
-        <div className="fixed bottom-4 left-0 right-0 px-4 z-40">
-          <div className="max-w-2xl mx-auto">
-            <button
-              onClick={() => setShowCartModal(true)}
-              className="w-full bg-orange-600 hover:bg-orange-700 text-white p-4 rounded-2xl shadow-xl flex items-center justify-between transition"
-            >
-              <div className="flex items-center gap-3">
-                <div className="bg-white/20 p-2 rounded-xl">
-                  <ShoppingBag className="w-5 h-5" />
-                </div>
-                <div className="text-left">
-                  <p className="text-xs font-semibold text-orange-100">
-                    {totalCartItems} Item{totalCartItems > 1 ? 's' : ''} Added
-                  </p>
-                  <p className="text-base font-extrabold">₹{totalCartPrice}</p>
-                </div>
+        {/* RIGHT COLUMN (4 Cols on Desktop: Live Order Tracker + Sticky Cart Panel) */}
+        <aside className="lg:col-span-4 space-y-5 lg:sticky lg:top-32">
+          {/* Live Order Tracker Card */}
+          {tableOrders.length > 0 && (
+            <section className="bg-white border-2 border-orange-200 rounded-2xl p-4 shadow-sm space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-extrabold uppercase tracking-wider text-orange-600 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5" /> Live Order Tracker
+                </span>
+                <span className="text-xs font-bold text-slate-500">
+                  {tableOrders.length} Active
+                </span>
               </div>
 
-              <span className="font-extrabold text-sm flex items-center gap-1">
-                View Cart & Order &rarr;
-              </span>
-            </button>
-          </div>
+              <div className="space-y-3">
+                {tableOrders.map((ord) => {
+                  const step = ord.status === 'ready' ? 3 : ord.status === 'preparing' ? 2 : 1;
+
+                  return (
+                    <div
+                      key={ord.id}
+                      className="bg-slate-50 border border-slate-200/80 p-3.5 rounded-xl space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="text-xs text-slate-700 font-medium">
+                          {ord.order_items?.map((i) => `${i.quantity}× ${i.item_name}`).join(', ')}
+                          <p className="font-extrabold text-slate-900 text-sm mt-1">
+                            ₹{ord.total_amount}
+                          </p>
+                        </div>
+
+                        <span
+                          className={`px-2.5 py-1 rounded-full text-[11px] font-extrabold uppercase flex items-center gap-1 shrink-0 ${
+                            ord.status === 'ready'
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : ord.status === 'preparing'
+                              ? 'bg-blue-100 text-blue-700'
+                              : 'bg-amber-100 text-amber-800'
+                          }`}
+                        >
+                          {ord.status === 'ready' ? (
+                            <>
+                              <CheckCircle2 className="w-3 h-3" /> Ready
+                            </>
+                          ) : ord.status === 'preparing' ? (
+                            <>
+                              <ChefHat className="w-3 h-3" /> Cooking
+                            </>
+                          ) : (
+                            <>
+                              <Clock className="w-3 h-3" /> Sent
+                            </>
+                          )}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-1.5 pt-1">
+                        <div className="space-y-1">
+                          <div className="h-1.5 rounded-full bg-emerald-500"></div>
+                          <p className="text-[10px] font-bold text-slate-600">1. Sent</p>
+                        </div>
+                        <div className="space-y-1">
+                          <div
+                            className={`h-1.5 rounded-full ${
+                              step >= 2 ? 'bg-blue-500' : 'bg-slate-200'
+                            }`}
+                          ></div>
+                          <p
+                            className={`text-[10px] font-bold ${
+                              step >= 2 ? 'text-blue-600' : 'text-slate-400'
+                            }`}
+                          >
+                            2. Cooking
+                          </p>
+                        </div>
+                        <div className="space-y-1">
+                          <div
+                            className={`h-1.5 rounded-full ${
+                              step >= 3 ? 'bg-emerald-500' : 'bg-slate-200'
+                            }`}
+                          ></div>
+                          <p
+                            className={`text-[10px] font-bold ${
+                              step >= 3 ? 'text-emerald-600' : 'text-slate-400'
+                            }`}
+                          >
+                            3. Ready
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {/* Desktop Persistent Cart Panel */}
+          <section className="hidden lg:block bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <h3 className="font-extrabold text-slate-900 text-base flex items-center gap-2">
+                <ShoppingBag className="w-4 h-4 text-orange-600" /> Table {tableNumber} Cart
+              </h3>
+              <span className="text-xs font-bold text-slate-500">{totalCartItems} item(s)</span>
+            </div>
+
+            {cartEntries.length === 0 ? (
+              <div className="py-10 text-center">
+                <ShoppingBag className="w-9 h-9 text-slate-200 mx-auto mb-2" />
+                <p className="text-xs font-semibold text-slate-500">Cart abhi khali hai</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Menu se + ADD dabakar items select karein
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3 pt-3">
+                <div className="max-h-72 overflow-y-auto space-y-3 pr-1">
+                  {cartEntries.map(({ menuItem, quantity, notes }) => (
+                    <div key={menuItem.id} className="bg-slate-50 p-3 rounded-xl space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <p className="font-bold text-slate-900 text-xs">{menuItem.name}</p>
+                          <p className="text-[11px] font-semibold text-slate-500">
+                            ₹{menuItem.price} × {quantity} = ₹{menuItem.price * quantity}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center bg-white border border-slate-300 rounded-lg overflow-hidden">
+                          <button
+                            onClick={() => removeFromCart(menuItem.id)}
+                            className="p-1 text-slate-700 hover:bg-slate-100"
+                          >
+                            <Minus className="w-3 h-3" />
+                          </button>
+                          <span className="px-2 font-bold text-xs">{quantity}</span>
+                          <button
+                            onClick={() => addToCart(menuItem)}
+                            className="p-1 text-slate-700 hover:bg-slate-100"
+                          >
+                            <Plus className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <input
+                        type="text"
+                        value={notes}
+                        onChange={(e) => updateItemNote(menuItem.id, e.target.value)}
+                        placeholder="Chef note (e.g. Less spicy)..."
+                        className="w-full px-2.5 py-1 border border-slate-200 rounded-lg text-[11px] outline-none focus:border-orange-500 bg-white"
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                <div className="pt-3 border-t border-slate-200">
+                  <div className="flex items-center justify-between font-extrabold text-slate-900 text-sm mb-3">
+                    <span>Total Payable</span>
+                    <span>₹{totalCartPrice}</span>
+                  </div>
+
+                  <button
+                    onClick={handlePlaceOrder}
+                    disabled={placingOrder}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-3 rounded-xl text-sm shadow-md transition disabled:opacity-50"
+                  >
+                    {placingOrder
+                      ? 'Sending to Kitchen...'
+                      : `Confirm & Send Order (₹${totalCartPrice})`}
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
+        </aside>
+      </main>
+
+      {/* Mobile Sticky Bottom Cart Bar */}
+      {totalCartItems > 0 && (
+        <div className="lg:hidden fixed bottom-4 left-0 right-0 px-4 z-40">
+          <button
+            onClick={() => setShowCartModal(true)}
+            className="w-full bg-orange-600 hover:bg-orange-700 text-white p-4 rounded-2xl shadow-xl flex items-center justify-between transition"
+          >
+            <div className="flex items-center gap-3">
+              <div className="bg-white/20 p-2 rounded-xl">
+                <ShoppingBag className="w-5 h-5" />
+              </div>
+              <div className="text-left">
+                <p className="text-xs font-semibold text-orange-100">
+                  {totalCartItems} Item{totalCartItems > 1 ? 's' : ''} Added
+                </p>
+                <p className="text-base font-extrabold">₹{totalCartPrice}</p>
+              </div>
+            </div>
+
+            <span className="font-extrabold text-sm flex items-center gap-1">
+              View Cart & Order &rarr;
+            </span>
+          </button>
         </div>
       )}
 
-      {/* Cart & Cooking Notes Drawer Modal */}
+      {/* Mobile Cart & Cooking Notes Drawer Modal */}
       {showCartModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
           <div className="bg-white rounded-t-3xl sm:rounded-3xl max-w-lg w-full p-6 shadow-2xl max-h-[90vh] flex flex-col">

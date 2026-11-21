@@ -17,6 +17,8 @@ import {
   X,
   Receipt,
   ExternalLink,
+  Settings,
+  Save,
 } from 'lucide-react';
 
 interface SessionData {
@@ -65,6 +67,16 @@ export default function DashboardPage() {
   const [selectedTableOrders, setSelectedTableOrders] = useState<Order[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'upi' | 'card'>('upi');
   const [settling, setSettling] = useState(false);
+
+  // Settings Modal States
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [loadingSettings, setLoadingSettings] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsName, setSettingsName] = useState('');
+  const [settingsCity, setSettingsCity] = useState('');
+  const [settingsTables, setSettingsTables] = useState(10);
+  const [settingsOwnerPin, setSettingsOwnerPin] = useState('');
+  const [settingsStaffPin, setSettingsStaffPin] = useState('');
 
   // 1. Check Session on Load
   useEffect(() => {
@@ -166,6 +178,64 @@ export default function DashboardPage() {
     }
   }, [activeOrders, selectedTable]);
 
+  // Open Settings Dialog & Fetch Current Details
+  const handleOpenSettings = async () => {
+    if (!session) return;
+    setShowSettingsModal(true);
+    setLoadingSettings(true);
+
+    const { data } = await supabase
+      .from('restaurants')
+      .select('*')
+      .eq('id', session.restaurantId)
+      .single();
+
+    if (data) {
+      setSettingsName(data.name || session.restaurantName);
+      setSettingsCity(data.city || session.city);
+      setSettingsTables(Number(data.total_tables) || session.totalTables);
+      setSettingsOwnerPin(data.owner_pin || '');
+      setSettingsStaffPin(data.staff_pin || '');
+    }
+    setLoadingSettings(false);
+  };
+
+  // Save Settings from Dialog
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!session || !settingsName.trim() || !settingsOwnerPin.trim() || !settingsStaffPin.trim()) {
+      return;
+    }
+
+    setSavingSettings(true);
+    const updatedTables = Math.max(1, Math.min(100, Number(settingsTables)));
+
+    const { error } = await supabase
+      .from('restaurants')
+      .update({
+        name: settingsName.trim(),
+        city: settingsCity.trim(),
+        total_tables: updatedTables,
+        owner_pin: settingsOwnerPin.trim(),
+        staff_pin: settingsStaffPin.trim(),
+      })
+      .eq('id', session.restaurantId);
+
+    setSavingSettings(false);
+
+    if (!error) {
+      const updatedSession: SessionData = {
+        ...session,
+        restaurantName: settingsName.trim(),
+        city: settingsCity.trim(),
+        totalTables: updatedTables,
+      };
+      localStorage.setItem('restro_session', JSON.stringify(updatedSession));
+      setSession(updatedSession);
+      setShowSettingsModal(false);
+    }
+  };
+
   // Handle Table Click
   const handleTableClick = (tableNum: number) => {
     const tableOrds = activeOrders.filter((o) => o.table_number === tableNum);
@@ -222,7 +292,7 @@ export default function DashboardPage() {
     0
   );
 
-  // Merge duplicate dishes across multiple orders on the same table (e.g., 1x ChowMein + 1x ChowMein = 2x ChowMein)
+  // Merge duplicate dishes across multiple orders on the same table
   const consolidatedItemsMap = new Map<string, ConsolidatedItem>();
   selectedTableOrders.forEach((ord) => {
     ord.order_items?.forEach((item) => {
@@ -272,13 +342,26 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <button
-            onClick={handleLogout}
-            className="text-slate-600 hover:text-red-600 text-sm font-semibold flex items-center gap-1.5 px-3 py-2 rounded-lg hover:bg-slate-100 transition"
-          >
-            <LogOut className="w-4 h-4" />
-            <span className="hidden sm:inline">Switch / Logout</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {session.role === 'owner' && (
+              <button
+                onClick={handleOpenSettings}
+                className="text-slate-600 hover:text-orange-600 text-sm font-semibold flex items-center gap-1.5 px-3 py-2 rounded-lg hover:bg-slate-100 transition"
+                title="Restaurant Settings"
+              >
+                <Settings className="w-4 h-4" />
+                <span className="hidden sm:inline">Settings</span>
+              </button>
+            )}
+
+            <button
+              onClick={handleLogout}
+              className="text-slate-600 hover:text-red-600 text-sm font-semibold flex items-center gap-1.5 px-3 py-2 rounded-lg hover:bg-slate-100 transition"
+            >
+              <LogOut className="w-4 h-4" />
+              <span className="hidden sm:inline">Switch / Logout</span>
+            </button>
+          </div>
         </div>
       </header>
 
@@ -345,15 +428,21 @@ export default function DashboardPage() {
 
         {/* Stats Row */}
         <section className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-          <div className="bg-white p-4 rounded-2xl border border-slate-200 flex items-center gap-3">
-            <div className="bg-emerald-100 text-emerald-600 p-2.5 rounded-xl">
-              <IndianRupee className="w-5 h-5" />
+          {/* Clickable Today's Sales Card -> Opens Sales & Order History */}
+          <button
+            onClick={() => router.push('/dashboard/orders')}
+            className="bg-white hover:border-emerald-400 p-4 rounded-2xl border border-slate-200 flex items-center justify-between gap-3 text-left transition group cursor-pointer"
+          >
+            <div className="flex items-center gap-3">
+              <div className="bg-emerald-100 text-emerald-600 p-2.5 rounded-xl group-hover:scale-105 transition">
+                <IndianRupee className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Aaj Ki Sales (View Bills &rarr;)</p>
+                <p className="text-xl font-extrabold text-slate-900">₹{todaySales}</p>
+              </div>
             </div>
-            <div>
-              <p className="text-xs text-slate-500">Aaj Ki Sales</p>
-              <p className="text-xl font-extrabold text-slate-900">₹{todaySales}</p>
-            </div>
-          </div>
+          </button>
 
           <div className="bg-white p-4 rounded-2xl border border-slate-200 flex items-center gap-3">
             <div className="bg-orange-100 text-orange-600 p-2.5 rounded-xl">
@@ -444,7 +533,7 @@ export default function DashboardPage() {
         </section>
       </main>
 
-      {/* MODAL: Consolidated Table Bill & Order Settlement */}
+      {/* MODAL 1: Consolidated Table Bill & Order Settlement */}
       {selectedTable !== null && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl relative max-h-[90vh] flex flex-col">
@@ -531,6 +620,123 @@ export default function DashboardPage() {
               <CheckCircle2 className="w-5 h-5" />
               {settling ? 'Completing...' : `Mark Paid (₹${selectedTableTotal}) & Free Table`}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: Restaurant Settings Dialog */}
+      {showSettingsModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
+            <button
+              onClick={() => setShowSettingsModal(false)}
+              className="absolute right-4 top-4 text-slate-400 hover:text-slate-600"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-2 mb-1">
+              <Settings className="w-5 h-5 text-orange-600" />
+              <h3 className="text-lg font-extrabold text-slate-900">Restaurant Settings</h3>
+            </div>
+            <p className="text-xs text-slate-500 mb-4">
+              Cafe details, seating tables aur login PINs update karein
+            </p>
+
+            {loadingSettings ? (
+              <div className="py-10 text-center text-sm text-slate-500">Loading details...</div>
+            ) : (
+              <form onSubmit={handleSaveSettings} className="space-y-3.5">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Restaurant Name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={settingsName}
+                      onChange={(e) => setSettingsName(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-orange-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">City *</label>
+                    <input
+                      type="text"
+                      required
+                      value={settingsCity}
+                      onChange={(e) => setSettingsCity(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-orange-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Total Seating Tables (1 – 100) *
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min="1"
+                    max="100"
+                    value={settingsTables}
+                    onChange={(e) => setSettingsTables(Number(e.target.value))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm font-bold outline-none focus:border-orange-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Owner PIN *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      maxLength={8}
+                      value={settingsOwnerPin}
+                      onChange={(e) => setSettingsOwnerPin(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm font-mono font-bold outline-none focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Staff / Waiter PIN *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      maxLength={8}
+                      value={settingsStaffPin}
+                      onChange={(e) => setSettingsStaffPin(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm font-mono font-bold outline-none focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-2.5 pt-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowSettingsModal(false)}
+                    className="flex-1 py-2.5 rounded-xl border border-slate-300 text-slate-700 font-bold text-sm hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={savingSettings}
+                    className="flex-1 bg-orange-600 hover:bg-orange-700 text-white font-bold py-2.5 rounded-xl text-sm flex items-center justify-center gap-1.5 transition disabled:opacity-50"
+                  >
+                    <Save className="w-4 h-4" />
+                    {savingSettings ? 'Saving...' : 'Save Settings'}
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}
