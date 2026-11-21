@@ -81,13 +81,11 @@ export default function DashboardPage() {
   const [loadingStock, setLoadingStock] = useState(false);
 
   // Owner Sales History Modal & Date Filters
-  const todayIso = new Date().toISOString().split("T")[0];
+  const [todayIso, setTodayIso] = useState<string>('');
   const [showSalesModal, setShowSalesModal] = useState(false);
-  const [salesFilter, setSalesFilter] = useState<
-    "today" | "7days" | "all" | "custom"
-  >("today");
-  const [customFromDate, setCustomFromDate] = useState<string>(todayIso);
-  const [customToDate, setCustomToDate] = useState<string>(todayIso);
+  const [salesFilter, setSalesFilter] = useState<'today' | '7days' | 'all' | 'custom'>('today');
+  const [customFromDate, setCustomFromDate] = useState<string>('');
+  const [customToDate, setCustomToDate] = useState<string>('');
 
   useEffect(() => {
     const raw = localStorage.getItem("restro_session");
