@@ -23,7 +23,6 @@ import {
   Receipt,
   Sparkles,
   ShieldCheck,
-  UserCheck,
   PlusCircle,
   PackageCheck,
   X,
@@ -138,6 +137,13 @@ export default function DashboardPage() {
 
     try {
       const parsed: SessionData = JSON.parse(raw);
+
+      // Staff ko dashboard ki zaroorat nahi — seedha Kitchen Display (KDS) par bhejein
+      if (parsed.role === 'staff') {
+        router.replace(`/kitchen/${parsed.restaurantId}`);
+        return;
+      }
+
       setSession(parsed);
       if (parsed.totalTables) {
         setActualTablesCount(parsed.totalTables);
@@ -147,6 +153,32 @@ export default function DashboardPage() {
     }
   }, [router]);
 
+  // LOCK BACKGROUND PAGE SCROLL WHEN ANY MODAL IS OPEN
+  useEffect(() => {
+    const anyModalOpen =
+      showSalesModal ||
+      showUpgradeModal ||
+      showStockModal ||
+      selectedTableModal !== null ||
+      showDeviceLimitModal;
+
+    if (anyModalOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [
+    showSalesModal,
+    showUpgradeModal,
+    showStockModal,
+    selectedTableModal,
+    showDeviceLimitModal,
+  ]);
+
   // MAX 3 DEVICES SESSION LOCK + AUTO LOGOUT ON BROWSER CLOSE
   useEffect(() => {
     if (!session?.restaurantId) return;
@@ -155,25 +187,21 @@ export default function DashboardPage() {
       const allowed = await registerAndVerifyDevice(session.restaurantId);
       if (!allowed) {
         localStorage.removeItem('restro_session');
-        sessionStorage.removeItem('restrosync_tab_alive');
         setShowDeviceLimitModal(true);
       }
     };
 
     checkDevice();
 
-    // Har 15 second mein heartbeat bhejein (browser band hone par 45 sec mein slot auto-free)
     const heartbeatInterval = setInterval(async () => {
       const stillValid = await sendDeviceHeartbeat(session.restaurantId);
       if (!stillValid) {
         localStorage.removeItem('restro_session');
-        sessionStorage.removeItem('restrosync_tab_alive');
         clearInterval(heartbeatInterval);
         setShowDeviceLimitModal(true);
       }
     }, 15000);
 
-    // Browser / Tab close hone par turant logout & slot cleanup
     const handleBrowserClose = () => {
       localStorage.removeItem('restro_session');
       removeCurrentDevice(session.restaurantId);
@@ -295,7 +323,6 @@ export default function DashboardPage() {
       await removeCurrentDevice(session.restaurantId);
     }
     localStorage.removeItem('restro_session');
-    sessionStorage.removeItem('restrosync_tab_alive');
     router.push('/');
   };
 
@@ -421,22 +448,8 @@ export default function DashboardPage() {
                 <h1 className="text-base sm:text-lg font-extrabold text-slate-900">
                   {session.restaurantName}
                 </h1>
-                <span
-                  className={`text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full flex items-center gap-1 ${
-                    isOwner
-                      ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                      : 'bg-blue-100 text-blue-700 border border-blue-200'
-                  }`}
-                >
-                  {isOwner ? (
-                    <>
-                      <ShieldCheck className="w-3 h-3" /> Owner
-                    </>
-                  ) : (
-                    <>
-                      <UserCheck className="w-3 h-3" /> Staff Mode
-                    </>
-                  )}
+                <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full flex items-center gap-1 bg-amber-100 text-amber-800 border border-amber-200">
+                  <ShieldCheck className="w-3 h-3" /> Owner
                 </span>
               </div>
               <p className="text-xs text-slate-500">
@@ -445,7 +458,7 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Role-Specific Action Buttons */}
+          {/* Owner Action Buttons */}
           <div className="flex items-center gap-2 flex-wrap">
             <Link
               href={`/kitchen/${session.restaurantId}`}
@@ -559,96 +572,55 @@ export default function DashboardPage() {
         )}
 
         {/* TOP KPI CARDS */}
-        {isOwner ? (
-          <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <button
-              type="button"
-              onClick={() => setShowSalesModal(true)}
-              className="bg-white hover:bg-emerald-50/40 p-5 rounded-2xl border-2 border-emerald-200 hover:border-emerald-500 shadow-sm text-left transition cursor-pointer group"
-            >
-              <div className="flex items-center justify-between text-slate-600 text-xs font-bold">
-                <span>Today&apos;s Total Sale</span>
-                <span className="flex items-center gap-1 text-emerald-600 font-extrabold">
-                  View History <ArrowUpRight className="w-4 h-4 group-hover:translate-x-0.5 transition" />
-                </span>
-              </div>
-              <p className="text-2xl font-extrabold text-slate-900 mt-2">
-                ₹{todayRevenue.toLocaleString('en-IN')}
-              </p>
-              <p className="text-[11px] text-emerald-700 font-semibold mt-1">
-                {todayCompleted.length} Bills Settled Today • Tap for Calendar
-              </p>
-            </button>
+        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <button
+            type="button"
+            onClick={() => setShowSalesModal(true)}
+            className="bg-white hover:bg-emerald-50/40 p-5 rounded-2xl border-2 border-emerald-200 hover:border-emerald-500 shadow-sm text-left transition cursor-pointer group"
+          >
+            <div className="flex items-center justify-between text-slate-600 text-xs font-bold">
+              <span>Today&apos;s Total Sale</span>
+              <span className="flex items-center gap-1 text-emerald-600 font-extrabold">
+                View History <ArrowUpRight className="w-4 h-4 group-hover:translate-x-0.5 transition" />
+              </span>
+            </div>
+            <p className="text-2xl font-extrabold text-slate-900 mt-2">
+              ₹{todayRevenue.toLocaleString('en-IN')}
+            </p>
+            <p className="text-[11px] text-emerald-700 font-semibold mt-1">
+              {todayCompleted.length} Bills Settled Today • Tap for Calendar
+            </p>
+          </button>
 
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-              <div className="flex items-center justify-between text-slate-500 text-xs font-bold">
-                <span>Active Tables</span>
-                <Users className="w-4 h-4 text-orange-600" />
-              </div>
-              <p className="text-2xl font-extrabold text-slate-900 mt-2">
-                {occupiedTablesCount} / {actualTablesCount}
-              </p>
-              <p className="text-[11px] text-slate-500 mt-1">Currently Occupied</p>
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+            <div className="flex items-center justify-between text-slate-500 text-xs font-bold">
+              <span>Active Tables</span>
+              <Users className="w-4 h-4 text-orange-600" />
             </div>
+            <p className="text-2xl font-extrabold text-slate-900 mt-2">
+              {occupiedTablesCount} / {actualTablesCount}
+            </p>
+            <p className="text-[11px] text-slate-500 mt-1">Currently Occupied</p>
+          </div>
 
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-              <div className="flex items-center justify-between text-slate-500 text-xs font-bold">
-                <span>In Kitchen (Cooking)</span>
-                <ChefHat className="w-4 h-4 text-blue-600" />
-              </div>
-              <p className="text-2xl font-extrabold text-slate-900 mt-2">{cookingOrdersCount}</p>
-              <p className="text-[11px] text-blue-600 font-semibold mt-1">Live KOTs Active</p>
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+            <div className="flex items-center justify-between text-slate-500 text-xs font-bold">
+              <span>In Kitchen (Cooking)</span>
+              <ChefHat className="w-4 h-4 text-blue-600" />
             </div>
+            <p className="text-2xl font-extrabold text-slate-900 mt-2">{cookingOrdersCount}</p>
+            <p className="text-[11px] text-blue-600 font-semibold mt-1">Live KOTs Active</p>
+          </div>
 
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-              <div className="flex items-center justify-between text-slate-500 text-xs font-bold">
-                <span>Ready to Serve</span>
-                <BellRing className="w-4 h-4 text-amber-600" />
-              </div>
-              <p className="text-2xl font-extrabold text-slate-900 mt-2">{readyToServeCount}</p>
-              <p className="text-[11px] text-amber-600 font-semibold mt-1">Pickup from Kitchen</p>
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+            <div className="flex items-center justify-between text-slate-500 text-xs font-bold">
+              <span>Ready to Serve</span>
+              <BellRing className="w-4 h-4 text-amber-600" />
             </div>
-          </section>
-        ) : (
-          <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-              <div className="flex items-center justify-between text-slate-500 text-xs font-bold">
-                <span>Occupied Tables</span>
-                <Users className="w-4 h-4 text-orange-600" />
-              </div>
-              <p className="text-2xl font-extrabold text-slate-900 mt-2">
-                {occupiedTablesCount} / {actualTablesCount}
-              </p>
-              <p className="text-[11px] text-slate-500 mt-1">
-                {Math.max(0, actualTablesCount - occupiedTablesCount)} Tables Free for Guests
-              </p>
-            </div>
-
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-              <div className="flex items-center justify-between text-slate-500 text-xs font-bold">
-                <span>Cooking in Kitchen</span>
-                <ChefHat className="w-4 h-4 text-blue-600" />
-              </div>
-              <p className="text-2xl font-extrabold text-slate-900 mt-2">{cookingOrdersCount}</p>
-              <p className="text-[11px] text-blue-600 font-semibold mt-1">
-                Orders Being Prepared
-              </p>
-            </div>
-
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-              <div className="flex items-center justify-between text-slate-500 text-xs font-bold">
-                <span>Ready to Serve</span>
-                <BellRing className="w-4 h-4 text-emerald-600" />
-              </div>
-              <p className="text-2xl font-extrabold text-emerald-600 mt-2">
-                {readyToServeCount}
-              </p>
-              <p className="text-[11px] text-emerald-700 font-semibold mt-1">
-                Deliver to Customer Tables
-              </p>
-            </div>
-          </section>
-        )}
+            <p className="text-2xl font-extrabold text-slate-900 mt-2">{readyToServeCount}</p>
+            <p className="text-[11px] text-amber-600 font-semibold mt-1">Pickup from Kitchen</p>
+          </div>
+        </section>
 
         {/* READY TO SERVE PRIORITY ALERT BANNER */}
         {readyToServeCount > 0 && (
@@ -683,7 +655,7 @@ export default function DashboardPage() {
         )}
 
         {/* LIVE FLOOR TABLE STATUS GRID */}
-        <section className="bg-white border border-slate-200 rounded-3xl p-5 sm:p-6 shadow-sm">
+        <section className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-5">
             <div>
               <h2 className="text-base sm:text-lg font-extrabold text-slate-900">
@@ -761,15 +733,9 @@ export default function DashboardPage() {
                       <p className="text-xs font-bold text-slate-700">
                         {totalDishes} Dish{totalDishes > 1 ? 'es' : ''} Running
                       </p>
-                      {isOwner ? (
-                        <p className="text-base font-extrabold text-slate-900 mt-0.5">
-                          ₹{tableTotal}
-                        </p>
-                      ) : (
-                        <p className="text-[11px] font-semibold text-orange-600 mt-0.5">
-                          View / Add Items &rarr;
-                        </p>
-                      )}
+                      <p className="text-base font-extrabold text-slate-900 mt-0.5">
+                        ₹{tableTotal}
+                      </p>
                     </div>
                   ) : (
                     <div className="mt-4 flex items-center justify-between text-slate-400">
@@ -784,13 +750,14 @@ export default function DashboardPage() {
         </section>
 
         {/* LIVE KITCHEN QUEUE FEED */}
-        <section className="bg-white border border-slate-200 rounded-3xl p-5 sm:p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
-              <Utensils className="w-4 h-4 text-orange-600" /> Live Kitchen & Service Queue
+        <section className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-sm">
+          <div className="flex items-center justify-between gap-2 mb-4">
+            <h2 className="text-sm sm:text-base font-extrabold text-slate-900 flex items-center gap-2">
+              <Utensils className="w-4 h-4 text-orange-600 shrink-0" />
+              <span>Live Kitchen & Service Queue</span>
             </h2>
-            <span className="text-xs font-bold text-slate-400">
-              {activeOrders.length} Active Ticket(s)
+            <span className="text-[11px] sm:text-xs font-bold bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full whitespace-nowrap shrink-0">
+              {activeOrders.length} Active
             </span>
           </div>
 
@@ -803,22 +770,22 @@ export default function DashboardPage() {
               {activeOrders.map((ord) => (
                 <div
                   key={ord.id}
-                  className="py-3 flex flex-wrap items-center justify-between gap-3 text-xs"
+                  className="py-3 flex items-start justify-between gap-3 text-xs"
                 >
-                  <div className="flex items-center gap-2.5">
-                    <span className="font-extrabold text-slate-900 bg-slate-100 px-2.5 py-1 rounded-lg">
+                  <div className="min-w-0 flex-1">
+                    <span className="inline-block font-extrabold text-slate-900 bg-slate-100 px-2 py-0.5 rounded-md mb-1">
                       Table {ord.table_number}
                     </span>
-                    <span className="text-slate-700 font-medium">
+                    <p className="text-slate-700 font-medium leading-relaxed break-words">
                       {ord.order_items
                         ?.map((i) => `${i.quantity}× ${i.item_name}`)
                         .join(', ')}
-                    </span>
+                    </p>
                   </div>
 
-                  <div className="flex items-center gap-2.5">
+                  <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1.5 shrink-0">
                     <span
-                      className={`text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full ${
+                      className={`text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full whitespace-nowrap ${
                         ord.status === 'ready'
                           ? 'bg-emerald-100 text-emerald-700'
                           : ord.status === 'served'
@@ -835,7 +802,7 @@ export default function DashboardPage() {
                       <button
                         type="button"
                         onClick={() => handleMarkServed(ord.id)}
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[11px] px-3 py-1 rounded-lg transition"
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[11px] px-3 py-1 rounded-lg transition whitespace-nowrap"
                       >
                         Mark Served ✓
                       </button>
@@ -849,18 +816,19 @@ export default function DashboardPage() {
 
         {/* RECENT SETTLED BILLS HISTORY — SIRF OWNER KE LIYE */}
         {isOwner && (
-          <section className="bg-white border border-slate-200 rounded-3xl p-5 sm:p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
-                <Receipt className="w-4 h-4 text-orange-600" /> Recent Settled Bills
+          <section className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+              <h2 className="text-sm sm:text-base font-extrabold text-slate-900 flex items-center gap-2">
+                <Receipt className="w-4 h-4 text-orange-600 shrink-0" />
+                <span>Recent Settled Bills</span>
               </h2>
               <button
                 type="button"
                 onClick={() => setShowSalesModal(true)}
-                className="text-xs font-extrabold text-orange-600 hover:underline flex items-center gap-1"
+                className="text-xs font-extrabold text-orange-600 hover:underline flex items-center gap-1.5 self-start sm:self-auto"
               >
-                <Calendar className="w-3.5 h-3.5" />
-                <span>Filter by Date / Custom Calendar ({completedOrders.length}) &rarr;</span>
+                <Calendar className="w-3.5 h-3.5 shrink-0" />
+                <span>View All & Filter ({completedOrders.length}) &rarr;</span>
               </button>
             </div>
 
@@ -873,26 +841,31 @@ export default function DashboardPage() {
                 {completedOrders.slice(0, 5).map((ord) => (
                   <div
                     key={ord.id}
-                    className="py-3 flex flex-wrap items-center justify-between gap-2 text-xs"
+                    className="py-3 flex items-start justify-between gap-3 text-xs"
                   >
-                    <div>
-                      <span className="font-extrabold text-slate-900">
+                    <div className="min-w-0 flex-1">
+                      <span className="font-extrabold text-slate-900 block">
                         Table {ord.table_number}
-                      </span>{' '}
-                      <span className="text-slate-500">
-                        •{' '}
+                      </span>
+                      <p className="text-slate-500 mt-0.5 leading-relaxed break-words">
                         {ord.order_items
                           ?.map((i) => `${i.quantity}× ${i.item_name}`)
                           .join(', ')}
-                      </span>
+                      </p>
                     </div>
 
-                    <div className="flex items-center gap-3">
-                      <span className="uppercase text-[10px] font-extrabold px-2 py-0.5 rounded bg-slate-100 text-slate-600">
-                        {ord.payment_method || 'PAID'}
-                      </span>
+                    <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1 sm:gap-2.5 shrink-0">
                       <span className="font-extrabold text-slate-900 text-sm">
                         ₹{ord.total_amount}
+                      </span>
+                      <span
+                        className={`uppercase text-[9px] sm:text-[10px] font-extrabold px-2 py-0.5 rounded ${
+                          (ord.payment_method || '').toLowerCase() === 'upi'
+                            ? 'bg-blue-50 text-blue-700'
+                            : 'bg-emerald-50 text-emerald-700'
+                        }`}
+                      >
+                        {ord.payment_method || 'PAID'}
                       </span>
                     </div>
                   </div>
@@ -905,11 +878,11 @@ export default function DashboardPage() {
 
       {/* OWNER PLAN UPGRADE / ACTIVATION MODAL */}
       {isOwner && showUpgradeModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl max-h-[85vh] overflow-y-auto overscroll-contain border border-slate-200">
             <div className="flex items-center justify-between pb-4 border-b border-slate-200">
               <div>
-                <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
+                <h3 className="text-base sm:text-lg font-extrabold text-slate-900 flex items-center gap-2">
                   <Crown className="w-5 h-5 text-orange-600" /> Activate RestroSync Plan
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
@@ -938,7 +911,7 @@ export default function DashboardPage() {
                     }`}
                   >
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-1.5">
                         <p className="font-extrabold text-sm text-slate-900">{plan.name}</p>
                         <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
                           {plan.tag}
@@ -965,12 +938,11 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* OWNER FULL SALES HISTORY MODAL (Mobile + Desktop Responsive) */}
+      {/* OWNER FULL SALES HISTORY MODAL */}
       {isOwner && showSalesModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
-          <div className="bg-white rounded-t-3xl sm:rounded-3xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl max-h-[92vh] flex flex-col">
-            {/* Header */}
-            <div className="flex items-start justify-between gap-2 pb-3.5 border-b border-slate-200">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 z-50">
+          <div className="bg-white rounded-3xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl max-h-[85vh] flex flex-col overflow-hidden border border-slate-200">
+            <div className="flex items-start justify-between gap-2 pb-3.5 border-b border-slate-200 shrink-0">
               <div>
                 <h3 className="text-base sm:text-lg font-extrabold text-slate-900">
                   Sales & Billing History
@@ -988,8 +960,7 @@ export default function DashboardPage() {
               </button>
             </div>
 
-            {/* Filter Tabs (Single Horizontal Row on Mobile) */}
-            <div className="flex items-center gap-2 pt-3.5 overflow-x-auto pb-1 no-scrollbar">
+            <div className="flex items-center gap-2 pt-3.5 overflow-x-auto pb-1 shrink-0 no-scrollbar">
               {(
                 [
                   { id: 'today', label: 'Today' },
@@ -1014,9 +985,8 @@ export default function DashboardPage() {
               ))}
             </div>
 
-            {/* Custom Date Inputs */}
             {salesFilter === 'custom' && (
-              <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-2xl grid grid-cols-2 gap-2.5">
+              <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-2xl grid grid-cols-2 gap-2.5 shrink-0">
                 <div>
                   <label className="block text-[10px] sm:text-[11px] font-bold text-slate-600 mb-1">
                     From Date
@@ -1046,8 +1016,7 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {/* Revenue Summary Cards: Mobile 2-Row Grid, Desktop 3-Column Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-3 my-3.5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-3 my-3.5 shrink-0">
               <div className="col-span-2 sm:col-span-1 bg-emerald-50 border border-emerald-200 p-3 sm:p-3.5 rounded-2xl flex sm:block items-center justify-between">
                 <div>
                   <p className="text-[11px] font-bold text-emerald-700">Total Revenue</p>
@@ -1079,8 +1048,7 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* Bills List */}
-            <div className="flex-1 overflow-y-auto divide-y divide-slate-100 border-t border-slate-100">
+            <div className="flex-1 overflow-y-auto overscroll-contain divide-y divide-slate-100 border-t border-slate-100 pr-1 pb-2">
               {filteredSalesOrders.length === 0 ? (
                 <p className="text-xs text-slate-400 text-center py-10">
                   Is selected date range mein koi settled bill nahi hai.
@@ -1136,9 +1104,9 @@ export default function DashboardPage() {
 
       {/* TABLE ACTION MODAL (Active Tables Only) */}
       {selectedTableModal !== null && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl max-h-[85vh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 shrink-0">
               <div>
                 <h3 className="text-lg font-extrabold text-slate-900">
                   Table {selectedTableModal}
@@ -1155,7 +1123,7 @@ export default function DashboardPage() {
               </button>
             </div>
 
-            <div className="pt-4">
+            <div className="pt-4 shrink-0">
               <Link
                 href={`/order/${session.restaurantId}/${selectedTableModal}`}
                 className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-3 rounded-2xl text-xs flex items-center justify-center gap-2 shadow-sm transition"
@@ -1166,7 +1134,7 @@ export default function DashboardPage() {
             </div>
 
             {modalTableOrders.length > 0 && (
-              <div className="py-4 space-y-3 max-h-64 overflow-y-auto">
+              <div className="py-4 space-y-3 overflow-y-auto overscroll-contain flex-1">
                 {modalTableOrders.map((ord) => (
                   <div
                     key={ord.id}
@@ -1227,9 +1195,7 @@ export default function DashboardPage() {
                               </span>
                             )}
                           </span>
-                          {isOwner && (
-                            <span className="font-bold">₹{item.price * item.quantity}</span>
-                          )}
+                          <span className="font-bold">₹{item.price * item.quantity}</span>
                         </div>
                       ))}
                     </div>
@@ -1238,48 +1204,40 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {modalTableOrders.length > 0 &&
-              (isOwner ? (
-                <div className="pt-3 border-t border-slate-200 space-y-3">
-                  <div className="flex items-center justify-between font-extrabold text-base text-slate-900">
-                    <span>Total Table Bill</span>
-                    <span>₹{modalTableTotal}</span>
-                  </div>
+            {modalTableOrders.length > 0 && (
+              <div className="pt-3 border-t border-slate-200 space-y-3 shrink-0">
+                <div className="flex items-center justify-between font-extrabold text-base text-slate-900">
+                  <span>Total Table Bill</span>
+                  <span>₹{modalTableTotal}</span>
+                </div>
 
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <button
-                      disabled={settling}
-                      onClick={() => handleSettleTable(selectedTableModal, 'cash')}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-3 rounded-xl text-xs transition"
-                    >
-                      Settle Cash ₹{modalTableTotal}
-                    </button>
-                    <button
-                      disabled={settling}
-                      onClick={() => handleSettleTable(selectedTableModal, 'upi')}
-                      className="bg-slate-900 hover:bg-slate-800 text-white font-extrabold py-3 rounded-xl text-xs transition"
-                    >
-                      Settle UPI ₹{modalTableTotal}
-                    </button>
-                  </div>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    disabled={settling}
+                    onClick={() => handleSettleTable(selectedTableModal, 'cash')}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-3 rounded-xl text-xs transition"
+                  >
+                    Settle Cash ₹{modalTableTotal}
+                  </button>
+                  <button
+                    disabled={settling}
+                    onClick={() => handleSettleTable(selectedTableModal, 'upi')}
+                    className="bg-slate-900 hover:bg-slate-800 text-white font-extrabold py-3 rounded-xl text-xs transition"
+                  >
+                    Settle UPI ₹{modalTableTotal}
+                  </button>
                 </div>
-              ) : (
-                <div className="pt-3 border-t border-slate-200 text-center">
-                  <p className="text-xs text-slate-500">
-                    Khana serve karne ke baad <strong>Mark Served ✓</strong> dabayein. Final
-                    billing Owner handle karega.
-                  </p>
-                </div>
-              ))}
+              </div>
+            )}
           </div>
         </div>
       )}
 
       {/* QUICK STOCK AVAILABILITY MODAL */}
       {showStockModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl max-h-[85vh] flex flex-col">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl max-h-[85vh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 shrink-0">
               <div>
                 <h3 className="text-lg font-extrabold text-slate-900">
                   Quick Dish Stock Toggle
@@ -1296,7 +1254,7 @@ export default function DashboardPage() {
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto py-3 divide-y divide-slate-100">
+            <div className="flex-1 overflow-y-auto overscroll-contain py-3 divide-y divide-slate-100">
               {loadingStock ? (
                 <p className="text-xs text-slate-500 text-center py-8">Loading menu items...</p>
               ) : stockItems.length === 0 ? (
