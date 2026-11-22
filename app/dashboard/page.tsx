@@ -4,7 +4,11 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { registerAndVerifyDevice, isCurrentDeviceValid } from '@/lib/deviceGuard';
+import {
+  registerAndVerifyDevice,
+  isCurrentDeviceValid,
+  removeCurrentDevice,
+} from '@/lib/deviceGuard';
 import {
   UtensilsCrossed,
   LogOut,
@@ -142,11 +146,19 @@ export default function DashboardPage() {
     }
   }, [router]);
 
-  // MAX 3 DEVICES SESSION LOCK (Account Sharing Protection)
+  // MAX 3 DEVICES SESSION LOCK (Strict Block on 4th Device)
   useEffect(() => {
     if (!session?.restaurantId) return;
 
-    registerAndVerifyDevice(session.restaurantId);
+    const checkDevice = async () => {
+      const allowed = await registerAndVerifyDevice(session.restaurantId);
+      if (!allowed) {
+        localStorage.removeItem('restro_session');
+        setShowDeviceLimitModal(true);
+      }
+    };
+
+    checkDevice();
 
     const deviceCheckInterval = setInterval(async () => {
       const valid = await isCurrentDeviceValid(session.restaurantId);
@@ -263,7 +275,10 @@ export default function DashboardPage() {
       .eq('id', item.id);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (session?.restaurantId) {
+      await removeCurrentDevice(session.restaurantId);
+    }
     localStorage.removeItem('restro_session');
     router.push('/');
   };
@@ -1296,7 +1311,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* MAX 3 DEVICES LOGOUT DIALOG */}
+      {/* MAX 3 DEVICES LOGOUT / BLOCK DIALOG */}
       {showDeviceLimitModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl text-center space-y-4 border border-slate-200">
@@ -1309,7 +1324,7 @@ export default function DashboardPage() {
                 Maximum 3 Devices Limit Reached
               </h3>
               <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                Kisi 4th device par login hone ke karan aapka yeh session logout kar diya gaya hai. Ek account ek saath sirf 3 devices par chal sakta hai.
+                Is restaurant account par pehle se 3 devices active hain. Naye device par login karne ke liye pehle kisi ek purane device se Logout karein.
               </p>
             </div>
 

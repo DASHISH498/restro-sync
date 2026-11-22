@@ -28,28 +28,54 @@ export async function registerAndVerifyDevice(restaurantId: string): Promise<boo
     ? data.active_sessions
     : [];
 
-  // Purane 24 ghante se inactive sessions saaf karein
-  const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
-  sessions = sessions.filter((s) => new Date(s.lastActive).getTime() > oneDayAgo);
+  // 12 ghante se purane inactive sessions auto-clean karein (agar koi browser band karna bhool jaye)
+  const twelveHoursAgo = Date.now() - 12 * 60 * 60 * 1000;
+  sessions = sessions.filter((s) => new Date(s.lastActive).getTime() > twelveHoursAgo);
 
   const existingIndex = sessions.findIndex((s) => s.deviceId === deviceId);
   if (existingIndex !== -1) {
     sessions[existingIndex].lastActive = new Date().toISOString();
-  } else {
-    // Agar 3 devices pehle se active hain, toh sabse purana device hata dein
-    if (sessions.length >= MAX_DEVICES) {
-      sessions.sort((a, b) => new Date(a.lastActive).getTime() - new Date(b.lastActive).getTime());
-      sessions.shift();
-    }
-    sessions.push({ deviceId, lastActive: new Date().toISOString() });
+    await supabase
+      .from('restaurants')
+      .update({ active_sessions: sessions })
+      .eq('id', restaurantId);
+    return true;
   }
 
+  // Agar pehle se 3 alag devices active hain, toh 4th device ko BLOCK karein
+  if (sessions.length >= MAX_DEVICES) {
+    return false;
+  }
+
+  sessions.push({ deviceId, lastActive: new Date().toISOString() });
   await supabase
     .from('restaurants')
     .update({ active_sessions: sessions })
     .eq('id', restaurantId);
 
   return true;
+}
+
+export async function removeCurrentDevice(restaurantId: string): Promise<void> {
+  const deviceId = getOrCreateDeviceId();
+  if (!deviceId) return;
+
+  const { data } = await supabase
+    .from('restaurants')
+    .select('active_sessions')
+    .eq('id', restaurantId)
+    .single();
+
+  if (!data || !Array.isArray(data.active_sessions)) return;
+
+  const updated = data.active_sessions.filter(
+    (s: { deviceId: string }) => s.deviceId !== deviceId
+  );
+
+  await supabase
+    .from('restaurants')
+    .update({ active_sessions: updated })
+    .eq('id', restaurantId);
 }
 
 export async function isCurrentDeviceValid(restaurantId: string): Promise<boolean> {
