@@ -117,6 +117,9 @@ export default function DashboardPage() {
   // Owner Plan Upgrade Modal
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
+  // Max 3 Devices Limit Modal
+  const [showDeviceLimitModal, setShowDeviceLimitModal] = useState(false);
+
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0];
     setTodayIso(today);
@@ -149,15 +152,13 @@ export default function DashboardPage() {
       const valid = await isCurrentDeviceValid(session.restaurantId);
       if (!valid) {
         localStorage.removeItem('restro_session');
-        alert(
-          'Maximum 3 devices limit reached! Doosre device par login hone ke karan aap logout ho gaye hain.'
-        );
-        router.push('/');
+        clearInterval(deviceCheckInterval);
+        setShowDeviceLimitModal(true);
       }
     }, 30000);
 
     return () => clearInterval(deviceCheckInterval);
-  }, [session?.restaurantId, router]);
+  }, [session?.restaurantId]);
 
   const fetchDashboardData = useCallback(async () => {
     if (!session?.restaurantId) return;
@@ -1291,6 +1292,34 @@ export default function DashboardPage() {
                 ))
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MAX 3 DEVICES LOGOUT DIALOG */}
+      {showDeviceLimitModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl text-center space-y-4 border border-slate-200">
+            <div className="w-12 h-12 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center mx-auto">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+
+            <div>
+              <h3 className="text-lg font-extrabold text-slate-900">
+                Maximum 3 Devices Limit Reached
+              </h3>
+              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                Kisi 4th device par login hone ke karan aapka yeh session logout kar diya gaya hai. Ek account ek saath sirf 3 devices par chal sakta hai.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => router.push('/')}
+              className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-3 rounded-xl text-xs shadow-sm transition"
+            >
+              OK, Back to Home &rarr;
+            </button>
           </div>
         </div>
       )}
