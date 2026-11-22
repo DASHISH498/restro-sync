@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import {
   registerAndVerifyDevice,
-  isCurrentDeviceValid,
+  sendDeviceHeartbeat,
   removeCurrentDevice,
 } from '@/lib/deviceGuard';
 import {
@@ -135,6 +135,7 @@ export default function DashboardPage() {
       router.push('/');
       return;
     }
+
     try {
       const parsed: SessionData = JSON.parse(raw);
       setSession(parsed);
@@ -146,7 +147,7 @@ export default function DashboardPage() {
     }
   }, [router]);
 
-  // MAX 3 DEVICES SESSION LOCK (Strict Block on 4th Device)
+  // MAX 3 DEVICES SESSION LOCK + AUTO LOGOUT ON BROWSER CLOSE
   useEffect(() => {
     if (!session?.restaurantId) return;
 
@@ -154,22 +155,36 @@ export default function DashboardPage() {
       const allowed = await registerAndVerifyDevice(session.restaurantId);
       if (!allowed) {
         localStorage.removeItem('restro_session');
+        sessionStorage.removeItem('restrosync_tab_alive');
         setShowDeviceLimitModal(true);
       }
     };
 
     checkDevice();
 
-    const deviceCheckInterval = setInterval(async () => {
-      const valid = await isCurrentDeviceValid(session.restaurantId);
-      if (!valid) {
+    // Har 15 second mein heartbeat bhejein (browser band hone par 45 sec mein slot auto-free)
+    const heartbeatInterval = setInterval(async () => {
+      const stillValid = await sendDeviceHeartbeat(session.restaurantId);
+      if (!stillValid) {
         localStorage.removeItem('restro_session');
-        clearInterval(deviceCheckInterval);
+        sessionStorage.removeItem('restrosync_tab_alive');
+        clearInterval(heartbeatInterval);
         setShowDeviceLimitModal(true);
       }
-    }, 30000);
+    }, 15000);
 
-    return () => clearInterval(deviceCheckInterval);
+    // Browser / Tab close hone par turant logout & slot cleanup
+    const handleBrowserClose = () => {
+      localStorage.removeItem('restro_session');
+      removeCurrentDevice(session.restaurantId);
+    };
+
+    window.addEventListener('pagehide', handleBrowserClose);
+
+    return () => {
+      clearInterval(heartbeatInterval);
+      window.removeEventListener('pagehide', handleBrowserClose);
+    };
   }, [session?.restaurantId]);
 
   const fetchDashboardData = useCallback(async () => {
@@ -280,6 +295,7 @@ export default function DashboardPage() {
       await removeCurrentDevice(session.restaurantId);
     }
     localStorage.removeItem('restro_session');
+    sessionStorage.removeItem('restrosync_tab_alive');
     router.push('/');
   };
 
@@ -949,29 +965,31 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* OWNER FULL SALES HISTORY MODAL */}
+      {/* OWNER FULL SALES HISTORY MODAL (Mobile + Desktop Responsive) */}
       {isOwner && showSalesModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl max-w-2xl w-full p-6 shadow-2xl max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-200">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
+          <div className="bg-white rounded-t-3xl sm:rounded-3xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl max-h-[92vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-start justify-between gap-2 pb-3.5 border-b border-slate-200">
               <div>
-                <h3 className="text-lg font-extrabold text-slate-900">
+                <h3 className="text-base sm:text-lg font-extrabold text-slate-900">
                   Sales & Billing History
                 </h3>
-                <p className="text-xs text-slate-500">
-                  {session.restaurantName} • Date-wise Revenue & Payment Breakdown
+                <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5">
+                  {session.restaurantName} • Date-wise Revenue Breakdown
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setShowSalesModal(false)}
-                className="p-2 rounded-full hover:bg-slate-100 text-slate-500"
+                className="p-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 shrink-0"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 pt-4">
+            {/* Filter Tabs (Single Horizontal Row on Mobile) */}
+            <div className="flex items-center gap-2 pt-3.5 overflow-x-auto pb-1 no-scrollbar">
               {(
                 [
                   { id: 'today', label: 'Today' },
@@ -984,7 +1002,7 @@ export default function DashboardPage() {
                   key={tab.id}
                   type="button"
                   onClick={() => setSalesFilter(tab.id)}
-                  className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 ${
+                  className={`px-3 sm:px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
                     salesFilter === tab.id
                       ? 'bg-slate-900 text-white shadow-sm'
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -996,24 +1014,25 @@ export default function DashboardPage() {
               ))}
             </div>
 
+            {/* Custom Date Inputs */}
             {salesFilter === 'custom' && (
-              <div className="mt-3 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-2xl grid grid-cols-2 gap-2.5">
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                    From Date (Start)
+                  <label className="block text-[10px] sm:text-[11px] font-bold text-slate-600 mb-1">
+                    From Date
                   </label>
                   <input
                     type="date"
                     max={customToDate || todayIso}
                     value={customFromDate}
                     onChange={(e) => setCustomFromDate(e.target.value)}
-                    className="w-full px-3 py-2 bg-white border border-slate-300 focus:border-orange-500 rounded-xl text-xs font-bold text-slate-800 outline-none"
+                    className="w-full px-2.5 py-2 bg-white border border-slate-300 focus:border-orange-500 rounded-xl text-xs font-bold text-slate-800 outline-none"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                    To Date (End)
+                  <label className="block text-[10px] sm:text-[11px] font-bold text-slate-600 mb-1">
+                    To Date
                   </label>
                   <input
                     type="date"
@@ -1021,42 +1040,46 @@ export default function DashboardPage() {
                     max={todayIso}
                     value={customToDate}
                     onChange={(e) => setCustomToDate(e.target.value)}
-                    className="w-full px-3 py-2 bg-white border border-slate-300 focus:border-orange-500 rounded-xl text-xs font-bold text-slate-800 outline-none"
+                    className="w-full px-2.5 py-2 bg-white border border-slate-300 focus:border-orange-500 rounded-xl text-xs font-bold text-slate-800 outline-none"
                   />
                 </div>
               </div>
             )}
 
-            <div className="grid grid-cols-3 gap-3 my-4">
-              <div className="bg-emerald-50 border border-emerald-200 p-3.5 rounded-2xl">
-                <p className="text-[11px] font-bold text-emerald-700">Total Revenue</p>
-                <p className="text-lg sm:text-xl font-extrabold text-emerald-900 mt-0.5">
-                  ₹{filteredTotalSales.toLocaleString('en-IN')}
-                </p>
-                <p className="text-[10px] text-emerald-700 mt-0.5">
+            {/* Revenue Summary Cards: Mobile 2-Row Grid, Desktop 3-Column Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-3 my-3.5">
+              <div className="col-span-2 sm:col-span-1 bg-emerald-50 border border-emerald-200 p-3 sm:p-3.5 rounded-2xl flex sm:block items-center justify-between">
+                <div>
+                  <p className="text-[11px] font-bold text-emerald-700">Total Revenue</p>
+                  <p className="text-xl font-extrabold text-emerald-900 mt-0.5">
+                    ₹{filteredTotalSales.toLocaleString('en-IN')}
+                  </p>
+                </div>
+                <span className="text-[11px] font-bold bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full sm:bg-transparent sm:p-0 sm:mt-0.5 inline-block">
                   {filteredSalesOrders.length} Bills
-                </p>
+                </span>
               </div>
 
-              <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+              <div className="bg-slate-50 border border-slate-200 p-3 sm:p-3.5 rounded-2xl">
                 <p className="text-[11px] font-bold text-slate-600 flex items-center gap-1">
                   <Banknote className="w-3.5 h-3.5 text-emerald-600" /> Cash
                 </p>
-                <p className="text-lg sm:text-xl font-extrabold text-slate-900 mt-0.5">
+                <p className="text-base sm:text-xl font-extrabold text-slate-900 mt-0.5">
                   ₹{filteredCashSales.toLocaleString('en-IN')}
                 </p>
               </div>
 
-              <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+              <div className="bg-slate-50 border border-slate-200 p-3 sm:p-3.5 rounded-2xl">
                 <p className="text-[11px] font-bold text-slate-600 flex items-center gap-1">
                   <Smartphone className="w-3.5 h-3.5 text-blue-600" /> UPI / Online
                 </p>
-                <p className="text-lg sm:text-xl font-extrabold text-slate-900 mt-0.5">
+                <p className="text-base sm:text-xl font-extrabold text-slate-900 mt-0.5">
                   ₹{filteredUpiSales.toLocaleString('en-IN')}
                 </p>
               </div>
             </div>
 
+            {/* Bills List */}
             <div className="flex-1 overflow-y-auto divide-y divide-slate-100 border-t border-slate-100">
               {filteredSalesOrders.length === 0 ? (
                 <p className="text-xs text-slate-400 text-center py-10">
@@ -1066,42 +1089,41 @@ export default function DashboardPage() {
                 filteredSalesOrders.map((ord) => (
                   <div
                     key={ord.id}
-                    className="py-3.5 flex flex-wrap items-center justify-between gap-3 text-xs"
+                    className="py-3 flex items-start justify-between gap-3 text-xs"
                   >
-                    <div>
-                      <div className="flex items-center gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                         <span className="font-extrabold text-slate-900">
                           Table {ord.table_number}
                         </span>
-                        <span className="text-[11px] text-slate-400">
+                        <span className="text-[10px] sm:text-[11px] text-slate-400">
                           {new Date(ord.created_at).toLocaleString('en-IN', {
                             day: '2-digit',
                             month: 'short',
-                            year: 'numeric',
                             hour: '2-digit',
                             minute: '2-digit',
                           })}
                         </span>
                       </div>
-                      <p className="text-slate-600 mt-0.5">
+                      <p className="text-slate-600 mt-1 leading-relaxed break-words">
                         {ord.order_items
                           ?.map((i) => `${i.quantity}× ${i.item_name}`)
                           .join(', ')}
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1.5 sm:gap-2.5 shrink-0">
+                      <span className="font-extrabold text-slate-900 text-sm">
+                        ₹{ord.total_amount}
+                      </span>
                       <span
-                        className={`uppercase text-[10px] font-extrabold px-2.5 py-1 rounded-lg ${
+                        className={`uppercase text-[9px] sm:text-[10px] font-extrabold px-2 py-0.5 rounded-md ${
                           (ord.payment_method || '').toLowerCase() === 'upi'
                             ? 'bg-blue-50 text-blue-700'
                             : 'bg-emerald-50 text-emerald-700'
                         }`}
                       >
                         {ord.payment_method || 'CASH'}
-                      </span>
-                      <span className="font-extrabold text-slate-900 text-sm">
-                        ₹{ord.total_amount}
                       </span>
                     </div>
                   </div>
@@ -1324,7 +1346,7 @@ export default function DashboardPage() {
                 Maximum 3 Devices Limit Reached
               </h3>
               <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                Is restaurant account par pehle se 3 devices active hain. Naye device par login karne ke liye pehle kisi ek purane device se Logout karein.
+                Is restaurant account par pehle se 3 devices active hain. Naye device par login karne ke liye pehle kisi ek purane device se Logout karein ya uska browser close karein.
               </p>
             </div>
 
