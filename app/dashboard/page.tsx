@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { registerAndVerifyDevice, isCurrentDeviceValid } from '@/lib/deviceGuard';
 import {
   UtensilsCrossed,
   LogOut,
@@ -137,6 +138,26 @@ export default function DashboardPage() {
       router.push('/');
     }
   }, [router]);
+
+  // MAX 3 DEVICES SESSION LOCK (Account Sharing Protection)
+  useEffect(() => {
+    if (!session?.restaurantId) return;
+
+    registerAndVerifyDevice(session.restaurantId);
+
+    const deviceCheckInterval = setInterval(async () => {
+      const valid = await isCurrentDeviceValid(session.restaurantId);
+      if (!valid) {
+        localStorage.removeItem('restro_session');
+        alert(
+          'Maximum 3 devices limit reached! Doosre device par login hone ke karan aap logout ho gaye hain.'
+        );
+        router.push('/');
+      }
+    }, 30000);
+
+    return () => clearInterval(deviceCheckInterval);
+  }, [session?.restaurantId, router]);
 
   const fetchDashboardData = useCallback(async () => {
     if (!session?.restaurantId) return;
