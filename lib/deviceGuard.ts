@@ -1,112 +1,98 @@
 import { supabase } from './supabase';
 
-const MAX_DEVICES = 3;
-// 45 seconds tak heartbeat na aaye toh browser close/offline maankar slot free kar dein
-const HEARTBEAT_TIMEOUT_MS = 45 * 1000;
+const DEVICE_ID_KEY = 'restrosync_device_uid';
+const STALE_TIMEOUT_MS = 45 * 1000; // 45 seconds se inactive sessions auto-clear hongi
 
-export function getOrCreateDeviceId(): string {
-  if (typeof window === 'undefined') return '';
-  let id = sessionStorage.getItem('restrosync_device_id');
-  if (!id) {
-    id = 'dev_' + Math.random().toString(36).substring(2, 12) + '_' + Date.now();
-    sessionStorage.setItem('restrosync_device_id', id);
+function getOrCreateDeviceId(): string {
+  if (typeof window === 'undefined') return 'server';
+
+  let uid = localStorage.getItem(DEVICE_ID_KEY);
+  if (!uid) {
+    uid =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `dev_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    localStorage.setItem(DEVICE_ID_KEY, uid);
   }
-  return id;
+  return uid;
 }
 
-export async function registerAndVerifyDevice(restaurantId: string): Promise<boolean> {
-  const deviceId = getOrCreateDeviceId();
-  if (!deviceId) return true;
+export async function registerAndVerifyDevice(
+  restaurantId: string,
+  maxDevices = 3
+): Promise<boolean> {
+  try {
+    const deviceId = getOrCreateDeviceId();
+    const nowIso = new Date().toISOString();
+    const staleThresholdIso = new Date(Date.now() - STALE_TIMEOUT_MS).toISOString();
 
-  const { data, error } = await supabase
-    .from('restaurants')
-    .select('active_sessions')
-    .eq('id', restaurantId)
-    .single();
-
-  if (error || !data) return true;
-
-  let sessions: { deviceId: string; lastActive: string }[] = Array.isArray(data.active_sessions)
-    ? data.active_sessions
-    : [];
-
-  // Jin devices ka browser close ho chuka hai (45 sec se inactive), unhe auto-remove karein
-  const cutoff = Date.now() - HEARTBEAT_TIMEOUT_MS;
-  sessions = sessions.filter((s) => new Date(s.lastActive).getTime() > cutoff);
-
-  const existingIndex = sessions.findIndex((s) => s.deviceId === deviceId);
-  if (existingIndex !== -1) {
-    sessions[existingIndex].lastActive = new Date().toISOString();
+    // 1. Pehle 45 sec se purane closed/dead sessions ko saaf karein
     await supabase
-      .from('restaurants')
-      .update({ active_sessions: sessions })
-      .eq('id', restaurantId);
+      .from('active_sessions')
+      .delete()
+      .eq('restaurant_id', restaurantId)
+      .lt('last_seen', staleThresholdIso);
+
+    // 2. Abhi currently active sessions fetch karein
+    const { data: activeList, error } = await supabase
+      .from('active_sessions')
+      .select('device_id')
+      .eq('restaurant_id', restaurantId);
+
+    if (error) {
+      // Temporary network glitch par galat block na karein
+      return true;
+    }
+
+    const devices = activeList || [];
+    const alreadyRegistered = devices.some((d) => d.device_id === deviceId);
+
+    if (alreadyRegistered) {
+      await supabase
+        .from('active_sessions')
+        .update({ last_seen: nowIso })
+        .eq('restaurant_id', restaurantId)
+        .eq('device_id', deviceId);
+      return true;
+    }
+
+    // 3. Agar sach mein 3 alag devices is waqt active hain, tabhi block karein
+    if (devices.length >= maxDevices) {
+      return false;
+    }
+
+    // 4. Naya device session register karein
+    await supabase.from('active_sessions').upsert(
+      {
+        restaurant_id: restaurantId,
+        device_id: deviceId,
+        last_seen: nowIso,
+      },
+      { onConflict: 'restaurant_id,device_id' }
+    );
+
+    return true;
+  } catch {
     return true;
   }
-
-  // Agar pehle se 3 active browsers khule hain, toh 4th ko BLOCK karein
-  if (sessions.length >= MAX_DEVICES) {
-    return false;
-  }
-
-  sessions.push({ deviceId, lastActive: new Date().toISOString() });
-  await supabase
-    .from('restaurants')
-    .update({ active_sessions: sessions })
-    .eq('id', restaurantId);
-
-  return true;
 }
 
-export async function sendDeviceHeartbeat(restaurantId: string): Promise<boolean> {
-  const deviceId = getOrCreateDeviceId();
-  if (!deviceId) return true;
-
-  const { data } = await supabase
-    .from('restaurants')
-    .select('active_sessions')
-    .eq('id', restaurantId)
-    .single();
-
-  if (!data || !Array.isArray(data.active_sessions)) return true;
-
-  const cutoff = Date.now() - HEARTBEAT_TIMEOUT_MS;
-  const activeOnly = data.active_sessions.filter(
-    (s: { deviceId: string; lastActive: string }) => new Date(s.lastActive).getTime() > cutoff
-  );
-
-  const idx = activeOnly.findIndex((s: { deviceId: string }) => s.deviceId === deviceId);
-  if (idx === -1) {
-    return false;
-  }
-
-  activeOnly[idx].lastActive = new Date().toISOString();
-  await supabase
-    .from('restaurants')
-    .update({ active_sessions: activeOnly })
-    .eq('id', restaurantId);
-
-  return true;
+export async function sendDeviceHeartbeat(
+  restaurantId: string,
+  maxDevices = 3
+): Promise<boolean> {
+  return registerAndVerifyDevice(restaurantId, maxDevices);
 }
 
 export async function removeCurrentDevice(restaurantId: string): Promise<void> {
-  const deviceId = getOrCreateDeviceId();
-  if (!deviceId) return;
-
-  const { data } = await supabase
-    .from('restaurants')
-    .select('active_sessions')
-    .eq('id', restaurantId)
-    .single();
-
-  if (!data || !Array.isArray(data.active_sessions)) return;
-
-  const updated = data.active_sessions.filter(
-    (s: { deviceId: string }) => s.deviceId !== deviceId
-  );
-
-  await supabase
-    .from('restaurants')
-    .update({ active_sessions: updated })
-    .eq('id', restaurantId);
+  try {
+    const deviceId = getOrCreateDeviceId();
+    await supabase
+      .from('active_sessions')
+      .delete()
+      .eq('restaurant_id', restaurantId)
+      .eq('device_id', deviceId);
+  } catch {
+    // Ignore unload errors
+  }
 }
