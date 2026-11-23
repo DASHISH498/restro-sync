@@ -107,7 +107,7 @@ export default function MenuManagerPage() {
   // Add New Dish
   const handleAddDish = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!session || !name.trim() || !price) return;
+    if (!session || session.role !== 'owner' || !name.trim() || !price) return;
 
     setAdding(true);
     const { error } = await supabase.from('menu_items').insert([
@@ -144,7 +144,8 @@ export default function MenuManagerPage() {
   // Save Edited Dish
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!session || !editingItem || !editName.trim() || !editPrice) return;
+    if (!session || session.role !== 'owner' || !editingItem || !editName.trim() || !editPrice)
+      return;
 
     setSavingEdit(true);
     const { error } = await supabase
@@ -167,7 +168,7 @@ export default function MenuManagerPage() {
 
   // Toggle Availability (In Stock / Sold Out)
   const handleToggleStock = async (item: MenuItem) => {
-    if (!session) return;
+    if (!session || session.role !== 'owner') return;
     const { error } = await supabase
       .from('menu_items')
       .update({ is_available: !item.is_available })
@@ -180,7 +181,7 @@ export default function MenuManagerPage() {
 
   // Confirm & Execute Delete (Safely detaches past order history reference first)
   const confirmDeleteDish = async () => {
-    if (!session || !deletingItem) return;
+    if (!session || session.role !== 'owner' || !deletingItem) return;
     setIsDeleting(true);
 
     // 1. Detach foreign key from past order_items so historical bills stay intact
@@ -211,6 +212,8 @@ export default function MenuManagerPage() {
     );
   }
 
+  const isOwnerWeb = session.role === 'owner';
+
   const filteredItems = items.filter(
     (i) =>
       i.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -240,8 +243,12 @@ export default function MenuManagerPage() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 pt-6 grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-        {/* Left Column: Add New Dish Form (Sticky on Desktop) */}
-        <section className="bg-white border border-slate-200 rounded-2xl p-5 h-fit shadow-sm lg:sticky lg:top-[76px]">
+        {/* Left Column: Add New Dish Form (Owner + Desktop Web Only Sticky) */}
+        <section
+          className={`bg-white border border-slate-200 rounded-2xl p-5 h-fit shadow-sm ${
+            isOwnerWeb ? 'lg:sticky lg:top-24' : ''
+          }`}
+        >
           <h2 className="text-base font-extrabold text-slate-900 mb-4 flex items-center gap-2">
             <Plus className="w-4 h-4 text-orange-600" /> Add New Dish
           </h2>
@@ -345,9 +352,15 @@ export default function MenuManagerPage() {
           </form>
         </section>
 
-        {/* Right Column: Sticky Search Bar + Existing Menu Items List */}
-        <section className="lg:col-span-2 space-y-4">
-          <div className="lg:sticky lg:top-[76px] lg:z-20 bg-slate-50/95 backdrop-blur-sm py-1">
+        {/* Right Column: Search Bar (Owner + Desktop Web Only Sticky) + Existing Menu Items List */}
+        <section className="lg:col-span-2 space-y-2">
+          <div
+            className={
+              isOwnerWeb
+                ? 'lg:sticky lg:top-20 lg:z-20 pt-3 pb-3 bg-slate-50'
+                : 'pt-1 pb-2'
+            }
+          >
             <div className="relative">
               <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
