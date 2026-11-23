@@ -501,26 +501,30 @@ function CustomerOrderContent() {
         @media print {
           @page {
             size: auto;
-            margin: 12mm;
+            margin: 10mm;
           }
           html,
           body {
             background: #ffffff !important;
+            margin: 0 !important;
+            padding: 0 !important;
             height: auto !important;
             overflow: visible !important;
           }
-          body * {
-            visibility: hidden !important;
+          /* Background header, menu aur cart ko print se poori tarah hatayein */
+          header,
+          main,
+          .no-print {
+            display: none !important;
           }
-          #printable-customer-receipt,
-          #printable-customer-receipt * {
-            visibility: visible !important;
+          #receipt-modal-backdrop {
+            position: static !important;
+            background: #ffffff !important;
+            padding: 0 !important;
+            display: block !important;
           }
           #printable-customer-receipt {
-            position: absolute !important;
-            left: 50% !important;
-            top: 0 !important;
-            transform: translateX(-50%) !important;
+            position: static !important;
             width: 100% !important;
             max-width: 420px !important;
             max-height: none !important;
@@ -532,9 +536,6 @@ function CustomerOrderContent() {
             padding: 20px !important;
             margin: 0 auto !important;
             background: #ffffff !important;
-          }
-          .no-print {
-            display: none !important;
           }
         }
       `}</style>
@@ -1203,10 +1204,11 @@ function CustomerOrderContent() {
 
       {/* PRINTABLE / DOWNLOADABLE DIGITAL BILL RECEIPT MODAL */}
       {receiptOrder && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 print:static print:bg-white print:p-0">
+        <div id="receipt-modal-backdrop"
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div
             id="printable-customer-receipt"
-            className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto print:max-h-none print:overflow-visible space-y-4"
+            className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto space-y-4"
           >
             {/* Receipt Header */}
             <div className="text-center border-b border-dashed border-slate-300 pb-4 relative">
