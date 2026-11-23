@@ -499,20 +499,39 @@ function CustomerOrderContent() {
       {/* Print-Only Styles taaki sirf clean Bill Receipt hi print/PDF save ho */}
       <style jsx global>{`
         @media print {
+          @page {
+            size: auto;
+            margin: 12mm;
+          }
+          html,
+          body {
+            background: #ffffff !important;
+            height: auto !important;
+            overflow: visible !important;
+          }
           body * {
-            visibility: hidden;
+            visibility: hidden !important;
           }
           #printable-customer-receipt,
           #printable-customer-receipt * {
-            visibility: visible;
+            visibility: visible !important;
           }
           #printable-customer-receipt {
-            position: fixed;
-            left: 0;
-            top: 0;
-            width: 100%;
+            position: absolute !important;
+            left: 50% !important;
+            top: 0 !important;
+            transform: translateX(-50%) !important;
+            width: 100% !important;
+            max-width: 420px !important;
+            max-height: none !important;
+            height: auto !important;
+            overflow: visible !important;
             box-shadow: none !important;
-            border: none !important;
+            border: 1px solid #cbd5e1 !important;
+            border-radius: 16px !important;
+            padding: 20px !important;
+            margin: 0 auto !important;
+            background: #ffffff !important;
           }
           .no-print {
             display: none !important;
@@ -1184,10 +1203,10 @@ function CustomerOrderContent() {
 
       {/* PRINTABLE / DOWNLOADABLE DIGITAL BILL RECEIPT MODAL */}
       {receiptOrder && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 print:static print:bg-white print:p-0">
           <div
             id="printable-customer-receipt"
-            className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto space-y-4"
+            className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto print:max-h-none print:overflow-visible space-y-4"
           >
             {/* Receipt Header */}
             <div className="text-center border-b border-dashed border-slate-300 pb-4 relative">
