@@ -120,7 +120,6 @@ function CustomerOrderContent() {
       setHasStaffSession(true);
     }
 
-    // Agar customer ne pehle details bhari thi toh autofill rakhein
     const savedCust = sessionStorage.getItem('restro_customer_info');
     if (savedCust) {
       try {
@@ -270,7 +269,6 @@ function CustomerOrderContent() {
     return true;
   };
 
-  // Load Razorpay Checkout Script Dynamically
   const loadRazorpayScript = (): Promise<boolean> => {
     return new Promise((resolve) => {
       if ((window as unknown as { Razorpay?: unknown }).Razorpay) {
@@ -285,7 +283,6 @@ function CustomerOrderContent() {
     });
   };
 
-  // Insert Order into Supabase (After Payment OR Staff Manual Order)
   const saveOrderToDatabase = async (
     paymentStatus: 'paid' | 'unpaid',
     paymentMethod: string,
@@ -370,14 +367,13 @@ function CustomerOrderContent() {
       setOrderSuccessToast(true);
       setTimeout(() => setOrderSuccessToast(false), 5000);
 
-      // Customer ne online pay kiya ho toh turant Digital Bill Receipt Modal kholein
       if (paymentStatus === 'paid') {
         setReceiptOrder(instantOrder);
       }
     }
   };
 
-  // Customer QR Prepaid Checkout (Validate Name/Phone -> Razorpay -> Order & Receipt)
+  // Customer QR Prepaid Checkout -> Restaurant Owner ke Razorpay account mein payment
   const handlePrepaidRazorpayOrder = async () => {
     const cartValues = Object.values(cart);
     if (cartValues.length === 0 || !restaurantId || !restaurant) return;
@@ -410,7 +406,7 @@ function CustomerOrderContent() {
       });
 
       const orderData = await res.json();
-      if (!res.ok || !orderData.orderId) {
+      if (!res.ok || !orderData.orderId || !orderData.keyId) {
         setFormError(orderData.error || 'Payment start karne mein error aaya.');
         setPlacingOrder(false);
         return;
@@ -419,7 +415,7 @@ function CustomerOrderContent() {
       setShowCartModal(false);
 
       const options = {
-        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+        key: orderData.keyId,
         amount: orderData.amount,
         currency: orderData.currency,
         name: restaurant.name,
@@ -496,7 +492,7 @@ function CustomerOrderContent() {
 
   return (
     <div className="min-h-screen bg-slate-50 pb-28 lg:pb-16">
-      {/* Print-Only Styles taaki sirf clean Bill Receipt hi print/PDF save ho */}
+      {/* 100% Single-Page Clean Print / PDF Styles */}
       <style jsx global>{`
         @media print {
           @page {
@@ -511,7 +507,6 @@ function CustomerOrderContent() {
             height: auto !important;
             overflow: visible !important;
           }
-          /* Background header, menu aur cart ko print se poori tarah hatayein */
           header,
           main,
           .no-print {
@@ -560,7 +555,6 @@ function CustomerOrderContent() {
             </div>
           </Link>
 
-          {/* Search & Veg Filter Inline on Desktop */}
           <div className="flex items-center gap-2 order-3 lg:order-2 w-full lg:w-auto lg:flex-1 lg:max-w-md">
             <div className="relative flex-1">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -605,7 +599,6 @@ function CustomerOrderContent() {
           </div>
         </div>
 
-        {/* Horizontal Category Pills */}
         {menuItems.length > 0 && (
           <div className="max-w-6xl mx-auto px-4 sm:px-6 pb-3 flex gap-2 overflow-x-auto">
             {categories.map((cat) => (
@@ -627,9 +620,8 @@ function CustomerOrderContent() {
 
       {/* Main 2-Column Wide Layout */}
       <main className="max-w-6xl mx-auto px-4 sm:px-6 pt-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* LEFT COLUMN (8 Cols on Desktop) */}
+        {/* LEFT COLUMN */}
         <div className="lg:col-span-8 space-y-5">
-          {/* Welcome Hero Banner */}
           <section className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white rounded-2xl p-5 sm:p-6 shadow-md flex items-center justify-between gap-4">
             <div>
               <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-orange-400 bg-orange-500/10 border border-orange-500/20 px-2.5 py-0.5 rounded-full mb-2">
@@ -647,7 +639,6 @@ function CustomerOrderContent() {
             </div>
           </section>
 
-          {/* Order Sent Toast */}
           {orderSuccessToast && (
             <div className="bg-emerald-600 text-white p-4 rounded-2xl shadow-lg flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
@@ -662,7 +653,6 @@ function CustomerOrderContent() {
             </div>
           )}
 
-          {/* Menu Items 2-Column Grid */}
           {menuItems.length === 0 ? (
             <div className="bg-white rounded-3xl p-10 sm:p-14 text-center border border-slate-200 shadow-sm">
               <div className="w-14 h-14 rounded-2xl bg-orange-100 text-orange-600 flex items-center justify-center mx-auto mb-3">
@@ -778,9 +768,8 @@ function CustomerOrderContent() {
           )}
         </div>
 
-        {/* RIGHT COLUMN (4 Cols on Desktop: Live Order Tracker + Sticky Cart Panel) */}
+        {/* RIGHT COLUMN */}
         <aside className="lg:col-span-4 space-y-5 lg:sticky lg:top-32">
-          {/* Live Order Tracker Card */}
           {tableOrders.length > 0 && (
             <section className="bg-white border-2 border-orange-200 rounded-2xl p-4 shadow-sm space-y-3">
               <div className="flex items-center justify-between">
@@ -889,7 +878,6 @@ function CustomerOrderContent() {
                         </div>
                       </div>
 
-                      {/* Download / Print Bill Button */}
                       <button
                         type="button"
                         onClick={() => setReceiptOrder(ord)}
@@ -1063,7 +1051,7 @@ function CustomerOrderContent() {
         </div>
       )}
 
-      {/* Mobile Cart, Customer Details & Cooking Notes Drawer Modal */}
+      {/* Mobile Cart & Customer Details Drawer Modal */}
       {showCartModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
           <div className="bg-white rounded-t-3xl sm:rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl max-h-[92vh] flex flex-col">
@@ -1085,7 +1073,6 @@ function CustomerOrderContent() {
             </div>
 
             <div className="flex-1 overflow-y-auto py-3.5 space-y-3.5">
-              {/* Mandatory Customer Info Form */}
               <div className="bg-orange-50/80 border border-orange-200 p-3.5 rounded-2xl space-y-2.5">
                 <p className="text-xs font-extrabold text-slate-900">
                   Customer Details (Mandatory) *
@@ -1127,7 +1114,6 @@ function CustomerOrderContent() {
                 )}
               </div>
 
-              {/* Cart Items */}
               {cartEntries.map(({ menuItem, quantity, notes }) => (
                 <div key={menuItem.id} className="bg-slate-50 p-3.5 rounded-2xl space-y-2.5">
                   <div className="flex items-center justify-between">
@@ -1204,13 +1190,14 @@ function CustomerOrderContent() {
 
       {/* PRINTABLE / DOWNLOADABLE DIGITAL BILL RECEIPT MODAL */}
       {receiptOrder && (
-        <div id="receipt-modal-backdrop"
-          className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+        <div
+          id="receipt-modal-backdrop"
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+        >
           <div
             id="printable-customer-receipt"
             className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto space-y-4"
           >
-            {/* Receipt Header */}
             <div className="text-center border-b border-dashed border-slate-300 pb-4 relative">
               <button
                 type="button"
@@ -1230,7 +1217,6 @@ function CustomerOrderContent() {
               </span>
             </div>
 
-            {/* Invoice, Bill & Customer Meta */}
             <div className="bg-slate-50 rounded-2xl p-3.5 text-xs space-y-1.5 border border-slate-200/80">
               <div className="flex justify-between">
                 <span className="text-slate-500">Invoice No:</span>
@@ -1284,7 +1270,6 @@ function CustomerOrderContent() {
               </div>
             </div>
 
-            {/* Ordered Items Table */}
             <div className="border-t border-b border-dashed border-slate-300 py-3 space-y-2">
               <div className="flex justify-between text-[11px] font-extrabold uppercase text-slate-400">
                 <span>Item</span>
@@ -1300,7 +1285,6 @@ function CustomerOrderContent() {
               ))}
             </div>
 
-            {/* Grand Total */}
             <div className="flex items-center justify-between text-base font-extrabold text-slate-900">
               <span>Grand Total Paid</span>
               <span className="text-emerald-700">₹{receiptOrder.total_amount}</span>
@@ -1310,7 +1294,6 @@ function CustomerOrderContent() {
               Thank you for dining at {restaurant.name}! Save or screenshot this receipt for your reference.
             </p>
 
-            {/* Print / Download PDF Button */}
             <div className="no-print grid grid-cols-2 gap-2.5 pt-2">
               <button
                 type="button"

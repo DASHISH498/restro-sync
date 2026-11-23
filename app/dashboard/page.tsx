@@ -37,6 +37,7 @@ import {
   Search,
   User,
   Phone,
+  KeyRound,
 } from 'lucide-react';
 
 interface SessionData {
@@ -86,11 +87,46 @@ interface MenuStockItem {
 const ADMIN_WHATSAPP = '919079083101';
 
 const UPGRADE_PLANS = [
-  { id: '1_month', name: '1 Month Plan', price: '₹599', tag: 'Monthly' },
-  { id: '3_months', name: '3 Months Plan', price: '₹1,699', tag: 'Save ₹98' },
-  { id: '6_months', name: '6 Months Plan', price: '₹3,299', tag: 'Save ₹295' },
-  { id: 'yearly', name: 'Yearly Plan (12 Months)', price: '₹5,499', tag: 'Most Popular' },
-  { id: 'lifetime', name: 'Lifetime License', price: '₹19,999', tag: 'One-Time Pay' },
+  {
+    id: '1_month',
+    name: '1 Month Plan',
+    price: '₹1',
+    amount: 1,
+    durationDays: 30,
+    tag: 'Monthly (Test)',
+  },
+  {
+    id: '3_months',
+    name: '3 Months Plan',
+    price: '₹5',
+    amount: 5,
+    durationDays: 90,
+    tag: 'Quarterly (Test)',
+  },
+  {
+    id: '6_months',
+    name: '6 Months Plan',
+    price: '₹10',
+    amount: 10,
+    durationDays: 180,
+    tag: 'Half-Yearly (Test)',
+  },
+  {
+    id: 'yearly',
+    name: 'Yearly Plan (12 Months)',
+    price: '₹15',
+    amount: 15,
+    durationDays: 365,
+    tag: 'Most Popular (Test)',
+  },
+  {
+    id: 'lifetime',
+    name: 'Lifetime License',
+    price: '₹20',
+    amount: 20,
+    durationDays: 36500,
+    tag: 'One-Time Pay (Test)',
+  },
 ];
 
 export default function DashboardPage() {
@@ -125,11 +161,25 @@ export default function DashboardPage() {
   const [customToDate, setCustomToDate] = useState<string>('');
   const [billSearchQuery, setBillSearchQuery] = useState<string>('');
 
-  // Owner Plan Upgrade Modal
+  // Owner Plan Upgrade Modal & Razorpay State
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [upgradingPlanId, setUpgradingPlanId] = useState<string | null>(null);
+  const [upgradeSuccessBanner, setUpgradeSuccessBanner] = useState<string | null>(null);
+  const [upgradeErrorMsg, setUpgradeErrorMsg] = useState<string | null>(null);
 
-  // Max 3 Devices Limit Modal
+  // Owner Payment Gateway (BYOK Razorpay) Modal
+  const [showPaymentSettingsModal, setShowPaymentSettingsModal] = useState(false);
+  const [ownerRzpKeyId, setOwnerRzpKeyId] = useState('');
+  const [ownerRzpKeySecret, setOwnerRzpKeySecret] = useState('');
+  const [ownerUpiId, setOwnerUpiId] = useState('');
+  const [ownerBankName, setOwnerBankName] = useState('');
+  const [savingPaymentSettings, setSavingPaymentSettings] = useState(false);
+  const [paymentSettingsMsg, setPaymentSettingsMsg] = useState<string | null>(null);
+  const [isPaymentConfigured, setIsPaymentConfigured] = useState<boolean>(true);
+
+  // Max 3 Devices Limit Modal & 1-Hour Inactivity Modal
   const [showDeviceLimitModal, setShowDeviceLimitModal] = useState(false);
+  const [showInactivityModal, setShowInactivityModal] = useState(false);
 
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0];
@@ -164,9 +214,11 @@ export default function DashboardPage() {
     const anyModalOpen =
       showSalesModal ||
       showUpgradeModal ||
+      showPaymentSettingsModal ||
       showStockModal ||
       selectedTableModal !== null ||
-      showDeviceLimitModal;
+      showDeviceLimitModal ||
+      showInactivityModal;
 
     if (anyModalOpen) {
       document.body.style.overflow = 'hidden';
@@ -180,9 +232,11 @@ export default function DashboardPage() {
   }, [
     showSalesModal,
     showUpgradeModal,
+    showPaymentSettingsModal,
     showStockModal,
     selectedTableModal,
     showDeviceLimitModal,
+    showInactivityModal,
   ]);
 
   // MAX 3 DEVICES SESSION LOCK + AUTO LOGOUT ON BROWSER CLOSE
@@ -221,13 +275,56 @@ export default function DashboardPage() {
     };
   }, [session?.restaurantId]);
 
+  // 1-HOUR INACTIVITY AUTO LOGOUT (60 Minutes)
+  useEffect(() => {
+    if (!session?.restaurantId || session.role !== 'owner') return;
+
+    const INACTIVITY_LIMIT_MS = 60 * 60 * 1000; // 1 Hour
+    let inactivityTimer: ReturnType<typeof setTimeout>;
+
+    const triggerInactivityLogout = async () => {
+      await removeCurrentDevice(session.restaurantId);
+      localStorage.removeItem('restro_session');
+      setShowInactivityModal(true);
+    };
+
+    const resetInactivityTimer = () => {
+      clearTimeout(inactivityTimer);
+      inactivityTimer = setTimeout(triggerInactivityLogout, INACTIVITY_LIMIT_MS);
+    };
+
+    const activityEvents = [
+      'mousemove',
+      'mousedown',
+      'keydown',
+      'touchstart',
+      'scroll',
+      'click',
+    ];
+
+    activityEvents.forEach((event) =>
+      window.addEventListener(event, resetInactivityTimer, { passive: true })
+    );
+
+    resetInactivityTimer();
+
+    return () => {
+      clearTimeout(inactivityTimer);
+      activityEvents.forEach((event) =>
+        window.removeEventListener(event, resetInactivityTimer)
+      );
+    };
+  }, [session?.restaurantId, session?.role]);
+
   const fetchDashboardData = useCallback(async () => {
     if (!session?.restaurantId) return;
 
     const [{ data: restData }, { data: ordersData }] = await Promise.all([
       supabase
         .from('restaurants')
-        .select('name, city, total_tables, subscription_status, selected_plan, trial_ends_at')
+        .select(
+          'name, city, total_tables, subscription_status, selected_plan, trial_ends_at, razorpay_key_id, razorpay_key_secret, upi_id, bank_account_name'
+        )
         .eq('id', session.restaurantId)
         .single(),
       supabase
@@ -243,6 +340,14 @@ export default function DashboardPage() {
       if (restData.total_tables) {
         setActualTablesCount(Number(restData.total_tables));
       }
+
+      setOwnerRzpKeyId(restData.razorpay_key_id || '');
+      setOwnerRzpKeySecret(restData.razorpay_key_secret || '');
+      setOwnerUpiId(restData.upi_id || '');
+      setOwnerBankName(restData.bank_account_name || '');
+      setIsPaymentConfigured(
+        Boolean(restData.razorpay_key_id && restData.razorpay_key_secret)
+      );
 
       const status = restData.subscription_status || 'free_trial';
       const selectedPlan = restData.selected_plan || 'Yearly (₹5,499)';
@@ -357,10 +462,145 @@ export default function DashboardPage() {
     fetchDashboardData();
   };
 
-  const handleWhatsAppUpgrade = (planName: string, price: string) => {
+  const loadRazorpayScript = (): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if ((window as unknown as { Razorpay?: unknown }).Razorpay) {
+        resolve(true);
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
+  const handleRazorpayPlanUpgrade = async (plan: (typeof UPGRADE_PLANS)[number]) => {
+    if (!session) return;
+    setUpgradeErrorMsg(null);
+    setUpgradingPlanId(plan.id);
+
+    try {
+      const loaded = await loadRazorpayScript();
+      if (!loaded) {
+        setUpgradeErrorMsg('Payment gateway load nahi ho paya. Internet check karein.');
+        setUpgradingPlanId(null);
+        return;
+      }
+
+      const res = await fetch('/api/razorpay/create-subscription-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: plan.amount,
+          planId: plan.id,
+          planName: plan.name,
+          restaurantId: session.restaurantId,
+          restaurantName: session.restaurantName,
+        }),
+      });
+
+      const orderData = await res.json();
+      if (!res.ok || !orderData.orderId) {
+        setUpgradeErrorMsg(orderData.error || 'Payment start karne mein error aaya.');
+        setUpgradingPlanId(null);
+        return;
+      }
+
+      setShowUpgradeModal(false);
+
+      const options = {
+        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+        amount: orderData.amount,
+        currency: orderData.currency,
+        name: 'RestroSync POS',
+        description: `${plan.name} (${plan.price}) • ${session.restaurantName}`,
+        order_id: orderData.orderId,
+        theme: {
+          color: '#ea580c',
+        },
+        handler: async function () {
+          const newExpiry = new Date(
+            Date.now() + plan.durationDays * 24 * 60 * 60 * 1000
+          ).toISOString();
+
+          await supabase
+            .from('restaurants')
+            .update({
+              subscription_status: 'active',
+              plan_type: plan.id,
+              selected_plan: `${plan.name} (${plan.price})`,
+              trial_ends_at: newExpiry,
+            })
+            .eq('id', session.restaurantId);
+
+          setUpgradingPlanId(null);
+          setUpgradeSuccessBanner(
+            `${plan.name} (${plan.price}) successfully activate ho gaya hai!`
+          );
+          fetchDashboardData();
+          setTimeout(() => setUpgradeSuccessBanner(null), 7000);
+        },
+        modal: {
+          ondismiss: function () {
+            setUpgradingPlanId(null);
+          },
+        },
+      };
+
+      const RazorpayConstructor = (
+        window as unknown as { Razorpay: new (opts: unknown) => { open: () => void } }
+      ).Razorpay;
+      const rzp = new RazorpayConstructor(options);
+      rzp.open();
+    } catch {
+      setUpgradeErrorMsg('Payment process mein dikkat aayi. Dobara try karein.');
+      setUpgradingPlanId(null);
+    }
+  };
+
+  const handleSavePaymentSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!session?.restaurantId) return;
+
+    setSavingPaymentSettings(true);
+    setPaymentSettingsMsg(null);
+
+    const cleanKeyId = ownerRzpKeyId.trim();
+    const cleanSecret = ownerRzpKeySecret.trim();
+
+    const { error } = await supabase
+      .from('restaurants')
+      .update({
+        razorpay_key_id: cleanKeyId || null,
+        razorpay_key_secret: cleanSecret || null,
+        upi_id: ownerUpiId.trim() || null,
+        bank_account_name: ownerBankName.trim() || null,
+      })
+      .eq('id', session.restaurantId);
+
+    setSavingPaymentSettings(false);
+
+    if (error) {
+      setPaymentSettingsMsg('Save karne mein error aaya. Dobara try karein.');
+      return;
+    }
+
+    setIsPaymentConfigured(Boolean(cleanKeyId && cleanSecret));
+    setPaymentSettingsMsg(
+      'Payment settings save ho gayi hain! Ab table bills seedha aapke account mein aayenge.'
+    );
+    setTimeout(() => {
+      setPaymentSettingsMsg(null);
+      setShowPaymentSettingsModal(false);
+    }, 1800);
+  };
+
+  const handleWhatsAppSupport = () => {
     if (!session) return;
     const msg = encodeURIComponent(
-      `Hi RestroSync! Mujhe apna POS plan activate karna hai:\n\n• Restaurant: ${session.restaurantName} (${session.city})\n• Selected Plan: ${planName} - ${price}\n• ID: ${session.restaurantId}\n\nPlease payment link / QR share karein.`
+      `Hi RestroSync! Mujhe plan activation mein help chahiye:\n• Restaurant: ${session.restaurantName} (${session.city})\n• ID: ${session.restaurantId}`
     );
     window.open(`https://wa.me/${ADMIN_WHATSAPP}?text=${msg}`, '_blank');
   };
@@ -384,7 +624,6 @@ export default function DashboardPage() {
   );
   const todayRevenue = todayCompleted.reduce((sum, o) => sum + Number(o.total_amount), 0);
 
-  // Search by Invoice No, Bill No, Razorpay Payment ID, Customer Name or Mobile
   const cleanSearch = billSearchQuery.trim().toLowerCase();
 
   const filteredSalesOrders = (cleanSearch ? orders : completedOrders).filter((ord) => {
@@ -531,6 +770,22 @@ export default function DashboardPage() {
                   <BookOpen className="w-4 h-4 text-blue-600" />
                   <span>Manage Menu</span>
                 </Link>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPaymentSettingsMsg(null);
+                    setShowPaymentSettingsModal(true);
+                  }}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition ${
+                    isPaymentConfigured
+                      ? 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
+                      : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300'
+                  }`}
+                >
+                  <KeyRound className="w-4 h-4 text-purple-600" />
+                  <span>Payment Setup</span>
+                </button>
               </>
             )}
 
@@ -546,6 +801,14 @@ export default function DashboardPage() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 space-y-6">
+        {/* PLAN ACTIVATION SUCCESS BANNER */}
+        {upgradeSuccessBanner && (
+          <div className="bg-emerald-600 text-white p-4 rounded-2xl shadow-md flex items-center gap-2.5 text-xs sm:text-sm font-extrabold">
+            <CheckCircle2 className="w-5 h-5 shrink-0" />
+            <span>{upgradeSuccessBanner}</span>
+          </div>
+        )}
+
         {/* OWNER SUBSCRIPTION / 14-DAY FREE TRIAL BANNER */}
         {isOwner && subInfo.status !== 'active' && (
           <section
@@ -582,19 +845,52 @@ export default function DashboardPage() {
                     subInfo.isExpired ? 'text-red-700' : 'text-slate-300'
                   }`}
                 >
-                  Chosen Plan: <strong>{subInfo.selectedPlan}</strong> • Bina kisi rukawat ke
-                  POS chalane ke liye plan activate karein.
+                  Chosen Plan: <strong>{subInfo.selectedPlan}</strong> • Instant online
+                  payment karke plan turant activate karein.
                 </p>
               </div>
             </div>
 
             <button
               type="button"
-              onClick={() => setShowUpgradeModal(true)}
+              onClick={() => {
+                setUpgradeErrorMsg(null);
+                setShowUpgradeModal(true);
+              }}
               className="bg-orange-600 hover:bg-orange-700 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center gap-1.5"
             >
               <Crown className="w-3.5 h-3.5" />
               <span>Upgrade / Activate Plan</span>
+            </button>
+          </section>
+        )}
+
+        {/* OWNER PAYMENT KEYS NOT CONFIGURED ALERT */}
+        {isOwner && !isPaymentConfigured && (
+          <section className="bg-amber-50 border border-amber-300 text-amber-950 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-amber-200/70 text-amber-800">
+                <KeyRound className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-xs sm:text-sm font-extrabold">
+                  Apna Payment Account Connect Karein (Table QR Payments Ke Liye)
+                </p>
+                <p className="text-[11px] text-amber-800 mt-0.5">
+                  Customers ke khane ka paisa seedha aapke bank mein aane ke liye apni Razorpay Key ID aur Secret add karein.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setPaymentSettingsMsg(null);
+                setShowPaymentSettingsModal(true);
+              }}
+              className="bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl transition"
+            >
+              Setup Payment Keys &rarr;
             </button>
           </section>
         )}
@@ -978,7 +1274,7 @@ export default function DashboardPage() {
         )}
       </main>
 
-      {/* OWNER PLAN UPGRADE / ACTIVATION MODAL */}
+      {/* OWNER PLAN UPGRADE / RAZORPAY ACTIVATION MODAL */}
       {isOwner && showUpgradeModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl max-h-[85vh] overflow-y-auto overscroll-contain border border-slate-200">
@@ -988,7 +1284,7 @@ export default function DashboardPage() {
                   <Crown className="w-5 h-5 text-orange-600" /> Activate RestroSync Plan
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Apna preferred plan chunein aur WhatsApp par instant activation link payein
+                  Online payment karte hi aapka plan turant activate ho jayega
                 </p>
               </div>
               <button
@@ -999,6 +1295,12 @@ export default function DashboardPage() {
                 <X className="w-5 h-5" />
               </button>
             </div>
+
+            {upgradeErrorMsg && (
+              <div className="mt-3 bg-red-50 border border-red-200 text-red-700 px-3.5 py-2.5 rounded-xl text-xs font-bold">
+                {upgradeErrorMsg}
+              </div>
+            )}
 
             <div className="py-4 space-y-2.5">
               {UPGRADE_PLANS.map((plan) => {
@@ -1026,16 +1328,125 @@ export default function DashboardPage() {
 
                     <button
                       type="button"
-                      onClick={() => handleWhatsAppUpgrade(plan.name, plan.price)}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs px-3.5 py-2.5 rounded-xl flex items-center gap-1.5 shadow-sm transition shrink-0"
+                      disabled={upgradingPlanId === plan.id}
+                      onClick={() => handleRazorpayPlanUpgrade(plan)}
+                      className="bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 shadow-sm transition shrink-0"
                     >
-                      <MessageCircle className="w-4 h-4" />
-                      <span>Activate</span>
+                      <Crown className="w-4 h-4" />
+                      <span>
+                        {upgradingPlanId === plan.id ? 'Opening...' : 'Pay & Activate'}
+                      </span>
                     </button>
                   </div>
                 );
               })}
             </div>
+
+            <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+              <span>Secured by Razorpay • Instant Activation</span>
+              <button
+                type="button"
+                onClick={handleWhatsAppSupport}
+                className="text-emerald-700 font-extrabold hover:underline flex items-center gap-1"
+              >
+                <MessageCircle className="w-3.5 h-3.5" /> Need Help?
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* OWNER PAYMENT GATEWAY (BYOK RAZORPAY) SETTINGS MODAL */}
+      {isOwner && showPaymentSettingsModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3.5 border-b border-slate-200">
+              <div>
+                <h3 className="text-base sm:text-lg font-extrabold text-slate-900 flex items-center gap-2">
+                  <KeyRound className="w-5 h-5 text-purple-600" /> Restaurant Payment Setup
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Table QR food payments seedha aapke Razorpay account mein jayenge
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPaymentSettingsModal(false)}
+                className="p-2 rounded-full hover:bg-slate-100 text-slate-500"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSavePaymentSettings} className="pt-4 space-y-3.5">
+              <div>
+                <label className="block text-xs font-extrabold text-slate-700 mb-1">
+                  Account Holder / Business Name
+                </label>
+                <input
+                  type="text"
+                  value={ownerBankName}
+                  onChange={(e) => setOwnerBankName(e.target.value)}
+                  placeholder="e.g. Sharma Family Restaurant"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 focus:bg-white border border-slate-300 focus:border-orange-500 rounded-xl text-xs font-semibold outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-extrabold text-slate-700 mb-1">
+                  Merchant UPI ID (Optional Reference)
+                </label>
+                <input
+                  type="text"
+                  value={ownerUpiId}
+                  onChange={(e) => setOwnerUpiId(e.target.value)}
+                  placeholder="e.g. restaurant@okicici"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 focus:bg-white border border-slate-300 focus:border-orange-500 rounded-xl text-xs font-semibold outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-extrabold text-slate-700 mb-1">
+                  Razorpay Key ID *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={ownerRzpKeyId}
+                  onChange={(e) => setOwnerRzpKeyId(e.target.value)}
+                  placeholder="rzp_live_xxxxxxxxxxxxxx"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 focus:bg-white border border-slate-300 focus:border-orange-500 rounded-xl text-xs font-mono font-semibold outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-extrabold text-slate-700 mb-1">
+                  Razorpay Key Secret *
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={ownerRzpKeySecret}
+                  onChange={(e) => setOwnerRzpKeySecret(e.target.value)}
+                  placeholder="••••••••••••••••••••••••"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 focus:bg-white border border-slate-300 focus:border-orange-500 rounded-xl text-xs font-mono font-semibold outline-none"
+                />
+              </div>
+
+              {paymentSettingsMsg && (
+                <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-3.5 py-2.5 rounded-xl text-xs font-bold">
+                  {paymentSettingsMsg}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={savingPaymentSettings}
+                className="w-full bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white font-extrabold py-3 rounded-xl text-xs shadow-sm transition"
+              >
+                {savingPaymentSettings ? 'Saving Keys...' : 'Save Payment Settings ✓'}
+              </button>
+            </form>
           </div>
         </div>
       )}
@@ -1062,7 +1473,6 @@ export default function DashboardPage() {
               </button>
             </div>
 
-            {/* Search Input for Bill / Invoice / Payment ID / Mobile */}
             <div className="pt-3 shrink-0">
               <div className="relative">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -1518,6 +1928,34 @@ export default function DashboardPage() {
               className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-3 rounded-xl text-xs shadow-sm transition"
             >
               OK, Back to Home &rarr;
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 1-HOUR INACTIVITY AUTO-LOGOUT DIALOG */}
+      {showInactivityModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl text-center space-y-4 border border-slate-200">
+            <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center mx-auto">
+              <Clock className="w-6 h-6" />
+            </div>
+
+            <div>
+              <h3 className="text-lg font-extrabold text-slate-900">
+                Session Expired (1 Hour Inactive)
+              </h3>
+              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                Security ke liye 1 ghante tak koi activity na hone par aapka Owner Dashboard automatic logout kar diya gaya hai.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => router.push('/')}
+              className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-3 rounded-xl text-xs shadow-sm transition"
+            >
+              Login Again &rarr;
             </button>
           </div>
         </div>
