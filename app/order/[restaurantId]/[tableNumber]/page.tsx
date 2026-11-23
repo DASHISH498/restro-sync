@@ -588,12 +588,13 @@ function CustomerOrderContent() {
 
   const merchantUpiId = (restaurant.upi_id || '').trim();
   const merchantDisplayName = (restaurant.bank_account_name || restaurant.name).trim();
+  const txnRefId = `TBL${tableNumber}-${Date.now()}`;
   const upiDeepLink = merchantUpiId
     ? `upi://pay?pa=${encodeURIComponent(merchantUpiId)}&pn=${encodeURIComponent(
         merchantDisplayName
-      )}&am=${totalCartPrice.toFixed(2)}&cu=INR&tn=${encodeURIComponent(
-        `Table ${tableNumber} Bill`
-      )}`
+      )}&tr=${encodeURIComponent(txnRefId)}&am=${totalCartPrice.toFixed(
+        2
+      )}&cu=INR&tn=${encodeURIComponent(`Table ${tableNumber} Bill`)}`
     : '';
   const dynamicQrImageUrl = upiDeepLink
     ? `https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=8&data=${encodeURIComponent(
