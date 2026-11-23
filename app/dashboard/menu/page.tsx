@@ -239,9 +239,9 @@ export default function MenuManagerPage() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 pt-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column: Add New Dish Form */}
-        <section className="bg-white border border-slate-200 rounded-2xl p-5 h-fit shadow-sm">
+      <main className="max-w-7xl mx-auto px-4 pt-6 grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+        {/* Left Column: Add New Dish Form (Sticky on Desktop) */}
+        <section className="bg-white border border-slate-200 rounded-2xl p-5 h-fit shadow-sm lg:sticky lg:top-[76px]">
           <h2 className="text-base font-extrabold text-slate-900 mb-4 flex items-center gap-2">
             <Plus className="w-4 h-4 text-orange-600" /> Add New Dish
           </h2>
@@ -345,17 +345,19 @@ export default function MenuManagerPage() {
           </form>
         </section>
 
-        {/* Right Column: Existing Menu Items List */}
+        {/* Right Column: Sticky Search Bar + Existing Menu Items List */}
         <section className="lg:col-span-2 space-y-4">
-          <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search dishes by name or category..."
-              className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:border-orange-500"
-            />
+          <div className="lg:sticky lg:top-[76px] lg:z-20 bg-slate-50/95 backdrop-blur-sm py-1">
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search dishes by name or category..."
+                className="w-full pl-10 pr-4 py-2.5 border border-slate-200 bg-white rounded-xl text-sm shadow-xs outline-none focus:border-orange-500"
+              />
+            </div>
           </div>
 
           {filteredItems.length === 0 ? (
