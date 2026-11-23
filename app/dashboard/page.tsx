@@ -666,20 +666,23 @@ export default function DashboardPage() {
                 Live Floor & Table Status
               </h2>
               <p className="text-xs text-slate-500">
-                Free table par click karke direct order lein; Active table par click karke running
-                items ya payment status dekhein.
+                Free table par click karke order lein; Guest khana khaakar uth jaye tab Occupied
+                table par click karke Free karein.
               </p>
             </div>
 
-            <div className="flex items-center gap-3 text-[11px] font-bold">
+            <div className="flex flex-wrap items-center gap-3 text-[11px] font-bold">
               <span className="flex items-center gap-1.5 text-slate-500">
                 <span className="w-2.5 h-2.5 rounded-full bg-slate-200"></span> Free
               </span>
               <span className="flex items-center gap-1.5 text-amber-700">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span> Active / Served
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span> Cooking
               </span>
               <span className="flex items-center gap-1.5 text-emerald-700">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Ready
+              </span>
+              <span className="flex items-center gap-1.5 text-blue-700">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span> Dining
               </span>
             </div>
           </div>
@@ -689,6 +692,8 @@ export default function DashboardPage() {
               const tOrders = activeOrders.filter((o) => o.table_number === tableNum);
               const isOccupied = tOrders.length > 0;
               const hasReady = tOrders.some((o) => o.status === 'ready');
+              const isAllServed =
+                isOccupied && tOrders.every((o) => o.status === 'served');
               const tableTotal = tOrders.reduce((s, o) => s + Number(o.total_amount), 0);
               const totalDishes = tOrders.reduce(
                 (s, o) =>
@@ -712,6 +717,8 @@ export default function DashboardPage() {
                   className={`p-4 rounded-2xl border-2 text-left transition flex flex-col justify-between min-h-[120px] cursor-pointer hover:shadow-md ${
                     hasReady
                       ? 'bg-emerald-50/80 border-emerald-500 shadow-sm'
+                      : isAllServed
+                      ? 'bg-blue-50/70 border-blue-400 shadow-sm'
                       : isOccupied
                       ? 'bg-amber-50/70 border-amber-400 shadow-sm'
                       : 'bg-slate-50 border-slate-200/80 hover:border-orange-300'
@@ -725,19 +732,29 @@ export default function DashboardPage() {
                       className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
                         hasReady
                           ? 'bg-emerald-600 text-white'
+                          : isAllServed
+                          ? 'bg-blue-600 text-white'
                           : isOccupied
                           ? 'bg-amber-500 text-white'
                           : 'bg-slate-200 text-slate-600'
                       }`}
                     >
-                      {hasReady ? 'Ready' : isOccupied ? 'Active' : 'Free'}
+                      {hasReady
+                        ? 'Ready'
+                        : isAllServed
+                        ? 'Dining'
+                        : isOccupied
+                        ? 'Cooking'
+                        : 'Free'}
                     </span>
                   </div>
 
                   {isOccupied ? (
                     <div className="mt-3">
                       <p className="text-xs font-bold text-slate-700">
-                        {totalDishes} Dish{totalDishes > 1 ? 'es' : ''} Running
+                        {isAllServed
+                          ? 'Guest Dining • Clear on Exit'
+                          : `${totalDishes} Dish${totalDishes > 1 ? 'es' : ''} Running`}
                       </p>
                       <div className="flex items-center justify-between gap-1 mt-1">
                         <p className="text-base font-extrabold text-slate-900">
@@ -820,9 +837,9 @@ export default function DashboardPage() {
                           ord.status === 'ready'
                             ? 'bg-emerald-100 text-emerald-700'
                             : ord.status === 'served'
-                            ? 'bg-purple-100 text-purple-700'
-                            : ord.status === 'preparing'
                             ? 'bg-blue-100 text-blue-700'
+                            : ord.status === 'preparing'
+                            ? 'bg-purple-100 text-purple-700'
                             : 'bg-amber-100 text-amber-800'
                         }`}
                       >
@@ -1182,9 +1199,9 @@ export default function DashboardPage() {
                               ord.status === 'ready'
                                 ? 'bg-emerald-100 text-emerald-700'
                                 : ord.status === 'served'
-                                ? 'bg-purple-100 text-purple-700'
-                                : ord.status === 'preparing'
                                 ? 'bg-blue-100 text-blue-700'
+                                : ord.status === 'preparing'
+                                ? 'bg-purple-100 text-purple-700'
                                 : 'bg-amber-100 text-amber-800'
                             }`}
                           >
@@ -1262,16 +1279,16 @@ export default function DashboardPage() {
                 {isModalTableFullyPaid ? (
                   <div className="space-y-2.5">
                     <div className="bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-xl p-2.5 text-center text-xs font-extrabold">
-                      ✓ Payment Already Received Online (UPI)
+                      ✓ Payment Received Online • Clear table only after guest leaves
                     </div>
                     <button
                       disabled={settling}
                       onClick={() => handleSettleTable(selectedTableModal, 'upi')}
-                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-3 rounded-xl text-xs transition"
+                      className="w-full bg-blue-600 hover:bg-blue-700 text-white font-extrabold py-3 rounded-xl text-xs transition"
                     >
                       {settling
-                        ? 'Closing Table...'
-                        : 'Close & Free Table (Mark Completed) ✓'}
+                        ? 'Clearing Table...'
+                        : 'Guest Left • Free Table ✓'}
                     </button>
                   </div>
                 ) : (
