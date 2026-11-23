@@ -20,6 +20,7 @@ import {
   BookOpen,
   Flame,
   MapPin,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface RestaurantInfo {
@@ -46,8 +47,10 @@ interface CartItem {
 
 interface ActiveOrder {
   id: string;
-  status: 'pending' | 'preparing' | 'ready' | 'completed';
+  status: 'pending' | 'preparing' | 'ready' | 'served' | 'completed';
   total_amount: number;
+  payment_status?: string;
+  payment_method?: string;
   created_at: string;
   order_items: {
     id: string;
@@ -119,7 +122,9 @@ function CustomerOrderContent() {
 
     const { data } = await supabase
       .from('orders')
-      .select('id, status, total_amount, created_at, order_items(id, item_name, quantity, price)')
+      .select(
+        'id, status, total_amount, payment_status, payment_method, created_at, order_items(id, item_name, quantity, price)'
+      )
       .eq('restaurant_id', restaurantId)
       .eq('table_number', tableNumber)
       .neq('status', 'completed')
@@ -201,11 +206,29 @@ function CustomerOrderContent() {
     });
   };
 
-  const handlePlaceOrder = async () => {
+  // Load Razorpay Checkout Script Dynamically
+  const loadRazorpayScript = (): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if ((window as unknown as { Razorpay?: unknown }).Razorpay) {
+        resolve(true);
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
+  // Insert Order into Supabase (After Payment OR Staff Manual Order)
+  const saveOrderToDatabase = async (
+    paymentStatus: 'paid' | 'unpaid',
+    paymentMethod: string,
+    razorpayPaymentId?: string
+  ) => {
     const cartValues = Object.values(cart);
     if (cartValues.length === 0 || !restaurantId) return;
-
-    setPlacingOrder(true);
 
     const totalAmount = cartValues.reduce(
       (sum, entry) => sum + Number(entry.menuItem.price) * entry.quantity,
@@ -220,7 +243,9 @@ function CustomerOrderContent() {
           table_number: tableNumber,
           status: 'pending',
           total_amount: totalAmount,
-          payment_method: 'unpaid',
+          payment_method: paymentMethod,
+          payment_status: paymentStatus,
+          razorpay_payment_id: razorpayPaymentId || null,
         },
       ])
       .select()
@@ -253,6 +278,8 @@ function CustomerOrderContent() {
         id: newOrder.id,
         status: 'pending',
         total_amount: totalAmount,
+        payment_status: paymentStatus,
+        payment_method: paymentMethod,
         created_at: newOrder.created_at,
         order_items: (insertedItems || []).map((i) => ({
           id: i.id,
@@ -266,8 +293,86 @@ function CustomerOrderContent() {
       setCart({});
       setShowCartModal(false);
       setOrderSuccessToast(true);
-      setTimeout(() => setOrderSuccessToast(false), 4000);
+      setTimeout(() => setOrderSuccessToast(false), 5000);
     }
+  };
+
+  // Customer QR Prepaid Checkout (Razorpay First -> Then Order Place)
+  const handlePrepaidRazorpayOrder = async () => {
+    const cartValues = Object.values(cart);
+    if (cartValues.length === 0 || !restaurantId || !restaurant) return;
+
+    const totalAmount = cartValues.reduce(
+      (sum, entry) => sum + Number(entry.menuItem.price) * entry.quantity,
+      0
+    );
+
+    setPlacingOrder(true);
+
+    try {
+      const loaded = await loadRazorpayScript();
+      if (!loaded) {
+        alert('Payment gateway load nahi ho paya. Internet check karein.');
+        setPlacingOrder(false);
+        return;
+      }
+
+      const res = await fetch('/api/razorpay/create-table-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: totalAmount,
+          restaurantId,
+          tableNumber,
+        }),
+      });
+
+      const orderData = await res.json();
+      if (!res.ok || !orderData.orderId) {
+        alert(orderData.error || 'Payment start karne mein error aaya.');
+        setPlacingOrder(false);
+        return;
+      }
+
+      // Close mobile drawer so Razorpay modal stays cleanly interactive
+      setShowCartModal(false);
+
+      const options = {
+        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+        amount: orderData.amount,
+        currency: orderData.currency,
+        name: restaurant.name,
+        description: `Table ${tableNumber} Food Order`,
+        order_id: orderData.orderId,
+        theme: {
+          color: '#ea580c',
+        },
+        handler: async function (response: { razorpay_payment_id: string }) {
+          // Payment successful! Ab order kitchen & dashboard par bhejein
+          await saveOrderToDatabase('paid', 'upi', response.razorpay_payment_id);
+        },
+        modal: {
+          ondismiss: function () {
+            setPlacingOrder(false);
+          },
+        },
+      };
+
+      const RazorpayConstructor = (
+        window as unknown as { Razorpay: new (opts: unknown) => { open: () => void } }
+      ).Razorpay;
+      const rzp = new RazorpayConstructor(options);
+      rzp.open();
+    } catch {
+      alert('Payment process mein dikkat aayi. Dobara try karein.');
+      setPlacingOrder(false);
+    }
+  };
+
+  // Staff/Owner Direct Order (Pay Later at Counter)
+  const handleDirectStaffOrder = async () => {
+    setPlacingOrder(true);
+    await saveOrderToDatabase('unpaid', 'unpaid');
   };
 
   if (loading) {
@@ -310,9 +415,8 @@ function CustomerOrderContent() {
       <header className="bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-30">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
           <Link
-            href="/dashboard"
+            href={hasStaffSession ? '/dashboard' : '#'}
             className="flex items-center gap-2.5 text-left group cursor-pointer"
-            title="Go to Dashboard"
           >
             <div className="bg-gradient-to-br from-orange-500 to-orange-600 text-white p-2.5 rounded-xl shadow-sm group-hover:scale-105 transition">
               <UtensilsCrossed className="w-5 h-5" />
@@ -392,7 +496,7 @@ function CustomerOrderContent() {
         )}
       </header>
 
-      {/* Main 2-Column Wide Layout (Left: Menu Grid | Right: Live Order & Cart Sidebar) */}
+      {/* Main 2-Column Wide Layout */}
       <main className="max-w-6xl mx-auto px-4 sm:px-6 pt-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* LEFT COLUMN (8 Cols on Desktop) */}
         <div className="lg:col-span-8 space-y-5">
@@ -406,7 +510,7 @@ function CustomerOrderContent() {
                 Welcome to {restaurant.name}
               </h2>
               <p className="text-xs text-slate-300 mt-1">
-                Apni pasandida dishes select karein aur seedha kitchen mein order bhejein.
+                Apni pasandida dishes select karein, instant payment karein aur seedha kitchen mein order bhejein.
               </p>
             </div>
             <div className="hidden sm:flex w-14 h-14 rounded-2xl bg-orange-500/20 text-orange-400 items-center justify-center shrink-0">
@@ -419,7 +523,7 @@ function CustomerOrderContent() {
             <div className="bg-emerald-600 text-white p-4 rounded-2xl shadow-lg flex items-center gap-3">
               <CheckCircle2 className="w-6 h-6 shrink-0" />
               <div>
-                <p className="font-bold text-sm">Order Sent to Kitchen!</p>
+                <p className="font-bold text-sm">Payment Done & Order Sent to Kitchen!</p>
                 <p className="text-xs text-emerald-100">
                   Chef ne aapka order receive kar liya hai. Live status tracker dekhein.
                 </p>
@@ -560,7 +664,13 @@ function CustomerOrderContent() {
 
               <div className="space-y-3">
                 {tableOrders.map((ord) => {
-                  const step = ord.status === 'ready' ? 3 : ord.status === 'preparing' ? 2 : 1;
+                  const step =
+                    ord.status === 'ready' || ord.status === 'served'
+                      ? 3
+                      : ord.status === 'preparing'
+                      ? 2
+                      : 1;
+                  const isPaid = ord.payment_status === 'paid';
 
                   return (
                     <div
@@ -570,21 +680,28 @@ function CustomerOrderContent() {
                       <div className="flex items-start justify-between gap-2">
                         <div className="text-xs text-slate-700 font-medium">
                           {ord.order_items?.map((i) => `${i.quantity}× ${i.item_name}`).join(', ')}
-                          <p className="font-extrabold text-slate-900 text-sm mt-1">
-                            ₹{ord.total_amount}
-                          </p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <p className="font-extrabold text-slate-900 text-sm">
+                              ₹{ord.total_amount}
+                            </p>
+                            {isPaid && (
+                              <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-emerald-100 text-emerald-700">
+                                Paid Online ✓
+                              </span>
+                            )}
+                          </div>
                         </div>
 
                         <span
                           className={`px-2.5 py-1 rounded-full text-[11px] font-extrabold uppercase flex items-center gap-1 shrink-0 ${
-                            ord.status === 'ready'
+                            ord.status === 'ready' || ord.status === 'served'
                               ? 'bg-emerald-100 text-emerald-700'
                               : ord.status === 'preparing'
                               ? 'bg-blue-100 text-blue-700'
                               : 'bg-amber-100 text-amber-800'
                           }`}
                         >
-                          {ord.status === 'ready' ? (
+                          {ord.status === 'ready' || ord.status === 'served' ? (
                             <>
                               <CheckCircle2 className="w-3 h-3" /> Ready
                             </>
@@ -699,21 +816,36 @@ function CustomerOrderContent() {
                   ))}
                 </div>
 
-                <div className="pt-3 border-t border-slate-200">
-                  <div className="flex items-center justify-between font-extrabold text-slate-900 text-sm mb-3">
+                <div className="pt-3 border-t border-slate-200 space-y-2.5">
+                  <div className="flex items-center justify-between font-extrabold text-slate-900 text-sm">
                     <span>Total Payable</span>
                     <span>₹{totalCartPrice}</span>
                   </div>
 
+                  {/* Primary: Prepaid Razorpay Payment Button */}
                   <button
-                    onClick={handlePlaceOrder}
+                    onClick={handlePrepaidRazorpayOrder}
                     disabled={placingOrder}
-                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-3 rounded-xl text-sm shadow-md transition disabled:opacity-50"
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-3 rounded-xl text-sm shadow-md transition disabled:opacity-50 flex items-center justify-center gap-1.5"
                   >
-                    {placingOrder
-                      ? 'Sending to Kitchen...'
-                      : `Confirm & Send Order (₹${totalCartPrice})`}
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>
+                      {placingOrder
+                        ? 'Opening Payment...'
+                        : `Pay & Place Order (₹${totalCartPrice})`}
+                    </span>
                   </button>
+
+                  {/* Secondary: Staff/Owner Counter Pay-Later Option */}
+                  {hasStaffSession && (
+                    <button
+                      onClick={handleDirectStaffOrder}
+                      disabled={placingOrder}
+                      className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl text-xs transition disabled:opacity-50"
+                    >
+                      Send KOT Only (Pay Later at Counter)
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -741,7 +873,7 @@ function CustomerOrderContent() {
             </div>
 
             <span className="font-extrabold text-sm flex items-center gap-1">
-              View Cart & Order &rarr;
+              Proceed to Pay &rarr;
             </span>
           </button>
         </div>
@@ -810,21 +942,34 @@ function CustomerOrderContent() {
               ))}
             </div>
 
-            <div className="pt-3 border-t border-slate-200">
-              <div className="flex items-center justify-between text-base font-extrabold text-slate-900 mb-3">
+            <div className="pt-3 border-t border-slate-200 space-y-2.5">
+              <div className="flex items-center justify-between text-base font-extrabold text-slate-900">
                 <span>Total Payable</span>
                 <span>₹{totalCartPrice}</span>
               </div>
 
               <button
-                onClick={handlePlaceOrder}
+                onClick={handlePrepaidRazorpayOrder}
                 disabled={placingOrder}
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-3.5 rounded-2xl shadow-lg transition disabled:opacity-50"
+                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-3.5 rounded-2xl shadow-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                {placingOrder
-                  ? 'Sending to Kitchen...'
-                  : `Confirm & Send Order (₹${totalCartPrice})`}
+                <ShieldCheck className="w-4 h-4" />
+                <span>
+                  {placingOrder
+                    ? 'Opening Payment...'
+                    : `Pay & Place Order (₹${totalCartPrice})`}
+                </span>
               </button>
+
+              {hasStaffSession && (
+                <button
+                  onClick={handleDirectStaffOrder}
+                  disabled={placingOrder}
+                  className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl text-xs transition disabled:opacity-50"
+                >
+                  Send KOT Only (Pay Later at Counter)
+                </button>
+              )}
             </div>
           </div>
         </div>

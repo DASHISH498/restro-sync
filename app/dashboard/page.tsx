@@ -57,6 +57,7 @@ interface OrderRecord {
   status: 'pending' | 'preparing' | 'ready' | 'served' | 'completed';
   total_amount: number;
   payment_method: string;
+  payment_status?: string;
   created_at: string;
   order_items: {
     id: string;
@@ -227,7 +228,7 @@ export default function DashboardPage() {
       supabase
         .from('orders')
         .select(
-          'id, table_number, status, total_amount, payment_method, created_at, order_items(id, item_name, quantity, price, notes)'
+          'id, table_number, status, total_amount, payment_method, payment_status, created_at, order_items(id, item_name, quantity, price, notes)'
         )
         .eq('restaurant_id', session.restaurantId)
         .order('created_at', { ascending: false }),
@@ -337,7 +338,7 @@ export default function DashboardPage() {
     if (activeIds.length > 0) {
       await supabase
         .from('orders')
-        .update({ status: 'completed', payment_method: method })
+        .update({ status: 'completed', payment_method: method, payment_status: 'paid' })
         .in('id', activeIds);
     }
 
@@ -433,6 +434,9 @@ export default function DashboardPage() {
     (sum, o) => sum + Number(o.total_amount),
     0
   );
+  const isModalTableFullyPaid =
+    modalTableOrders.length > 0 &&
+    modalTableOrders.every((o) => o.payment_status === 'paid');
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 pb-16">
@@ -663,7 +667,7 @@ export default function DashboardPage() {
               </h2>
               <p className="text-xs text-slate-500">
                 Free table par click karke direct order lein; Active table par click karke running
-                items ya bill dekhein.
+                items ya payment status dekhein.
               </p>
             </div>
 
@@ -691,6 +695,8 @@ export default function DashboardPage() {
                   s + (o.order_items?.reduce((sum, i) => sum + i.quantity, 0) || 0),
                 0
               );
+              const isTableFullyPaid =
+                isOccupied && tOrders.every((o) => o.payment_status === 'paid');
 
               return (
                 <button
@@ -733,9 +739,20 @@ export default function DashboardPage() {
                       <p className="text-xs font-bold text-slate-700">
                         {totalDishes} Dish{totalDishes > 1 ? 'es' : ''} Running
                       </p>
-                      <p className="text-base font-extrabold text-slate-900 mt-0.5">
-                        ₹{tableTotal}
-                      </p>
+                      <div className="flex items-center justify-between gap-1 mt-1">
+                        <p className="text-base font-extrabold text-slate-900">
+                          ₹{tableTotal}
+                        </p>
+                        {isTableFullyPaid ? (
+                          <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-300">
+                            PAID ✓
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-200/80 text-slate-600">
+                            UNPAID
+                          </span>
+                        )}
+                      </div>
                     </div>
                   ) : (
                     <div className="mt-4 flex items-center justify-between text-slate-400">
@@ -767,49 +784,64 @@ export default function DashboardPage() {
             </p>
           ) : (
             <div className="divide-y divide-slate-100">
-              {activeOrders.map((ord) => (
-                <div
-                  key={ord.id}
-                  className="py-3 flex items-start justify-between gap-3 text-xs"
-                >
-                  <div className="min-w-0 flex-1">
-                    <span className="inline-block font-extrabold text-slate-900 bg-slate-100 px-2 py-0.5 rounded-md mb-1">
-                      Table {ord.table_number}
-                    </span>
-                    <p className="text-slate-700 font-medium leading-relaxed break-words">
-                      {ord.order_items
-                        ?.map((i) => `${i.quantity}× ${i.item_name}`)
-                        .join(', ')}
-                    </p>
-                  </div>
+              {activeOrders.map((ord) => {
+                const isPaid = ord.payment_status === 'paid';
 
-                  <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1.5 shrink-0">
-                    <span
-                      className={`text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full whitespace-nowrap ${
-                        ord.status === 'ready'
-                          ? 'bg-emerald-100 text-emerald-700'
-                          : ord.status === 'served'
-                          ? 'bg-purple-100 text-purple-700'
-                          : ord.status === 'preparing'
-                          ? 'bg-blue-100 text-blue-700'
-                          : 'bg-amber-100 text-amber-800'
-                      }`}
-                    >
-                      {ord.status}
-                    </span>
+                return (
+                  <div
+                    key={ord.id}
+                    className="py-3 flex items-start justify-between gap-3 text-xs"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                        <span className="inline-block font-extrabold text-slate-900 bg-slate-100 px-2 py-0.5 rounded-md">
+                          Table {ord.table_number}
+                        </span>
+                        {isPaid ? (
+                          <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-700 border border-emerald-200">
+                            PAID ONLINE ✓ (₹{ord.total_amount})
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200">
+                            UNPAID • ₹{ord.total_amount}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-slate-700 font-medium leading-relaxed break-words">
+                        {ord.order_items
+                          ?.map((i) => `${i.quantity}× ${i.item_name}`)
+                          .join(', ')}
+                      </p>
+                    </div>
 
-                    {ord.status === 'ready' && (
-                      <button
-                        type="button"
-                        onClick={() => handleMarkServed(ord.id)}
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[11px] px-3 py-1 rounded-lg transition whitespace-nowrap"
+                    <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1.5 shrink-0">
+                      <span
+                        className={`text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full whitespace-nowrap ${
+                          ord.status === 'ready'
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : ord.status === 'served'
+                            ? 'bg-purple-100 text-purple-700'
+                            : ord.status === 'preparing'
+                            ? 'bg-blue-100 text-blue-700'
+                            : 'bg-amber-100 text-amber-800'
+                        }`}
                       >
-                        Mark Served ✓
-                      </button>
-                    )}
+                        {ord.status}
+                      </span>
+
+                      {ord.status === 'ready' && (
+                        <button
+                          type="button"
+                          onClick={() => handleMarkServed(ord.id)}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[11px] px-3 py-1 rounded-lg transition whitespace-nowrap"
+                        >
+                          Mark Served ✓
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </section>
@@ -1135,72 +1167,88 @@ export default function DashboardPage() {
 
             {modalTableOrders.length > 0 && (
               <div className="py-4 space-y-3 overflow-y-auto overscroll-contain flex-1">
-                {modalTableOrders.map((ord) => (
-                  <div
-                    key={ord.id}
-                    className="bg-slate-50 border border-slate-200/80 p-3.5 rounded-2xl space-y-2"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span
-                        className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full flex items-center gap-1 ${
-                          ord.status === 'ready'
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : ord.status === 'served'
-                            ? 'bg-purple-100 text-purple-700'
-                            : ord.status === 'preparing'
-                            ? 'bg-blue-100 text-blue-700'
-                            : 'bg-amber-100 text-amber-800'
-                        }`}
-                      >
-                        {ord.status === 'ready' ? (
-                          <>
-                            <CheckCircle2 className="w-3 h-3" /> Ready
-                          </>
-                        ) : ord.status === 'served' ? (
-                          <>
-                            <CheckCircle2 className="w-3 h-3" /> Served
-                          </>
-                        ) : ord.status === 'preparing' ? (
-                          <>
-                            <ChefHat className="w-3 h-3" /> Cooking
-                          </>
-                        ) : (
-                          <>
-                            <Clock className="w-3 h-3" /> Pending
-                          </>
-                        )}
-                      </span>
+                {modalTableOrders.map((ord) => {
+                  const isPaid = ord.payment_status === 'paid';
 
-                      {ord.status === 'ready' && (
-                        <button
-                          onClick={() => handleMarkServed(ord.id)}
-                          className="text-[11px] font-extrabold bg-emerald-600 text-white px-2.5 py-1 rounded-lg hover:bg-emerald-700 transition"
-                        >
-                          Mark Served ✓
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="space-y-1">
-                      {ord.order_items?.map((item) => (
-                        <div
-                          key={item.id}
-                          className="flex items-center justify-between text-xs text-slate-700"
-                        >
-                          <span>
-                            <strong>{item.quantity}×</strong> {item.item_name}
-                            {item.notes && (
-                              <span className="text-[11px] text-orange-600 ml-1">
-                                ({item.notes})
-                              </span>
+                  return (
+                    <div
+                      key={ord.id}
+                      className="bg-slate-50 border border-slate-200/80 p-3.5 rounded-2xl space-y-2"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span
+                            className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full flex items-center gap-1 ${
+                              ord.status === 'ready'
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : ord.status === 'served'
+                                ? 'bg-purple-100 text-purple-700'
+                                : ord.status === 'preparing'
+                                ? 'bg-blue-100 text-blue-700'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}
+                          >
+                            {ord.status === 'ready' ? (
+                              <>
+                                <CheckCircle2 className="w-3 h-3" /> Ready
+                              </>
+                            ) : ord.status === 'served' ? (
+                              <>
+                                <CheckCircle2 className="w-3 h-3" /> Served
+                              </>
+                            ) : ord.status === 'preparing' ? (
+                              <>
+                                <ChefHat className="w-3 h-3" /> Cooking
+                              </>
+                            ) : (
+                              <>
+                                <Clock className="w-3 h-3" /> Pending
+                              </>
                             )}
                           </span>
-                          <span className="font-bold">₹{item.price * item.quantity}</span>
+
+                          {isPaid ? (
+                            <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
+                              Paid Online ✓
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                              Unpaid
+                            </span>
+                          )}
                         </div>
-                      ))}
+
+                        {ord.status === 'ready' && (
+                          <button
+                            onClick={() => handleMarkServed(ord.id)}
+                            className="text-[11px] font-extrabold bg-emerald-600 text-white px-2.5 py-1 rounded-lg hover:bg-emerald-700 transition shrink-0"
+                          >
+                            Mark Served ✓
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="space-y-1">
+                        {ord.order_items?.map((item) => (
+                          <div
+                            key={item.id}
+                            className="flex items-center justify-between text-xs text-slate-700"
+                          >
+                            <span>
+                              <strong>{item.quantity}×</strong> {item.item_name}
+                              {item.notes && (
+                                <span className="text-[11px] text-orange-600 ml-1">
+                                  ({item.notes})
+                                </span>
+                              )}
+                            </span>
+                            <span className="font-bold">₹{item.price * item.quantity}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 
@@ -1211,22 +1259,39 @@ export default function DashboardPage() {
                   <span>₹{modalTableTotal}</span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2.5">
-                  <button
-                    disabled={settling}
-                    onClick={() => handleSettleTable(selectedTableModal, 'cash')}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-3 rounded-xl text-xs transition"
-                  >
-                    Settle Cash ₹{modalTableTotal}
-                  </button>
-                  <button
-                    disabled={settling}
-                    onClick={() => handleSettleTable(selectedTableModal, 'upi')}
-                    className="bg-slate-900 hover:bg-slate-800 text-white font-extrabold py-3 rounded-xl text-xs transition"
-                  >
-                    Settle UPI ₹{modalTableTotal}
-                  </button>
-                </div>
+                {isModalTableFullyPaid ? (
+                  <div className="space-y-2.5">
+                    <div className="bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-xl p-2.5 text-center text-xs font-extrabold">
+                      ✓ Payment Already Received Online (UPI)
+                    </div>
+                    <button
+                      disabled={settling}
+                      onClick={() => handleSettleTable(selectedTableModal, 'upi')}
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-3 rounded-xl text-xs transition"
+                    >
+                      {settling
+                        ? 'Closing Table...'
+                        : 'Close & Free Table (Mark Completed) ✓'}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <button
+                      disabled={settling}
+                      onClick={() => handleSettleTable(selectedTableModal, 'cash')}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-3 rounded-xl text-xs transition"
+                    >
+                      Settle Cash ₹{modalTableTotal}
+                    </button>
+                    <button
+                      disabled={settling}
+                      onClick={() => handleSettleTable(selectedTableModal, 'upi')}
+                      className="bg-slate-900 hover:bg-slate-800 text-white font-extrabold py-3 rounded-xl text-xs transition"
+                    >
+                      Settle UPI ₹{modalTableTotal}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
