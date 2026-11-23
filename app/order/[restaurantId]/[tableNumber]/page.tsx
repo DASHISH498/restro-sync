@@ -26,12 +26,19 @@ import {
   Printer,
   Receipt,
   AlertCircle,
+  Smartphone,
+  Copy,
+  Check,
+  ExternalLink,
 } from 'lucide-react';
 
 interface RestaurantInfo {
   id: string;
   name: string;
   city: string;
+  upi_id?: string | null;
+  bank_account_name?: string | null;
+  razorpay_key_id?: string | null;
 }
 
 interface MenuItem {
@@ -84,8 +91,8 @@ function getShortBillNumber(orderId: string): string {
 
 function CustomerOrderContent() {
   const params = useParams();
-  const restaurantId = params.restaurantId as string;
-  const tableNumber = Number(params.tableNumber);
+  const restaurantId = params?.restaurantId as string;
+  const tableNumber = Number(params?.tableNumber);
 
   const [restaurant, setRestaurant] = useState<RestaurantInfo | null>(null);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
@@ -107,6 +114,11 @@ function CustomerOrderContent() {
   const [showCartModal, setShowCartModal] = useState(false);
   const [placingOrder, setPlacingOrder] = useState(false);
   const [orderSuccessToast, setOrderSuccessToast] = useState(false);
+
+  // Direct Merchant UPI Payment Modal States
+  const [showUpiPayModal, setShowUpiPayModal] = useState(false);
+  const [upiCopied, setUpiCopied] = useState(false);
+  const [upiUtrInput, setUpiUtrInput] = useState('');
 
   // Printable Digital Receipt Modal
   const [receiptOrder, setReceiptOrder] = useState<ActiveOrder | null>(null);
@@ -133,13 +145,30 @@ function CustomerOrderContent() {
   }, []);
 
   const fetchPageData = useCallback(async () => {
-    if (!restaurantId) return;
+    if (!restaurantId) {
+      setLoading(false);
+      return;
+    }
 
-    const { data: restData } = await supabase
+    let restData: RestaurantInfo | null = null;
+    const { data: fullRest, error: restErr } = await supabase
       .from('restaurants')
-      .select('id, name, city')
+      .select('id, name, city, upi_id, bank_account_name, razorpay_key_id')
       .eq('id', restaurantId)
       .single();
+
+    if (!restErr && fullRest) {
+      restData = fullRest as RestaurantInfo;
+    } else {
+      const { data: basicRest } = await supabase
+        .from('restaurants')
+        .select('id, name, city')
+        .eq('id', restaurantId)
+        .single();
+      if (basicRest) {
+        restData = basicRest as RestaurantInfo;
+      }
+    }
 
     if (restData) {
       setRestaurant(restData);
@@ -161,7 +190,7 @@ function CustomerOrderContent() {
   const fetchTableOrders = useCallback(async () => {
     if (!restaurantId || !tableNumber) return;
 
-    const { data } = await supabase
+    const { data: fullOrders, error: ordErr } = await supabase
       .from('orders')
       .select(
         'id, status, total_amount, payment_status, payment_method, customer_name, customer_phone, invoice_number, razorpay_payment_id, created_at, order_items(id, item_name, quantity, price)'
@@ -171,14 +200,32 @@ function CustomerOrderContent() {
       .neq('status', 'completed')
       .order('created_at', { ascending: false });
 
-    if (data) {
-      setTableOrders(data as ActiveOrder[]);
+    if (!ordErr && fullOrders) {
+      setTableOrders(fullOrders as ActiveOrder[]);
+      return;
+    }
+
+    const { data: basicOrders } = await supabase
+      .from('orders')
+      .select(
+        'id, status, total_amount, created_at, order_items(id, item_name, quantity, price)'
+      )
+      .eq('restaurant_id', restaurantId)
+      .eq('table_number', tableNumber)
+      .neq('status', 'completed')
+      .order('created_at', { ascending: false });
+
+    if (basicOrders) {
+      setTableOrders(basicOrders as ActiveOrder[]);
     }
   }, [restaurantId, tableNumber]);
 
   useEffect(() => {
+    setLoading(true);
     fetchPageData();
     fetchTableOrders();
+
+    if (!restaurantId) return;
 
     const channel = supabase
       .channel(`table-orders-${restaurantId}-${tableNumber}`)
@@ -286,7 +333,7 @@ function CustomerOrderContent() {
   const saveOrderToDatabase = async (
     paymentStatus: 'paid' | 'unpaid',
     paymentMethod: string,
-    razorpayPaymentId?: string
+    paymentReferenceId?: string
   ) => {
     const cartValues = Object.values(cart);
     if (cartValues.length === 0 || !restaurantId) return;
@@ -300,7 +347,9 @@ function CustomerOrderContent() {
     const cleanName = customerName.trim() || 'Walk-in Guest';
     const cleanPhone = customerPhone.replace(/\D/g, '') || null;
 
-    const { data: newOrder, error: orderError } = await supabase
+    let createdOrder = null;
+
+    const { data: fullInserted, error: fullErr } = await supabase
       .from('orders')
       .insert([
         {
@@ -313,20 +362,42 @@ function CustomerOrderContent() {
           customer_name: cleanName,
           customer_phone: cleanPhone,
           invoice_number: invoiceNo,
-          razorpay_payment_id: razorpayPaymentId || null,
+          razorpay_payment_id: paymentReferenceId || null,
         },
       ])
       .select()
       .single();
 
-    if (orderError || !newOrder) {
+    if (!fullErr && fullInserted) {
+      createdOrder = fullInserted;
+    } else {
+      const { data: basicInserted, error: basicErr } = await supabase
+        .from('orders')
+        .insert([
+          {
+            restaurant_id: restaurantId,
+            table_number: tableNumber,
+            status: 'pending',
+            total_amount: totalAmount,
+            payment_method: paymentMethod,
+          },
+        ])
+        .select()
+        .single();
+
+      if (!basicErr && basicInserted) {
+        createdOrder = basicInserted;
+      }
+    }
+
+    if (!createdOrder) {
       setFormError('Order save karne mein error aaya. Dobara try karein.');
       setPlacingOrder(false);
       return;
     }
 
     const orderItemsPayload = cartValues.map((entry) => ({
-      order_id: newOrder.id,
+      order_id: createdOrder.id,
       menu_item_id: entry.menuItem.id,
       item_name: entry.menuItem.name,
       quantity: entry.quantity,
@@ -343,7 +414,7 @@ function CustomerOrderContent() {
 
     if (!itemsError) {
       const instantOrder: ActiveOrder = {
-        id: newOrder.id,
+        id: createdOrder.id,
         status: 'pending',
         total_amount: totalAmount,
         payment_status: paymentStatus,
@@ -351,8 +422,8 @@ function CustomerOrderContent() {
         customer_name: cleanName,
         customer_phone: cleanPhone,
         invoice_number: invoiceNo,
-        razorpay_payment_id: razorpayPaymentId || null,
-        created_at: newOrder.created_at,
+        razorpay_payment_id: paymentReferenceId || null,
+        created_at: createdOrder.created_at,
         order_items: (insertedItems || []).map((i) => ({
           id: i.id,
           item_name: i.item_name,
@@ -361,9 +432,11 @@ function CustomerOrderContent() {
         })),
       };
 
-      setTableOrders((prev) => [instantOrder, ...prev.filter((o) => o.id !== newOrder.id)]);
+      setTableOrders((prev) => [instantOrder, ...prev.filter((o) => o.id !== createdOrder.id)]);
       setCart({});
+      setUpiUtrInput('');
       setShowCartModal(false);
+      setShowUpiPayModal(false);
       setOrderSuccessToast(true);
       setTimeout(() => setOrderSuccessToast(false), 5000);
 
@@ -373,83 +446,106 @@ function CustomerOrderContent() {
     }
   };
 
-  // Customer QR Prepaid Checkout -> Restaurant Owner ke Razorpay account mein payment
-  const handlePrepaidRazorpayOrder = async () => {
+  const handleStartCustomerCheckout = async () => {
     const cartValues = Object.values(cart);
     if (cartValues.length === 0 || !restaurantId || !restaurant) return;
 
     if (!validateCustomerDetails()) return;
 
-    const totalAmount = cartValues.reduce(
-      (sum, entry) => sum + Number(entry.menuItem.price) * entry.quantity,
-      0
-    );
+    if (restaurant.razorpay_key_id && restaurant.razorpay_key_id.trim()) {
+      const totalAmount = cartValues.reduce(
+        (sum, entry) => sum + Number(entry.menuItem.price) * entry.quantity,
+        0
+      );
+
+      setPlacingOrder(true);
+
+      try {
+        const loaded = await loadRazorpayScript();
+        if (!loaded) {
+          setFormError('Payment gateway load nahi ho paya. Internet check karein.');
+          setPlacingOrder(false);
+          return;
+        }
+
+        const res = await fetch('/api/razorpay/create-table-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount: totalAmount,
+            restaurantId,
+            tableNumber,
+          }),
+        });
+
+        const orderData = await res.json();
+        if (!res.ok || !orderData.orderId || !orderData.keyId) {
+          setFormError(orderData.error || 'Payment start karne mein error aaya.');
+          setPlacingOrder(false);
+          return;
+        }
+
+        setShowCartModal(false);
+
+        const options = {
+          key: orderData.keyId,
+          amount: orderData.amount,
+          currency: orderData.currency,
+          name: restaurant.name,
+          description: `Table ${tableNumber} • ${customerName.trim()}`,
+          order_id: orderData.orderId,
+          prefill: {
+            name: customerName.trim(),
+            contact: customerPhone.replace(/\D/g, ''),
+          },
+          theme: {
+            color: '#ea580c',
+          },
+          handler: async function (response: { razorpay_payment_id: string }) {
+            await saveOrderToDatabase('paid', 'upi', response.razorpay_payment_id);
+          },
+          modal: {
+            ondismiss: function () {
+              setPlacingOrder(false);
+            },
+          },
+        };
+
+        const RazorpayConstructor = (
+          window as unknown as { Razorpay: new (opts: unknown) => { open: () => void } }
+        ).Razorpay;
+        const rzp = new RazorpayConstructor(options);
+        rzp.open();
+      } catch {
+        setFormError('Payment process mein dikkat aayi. Dobara try karein.');
+        setPlacingOrder(false);
+      }
+      return;
+    }
+
+    if (restaurant.upi_id && restaurant.upi_id.trim()) {
+      setShowCartModal(false);
+      setShowUpiPayModal(true);
+      return;
+    }
 
     setPlacingOrder(true);
-
-    try {
-      const loaded = await loadRazorpayScript();
-      if (!loaded) {
-        setFormError('Payment gateway load nahi ho paya. Internet check karein.');
-        setPlacingOrder(false);
-        return;
-      }
-
-      const res = await fetch('/api/razorpay/create-table-order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          amount: totalAmount,
-          restaurantId,
-          tableNumber,
-        }),
-      });
-
-      const orderData = await res.json();
-      if (!res.ok || !orderData.orderId || !orderData.keyId) {
-        setFormError(orderData.error || 'Payment start karne mein error aaya.');
-        setPlacingOrder(false);
-        return;
-      }
-
-      setShowCartModal(false);
-
-      const options = {
-        key: orderData.keyId,
-        amount: orderData.amount,
-        currency: orderData.currency,
-        name: restaurant.name,
-        description: `Table ${tableNumber} • ${customerName.trim()}`,
-        order_id: orderData.orderId,
-        prefill: {
-          name: customerName.trim(),
-          contact: customerPhone.replace(/\D/g, ''),
-        },
-        theme: {
-          color: '#ea580c',
-        },
-        handler: async function (response: { razorpay_payment_id: string }) {
-          await saveOrderToDatabase('paid', 'upi', response.razorpay_payment_id);
-        },
-        modal: {
-          ondismiss: function () {
-            setPlacingOrder(false);
-          },
-        },
-      };
-
-      const RazorpayConstructor = (
-        window as unknown as { Razorpay: new (opts: unknown) => { open: () => void } }
-      ).Razorpay;
-      const rzp = new RazorpayConstructor(options);
-      rzp.open();
-    } catch {
-      setFormError('Payment process mein dikkat aayi. Dobara try karein.');
-      setPlacingOrder(false);
-    }
+    await saveOrderToDatabase('unpaid', 'cash');
   };
 
-  // Staff/Owner Direct Order (Pay Later at Counter)
+  const handleConfirmMerchantUpiPaid = async () => {
+    setPlacingOrder(true);
+    const refText =
+      upiUtrInput.trim() || `UPI-TBL${tableNumber}-${Date.now().toString().slice(-5)}`;
+    await saveOrderToDatabase('paid', 'upi', refText);
+  };
+
+  const handlePayAtCounterCustomer = async () => {
+    if (!validateCustomerDetails()) return;
+    setPlacingOrder(true);
+    await saveOrderToDatabase('unpaid', 'cash');
+  };
+
   const handleDirectStaffOrder = async () => {
     setFormError(null);
     setPlacingOrder(true);
@@ -490,9 +586,34 @@ function CustomerOrderContent() {
     0
   );
 
+  const merchantUpiId = (restaurant.upi_id || '').trim();
+  const merchantDisplayName = (restaurant.bank_account_name || restaurant.name).trim();
+  const upiDeepLink = merchantUpiId
+    ? `upi://pay?pa=${encodeURIComponent(merchantUpiId)}&pn=${encodeURIComponent(
+        merchantDisplayName
+      )}&am=${totalCartPrice.toFixed(2)}&cu=INR&tn=${encodeURIComponent(
+        `Table ${tableNumber} Bill`
+      )}`
+    : '';
+  const dynamicQrImageUrl = upiDeepLink
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=8&data=${encodeURIComponent(
+        upiDeepLink
+      )}`
+    : '';
+
+  const hasAnyOnlinePayment = Boolean(
+    (restaurant.razorpay_key_id && restaurant.razorpay_key_id.trim()) || merchantUpiId
+  );
+
+  const handleCopyUpi = () => {
+    if (!merchantUpiId) return;
+    navigator.clipboard.writeText(merchantUpiId);
+    setUpiCopied(true);
+    setTimeout(() => setUpiCopied(false), 2500);
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 pb-28 lg:pb-16">
-      {/* 100% Single-Page Clean Print / PDF Styles */}
       <style jsx global>{`
         @media print {
           @page {
@@ -535,11 +656,16 @@ function CustomerOrderContent() {
         }
       `}</style>
 
-      {/* Full-Width Top Sticky Header */}
       <header className="bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-30">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
           <Link
-            href={hasStaffSession ? '/dashboard' : '#'}
+            href="/dashboard"
+            onClick={(e) => {
+              if (hasStaffSession) {
+                e.preventDefault();
+                window.location.assign('/dashboard');
+              }
+            }}
             className="flex items-center gap-2.5 text-left group cursor-pointer"
           >
             <div className="bg-gradient-to-br from-orange-500 to-orange-600 text-white p-2.5 rounded-xl shadow-sm group-hover:scale-105 transition">
@@ -618,9 +744,7 @@ function CustomerOrderContent() {
         )}
       </header>
 
-      {/* Main 2-Column Wide Layout */}
       <main className="max-w-6xl mx-auto px-4 sm:px-6 pt-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* LEFT COLUMN */}
         <div className="lg:col-span-8 space-y-5">
           <section className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white rounded-2xl p-5 sm:p-6 shadow-md flex items-center justify-between gap-4">
             <div>
@@ -631,7 +755,7 @@ function CustomerOrderContent() {
                 Welcome to {restaurant.name}
               </h2>
               <p className="text-xs text-slate-300 mt-1">
-                Apni pasandida dishes select karein, instant payment karein aur digital invoice download karein.
+                Apni pasandida dishes select karein, UPI se instant payment karein aur digital invoice download karein.
               </p>
             </div>
             <div className="hidden sm:flex w-14 h-14 rounded-2xl bg-orange-500/20 text-orange-400 items-center justify-center shrink-0">
@@ -644,7 +768,7 @@ function CustomerOrderContent() {
               <div className="flex items-center gap-3">
                 <CheckCircle2 className="w-6 h-6 shrink-0" />
                 <div>
-                  <p className="font-bold text-sm">Payment Done & Order Sent to Kitchen!</p>
+                  <p className="font-bold text-sm">Order Sent to Kitchen!</p>
                   <p className="text-xs text-emerald-100">
                     Chef ne aapka order receive kar liya hai. Digital bill neeche tracker se kabhi bhi download karein.
                   </p>
@@ -768,7 +892,6 @@ function CustomerOrderContent() {
           )}
         </div>
 
-        {/* RIGHT COLUMN */}
         <aside className="lg:col-span-4 space-y-5 lg:sticky lg:top-32">
           {tableOrders.length > 0 && (
             <section className="bg-white border-2 border-orange-200 rounded-2xl p-4 shadow-sm space-y-3">
@@ -800,7 +923,8 @@ function CustomerOrderContent() {
                         <div className="text-xs text-slate-700 font-medium">
                           {ord.customer_name && (
                             <p className="text-[11px] font-extrabold text-slate-800 mb-0.5">
-                              {ord.customer_name} • {ord.invoice_number || getShortBillNumber(ord.id)}
+                              {ord.customer_name} •{' '}
+                              {ord.invoice_number || getShortBillNumber(ord.id)}
                             </p>
                           )}
                           <p>
@@ -893,7 +1017,6 @@ function CustomerOrderContent() {
             </section>
           )}
 
-          {/* Desktop Persistent Cart Panel */}
           <section className="hidden lg:block bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <h3 className="font-extrabold text-slate-900 text-base flex items-center gap-2">
@@ -951,7 +1074,6 @@ function CustomerOrderContent() {
                   ))}
                 </div>
 
-                {/* Mandatory Customer Name & Mobile Input */}
                 <div className="bg-orange-50/70 border border-orange-200 p-3 rounded-xl space-y-2">
                   <p className="text-[11px] font-extrabold text-slate-800">
                     Your Details (For Bill & Invoice) *
@@ -990,32 +1112,44 @@ function CustomerOrderContent() {
                   )}
                 </div>
 
-                <div className="pt-2 border-t border-slate-200 space-y-2.5">
+                <div className="pt-2 border-t border-slate-200 space-y-2">
                   <div className="flex items-center justify-between font-extrabold text-slate-900 text-sm">
                     <span>Total Payable</span>
                     <span>₹{totalCartPrice}</span>
                   </div>
 
                   <button
-                    onClick={handlePrepaidRazorpayOrder}
+                    onClick={handleStartCustomerCheckout}
                     disabled={placingOrder}
                     className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-3 rounded-xl text-sm shadow-md transition disabled:opacity-50 flex items-center justify-center gap-1.5"
                   >
                     <ShieldCheck className="w-4 h-4" />
                     <span>
                       {placingOrder
-                        ? 'Opening Payment...'
-                        : `Pay & Place Order (₹${totalCartPrice})`}
+                        ? 'Processing...'
+                        : hasAnyOnlinePayment
+                        ? `Pay via UPI & Order (₹${totalCartPrice})`
+                        : `Place Order (₹${totalCartPrice})`}
                     </span>
                   </button>
+
+                  {hasAnyOnlinePayment && (
+                    <button
+                      onClick={handlePayAtCounterCustomer}
+                      disabled={placingOrder}
+                      className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2 rounded-xl text-xs transition disabled:opacity-50"
+                    >
+                      Place Order & Pay at Counter
+                    </button>
+                  )}
 
                   {hasStaffSession && (
                     <button
                       onClick={handleDirectStaffOrder}
                       disabled={placingOrder}
-                      className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl text-xs transition disabled:opacity-50"
+                      className="w-full bg-orange-50 hover:bg-orange-100 text-orange-700 font-bold py-2 rounded-xl text-xs transition disabled:opacity-50"
                     >
-                      Send KOT Only (Pay Later at Counter)
+                      Staff KOT Only (Skip Details)
                     </button>
                   )}
                 </div>
@@ -1025,7 +1159,6 @@ function CustomerOrderContent() {
         </aside>
       </main>
 
-      {/* Mobile Sticky Bottom Cart Bar */}
       {totalCartItems > 0 && (
         <div className="lg:hidden fixed bottom-4 left-0 right-0 px-4 z-40">
           <button
@@ -1051,7 +1184,6 @@ function CustomerOrderContent() {
         </div>
       )}
 
-      {/* Mobile Cart & Customer Details Drawer Modal */}
       {showCartModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
           <div className="bg-white rounded-t-3xl sm:rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl max-h-[92vh] flex flex-col">
@@ -1155,32 +1287,44 @@ function CustomerOrderContent() {
               ))}
             </div>
 
-            <div className="pt-3 border-t border-slate-200 space-y-2.5 shrink-0">
+            <div className="pt-3 border-t border-slate-200 space-y-2 shrink-0">
               <div className="flex items-center justify-between text-base font-extrabold text-slate-900">
                 <span>Total Payable</span>
                 <span>₹{totalCartPrice}</span>
               </div>
 
               <button
-                onClick={handlePrepaidRazorpayOrder}
+                onClick={handleStartCustomerCheckout}
                 disabled={placingOrder}
                 className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-3.5 rounded-2xl shadow-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 <ShieldCheck className="w-4 h-4" />
                 <span>
                   {placingOrder
-                    ? 'Opening Payment...'
-                    : `Pay & Place Order (₹${totalCartPrice})`}
+                    ? 'Processing...'
+                    : hasAnyOnlinePayment
+                    ? `Pay via UPI & Order (₹${totalCartPrice})`
+                    : `Place Order (₹${totalCartPrice})`}
                 </span>
               </button>
+
+              {hasAnyOnlinePayment && (
+                <button
+                  onClick={handlePayAtCounterCustomer}
+                  disabled={placingOrder}
+                  className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl text-xs transition disabled:opacity-50"
+                >
+                  Place Order & Pay at Counter
+                </button>
+              )}
 
               {hasStaffSession && (
                 <button
                   onClick={handleDirectStaffOrder}
                   disabled={placingOrder}
-                  className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl text-xs transition disabled:opacity-50"
+                  className="w-full bg-orange-50 hover:bg-orange-100 text-orange-700 font-bold py-2 rounded-xl text-xs transition disabled:opacity-50"
                 >
-                  Send KOT Only (Pay Later at Counter)
+                  Staff KOT Only (Skip Details)
                 </button>
               )}
             </div>
@@ -1188,7 +1332,111 @@ function CustomerOrderContent() {
         </div>
       )}
 
-      {/* PRINTABLE / DOWNLOADABLE DIGITAL BILL RECEIPT MODAL */}
+      {showUpiPayModal && merchantUpiId && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <div>
+                <h3 className="text-base sm:text-lg font-extrabold text-slate-900">
+                  Pay ₹{totalCartPrice} via UPI
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Direct to <strong>{merchantDisplayName}</strong> (0% Extra Fee)
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowUpiPayModal(false)}
+                className="p-2 rounded-full hover:bg-slate-100 text-slate-500"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <a
+              href={upiDeepLink}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-extrabold py-3.5 px-4 rounded-2xl text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md transition"
+            >
+              <Smartphone className="w-4 h-4" />
+              <span>Open GPay / PhonePe / Paytm (₹{totalCartPrice})</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-center space-y-2.5">
+              <p className="text-[11px] font-bold text-slate-600">
+                Ya kisi bhi UPI App se yeh QR Code scan karein:
+              </p>
+              {dynamicQrImageUrl && (
+                <img
+                  src={dynamicQrImageUrl}
+                  alt="Merchant UPI QR Code"
+                  className="w-44 h-44 mx-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm"
+                />
+              )}
+
+              <div className="flex items-center justify-center gap-2 pt-1">
+                <span className="text-xs font-mono font-bold text-slate-800 bg-white border border-slate-200 px-3 py-1.5 rounded-lg">
+                  {merchantUpiId}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleCopyUpi}
+                  className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition"
+                >
+                  {upiCopied ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-400" /> Copied
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" /> Copy
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-2.5 pt-1">
+              <div>
+                <label className="block text-[11px] font-extrabold text-slate-700 mb-1">
+                  UPI Transaction / UTR Ref No. (Optional — Fast Verification Ke Liye)
+                </label>
+                <input
+                  type="text"
+                  value={upiUtrInput}
+                  onChange={(e) => setUpiUtrInput(e.target.value)}
+                  placeholder="e.g. 632819402184 (Last 4-12 digits)"
+                  className="w-full px-3.5 py-2 bg-slate-50 focus:bg-white border border-slate-300 focus:border-emerald-500 rounded-xl text-xs font-mono font-semibold outline-none"
+                />
+              </div>
+
+              <button
+                type="button"
+                disabled={placingOrder}
+                onClick={handleConfirmMerchantUpiPaid}
+                className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-extrabold py-3.5 rounded-2xl text-xs sm:text-sm shadow-lg transition flex items-center justify-center gap-2"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>
+                  {placingOrder
+                    ? 'Sending Order...'
+                    : 'I Have Completed Payment • Place Order ✓'}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                disabled={placingOrder}
+                onClick={handlePayAtCounterCustomer}
+                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl text-xs transition"
+              >
+                Payment Failed? Pay at Counter Instead
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {receiptOrder && (
         <div
           id="receipt-modal-backdrop"
@@ -1221,7 +1469,8 @@ function CustomerOrderContent() {
               <div className="flex justify-between">
                 <span className="text-slate-500">Invoice No:</span>
                 <span className="font-extrabold text-slate-900">
-                  {receiptOrder.invoice_number || `INV-${receiptOrder.id.slice(0, 8).toUpperCase()}`}
+                  {receiptOrder.invoice_number ||
+                    `INV-${receiptOrder.id.slice(0, 8).toUpperCase()}`}
                 </span>
               </div>
               <div className="flex justify-between">
@@ -1232,7 +1481,7 @@ function CustomerOrderContent() {
               </div>
               {receiptOrder.razorpay_payment_id && (
                 <div className="flex justify-between gap-2">
-                  <span className="text-slate-500 shrink-0">Payment ID:</span>
+                  <span className="text-slate-500 shrink-0">Payment / UTR Ref:</span>
                   <span className="font-mono font-bold text-slate-800 text-[11px] break-all text-right">
                     {receiptOrder.razorpay_payment_id}
                   </span>

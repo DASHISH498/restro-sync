@@ -84,46 +84,53 @@ interface MenuStockItem {
   is_available: boolean;
 }
 
+interface MergedBillItem {
+  item_name: string;
+  price: number;
+  quantity: number;
+  notes: string[];
+}
+
 const ADMIN_WHATSAPP = '919079083101';
 
 const UPGRADE_PLANS = [
   {
     id: '1_month',
     name: '1 Month Plan',
-    price: '₹1',
-    amount: 1,
+    price: '₹599',
+    amount: 599,
     durationDays: 30,
     tag: 'Monthly (Test)',
   },
   {
     id: '3_months',
     name: '3 Months Plan',
-    price: '₹5',
-    amount: 5,
+    price: '₹1,699',
+    amount: 1699,
     durationDays: 90,
     tag: 'Quarterly (Test)',
   },
   {
     id: '6_months',
     name: '6 Months Plan',
-    price: '₹10',
-    amount: 10,
+    price: '₹3,299',
+    amount: 3299,
     durationDays: 180,
     tag: 'Half-Yearly (Test)',
   },
   {
     id: 'yearly',
     name: 'Yearly Plan (12 Months)',
-    price: '₹15',
-    amount: 15,
+    price: '₹5,499',
+    amount: 5499,
     durationDays: 365,
     tag: 'Most Popular (Test)',
   },
   {
     id: 'lifetime',
     name: 'Lifetime License',
-    price: '₹20',
-    amount: 20,
+    price: '₹19,999',
+    amount: 19999,
     durationDays: 36500,
     tag: 'One-Time Pay (Test)',
   },
@@ -167,15 +174,21 @@ export default function DashboardPage() {
   const [upgradeSuccessBanner, setUpgradeSuccessBanner] = useState<string | null>(null);
   const [upgradeErrorMsg, setUpgradeErrorMsg] = useState<string | null>(null);
 
-  // Owner Payment Gateway (BYOK Razorpay) Modal
+  // Owner Payment Setup Modal (Merchant UPI ID + Optional Razorpay)
   const [showPaymentSettingsModal, setShowPaymentSettingsModal] = useState(false);
-  const [ownerRzpKeyId, setOwnerRzpKeyId] = useState('');
-  const [ownerRzpKeySecret, setOwnerRzpKeySecret] = useState('');
   const [ownerUpiId, setOwnerUpiId] = useState('');
   const [ownerBankName, setOwnerBankName] = useState('');
+  const [ownerRzpKeyId, setOwnerRzpKeyId] = useState('');
+  const [ownerRzpKeySecret, setOwnerRzpKeySecret] = useState('');
   const [savingPaymentSettings, setSavingPaymentSettings] = useState(false);
   const [paymentSettingsMsg, setPaymentSettingsMsg] = useState<string | null>(null);
   const [isPaymentConfigured, setIsPaymentConfigured] = useState<boolean>(true);
+  const [savedPaymentInfo, setSavedPaymentInfo] = useState({
+    upiId: '',
+    bankName: '',
+    rzpKeyId: '',
+    rzpKeySecret: '',
+  });
 
   // Max 3 Devices Limit Modal & 1-Hour Inactivity Modal
   const [showDeviceLimitModal, setShowDeviceLimitModal] = useState(false);
@@ -239,7 +252,7 @@ export default function DashboardPage() {
     showInactivityModal,
   ]);
 
-  // MAX 3 DEVICES SESSION LOCK + AUTO LOGOUT ON BROWSER CLOSE
+  // MAX 3 DEVICES SESSION LOCK (Removed pagehide listener so navigation doesn't clear session)
   useEffect(() => {
     if (!session?.restaurantId) return;
 
@@ -262,16 +275,8 @@ export default function DashboardPage() {
       }
     }, 15000);
 
-    const handleBrowserClose = () => {
-      localStorage.removeItem('restro_session');
-      removeCurrentDevice(session.restaurantId);
-    };
-
-    window.addEventListener('pagehide', handleBrowserClose);
-
     return () => {
       clearInterval(heartbeatInterval);
-      window.removeEventListener('pagehide', handleBrowserClose);
     };
   }, [session?.restaurantId]);
 
@@ -279,7 +284,7 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!session?.restaurantId || session.role !== 'owner') return;
 
-    const INACTIVITY_LIMIT_MS = 60 * 60 * 1000; // 1 Hour
+    const INACTIVITY_LIMIT_MS = 60 * 60 * 1000;
     let inactivityTimer: ReturnType<typeof setTimeout>;
 
     const triggerInactivityLogout = async () => {
@@ -341,13 +346,21 @@ export default function DashboardPage() {
         setActualTablesCount(Number(restData.total_tables));
       }
 
-      setOwnerRzpKeyId(restData.razorpay_key_id || '');
-      setOwnerRzpKeySecret(restData.razorpay_key_secret || '');
-      setOwnerUpiId(restData.upi_id || '');
-      setOwnerBankName(restData.bank_account_name || '');
-      setIsPaymentConfigured(
-        Boolean(restData.razorpay_key_id && restData.razorpay_key_secret)
-      );
+      const upi = restData.upi_id || '';
+      const bank = restData.bank_account_name || '';
+      const keyId = restData.razorpay_key_id || '';
+      const keySecret = restData.razorpay_key_secret || '';
+
+      setSavedPaymentInfo({
+        upiId: upi,
+        bankName: bank,
+        rzpKeyId: keyId,
+        rzpKeySecret: keySecret,
+      });
+
+      const hasUpi = Boolean(upi.trim());
+      const hasRzp = Boolean(keyId && keySecret);
+      setIsPaymentConfigured(hasUpi || hasRzp);
 
       const status = restData.subscription_status || 'free_trial';
       const selectedPlan = restData.selected_plan || 'Yearly (₹5,499)';
@@ -399,6 +412,15 @@ export default function DashboardPage() {
       clearInterval(interval);
     };
   }, [session?.restaurantId, fetchDashboardData]);
+
+  const handleOpenPaymentSettings = () => {
+    setOwnerUpiId(savedPaymentInfo.upiId);
+    setOwnerBankName(savedPaymentInfo.bankName);
+    setOwnerRzpKeyId(savedPaymentInfo.rzpKeyId);
+    setOwnerRzpKeySecret(savedPaymentInfo.rzpKeySecret);
+    setPaymentSettingsMsg(null);
+    setShowPaymentSettingsModal(true);
+  };
 
   const handleOpenStockModal = async () => {
     if (!session?.restaurantId) return;
@@ -567,16 +589,18 @@ export default function DashboardPage() {
     setSavingPaymentSettings(true);
     setPaymentSettingsMsg(null);
 
+    const cleanUpi = ownerUpiId.trim();
+    const cleanBank = ownerBankName.trim();
     const cleanKeyId = ownerRzpKeyId.trim();
     const cleanSecret = ownerRzpKeySecret.trim();
 
     const { error } = await supabase
       .from('restaurants')
       .update({
+        upi_id: cleanUpi || null,
+        bank_account_name: cleanBank || null,
         razorpay_key_id: cleanKeyId || null,
         razorpay_key_secret: cleanSecret || null,
-        upi_id: ownerUpiId.trim() || null,
-        bank_account_name: ownerBankName.trim() || null,
       })
       .eq('id', session.restaurantId);
 
@@ -587,9 +611,15 @@ export default function DashboardPage() {
       return;
     }
 
-    setIsPaymentConfigured(Boolean(cleanKeyId && cleanSecret));
+    setSavedPaymentInfo({
+      upiId: cleanUpi,
+      bankName: cleanBank,
+      rzpKeyId: cleanKeyId,
+      rzpKeySecret: cleanSecret,
+    });
+    setIsPaymentConfigured(Boolean(cleanUpi || (cleanKeyId && cleanSecret)));
     setPaymentSettingsMsg(
-      'Payment settings save ho gayi hain! Ab table bills seedha aapke account mein aayenge.'
+      'Payment details save ho gayi hain! Ab customers seedha aapke UPI / account mein pay kar sakenge.'
     );
     setTimeout(() => {
       setPaymentSettingsMsg(null);
@@ -701,6 +731,33 @@ export default function DashboardPage() {
     modalTableOrders.length > 0 &&
     modalTableOrders.every((o) => o.payment_status === 'paid');
 
+  // Merge same dishes across multiple KOTs on the selected table into single lines
+  const consolidatedTableItems: MergedBillItem[] = Object.values(
+    modalTableOrders.reduce<Record<string, MergedBillItem>>((acc, ord) => {
+      (ord.order_items || []).forEach((item) => {
+        const key = `${(item.item_name || '').trim().toLowerCase()}_${Number(item.price)}`;
+        if (!acc[key]) {
+          acc[key] = {
+            item_name: item.item_name,
+            price: Number(item.price),
+            quantity: 0,
+            notes: [],
+          };
+        }
+        acc[key].quantity += Number(item.quantity);
+        if (item.notes && !acc[key].notes.includes(item.notes)) {
+          acc[key].notes.push(item.notes);
+        }
+      });
+      return acc;
+    }, {})
+  );
+
+  const primaryTableGuest =
+    modalTableOrders.find(
+      (o) => o.customer_name && o.customer_name !== 'Walk-in Guest'
+    )?.customer_name || modalTableOrders[0]?.customer_name;
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 pb-16">
       {/* Top Navbar */}
@@ -773,10 +830,7 @@ export default function DashboardPage() {
 
                 <button
                   type="button"
-                  onClick={() => {
-                    setPaymentSettingsMsg(null);
-                    setShowPaymentSettingsModal(true);
-                  }}
+                  onClick={handleOpenPaymentSettings}
                   className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition ${
                     isPaymentConfigured
                       ? 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
@@ -790,6 +844,7 @@ export default function DashboardPage() {
             )}
 
             <button
+              type="button"
               onClick={handleLogout}
               className="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition"
             >
@@ -865,7 +920,7 @@ export default function DashboardPage() {
           </section>
         )}
 
-        {/* OWNER PAYMENT KEYS NOT CONFIGURED ALERT */}
+        {/* OWNER UPI / PAYMENT NOT CONFIGURED ALERT */}
         {isOwner && !isPaymentConfigured && (
           <section className="bg-amber-50 border border-amber-300 text-amber-950 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-sm">
             <div className="flex items-center gap-3">
@@ -874,23 +929,20 @@ export default function DashboardPage() {
               </div>
               <div>
                 <p className="text-xs sm:text-sm font-extrabold">
-                  Apna Payment Account Connect Karein (Table QR Payments Ke Liye)
+                  Apna Merchant UPI ID Connect Karein (0% Fee Direct Payments)
                 </p>
                 <p className="text-[11px] text-amber-800 mt-0.5">
-                  Customers ke khane ka paisa seedha aapke bank mein aane ke liye apni Razorpay Key ID aur Secret add karein.
+                  Customers ke khane ka paisa seedha aapke GPay / PhonePe / Paytm Merchant box mein aane ke liye apna UPI ID save karein.
                 </p>
               </div>
             </div>
 
             <button
               type="button"
-              onClick={() => {
-                setPaymentSettingsMsg(null);
-                setShowPaymentSettingsModal(true);
-              }}
+              onClick={handleOpenPaymentSettings}
               className="bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl transition"
             >
-              Setup Payment Keys &rarr;
+              Add Merchant UPI ID &rarr;
             </button>
           </section>
         )}
@@ -1024,25 +1076,41 @@ export default function DashboardPage() {
                 isOccupied && tOrders.every((o) => o.payment_status === 'paid');
               const guestName = tOrders[0]?.customer_name;
 
+              if (!isOccupied) {
+                return (
+                  <Link
+                    key={tableNum}
+                    href={`/order/${session.restaurantId}/${tableNum}`}
+                    className="p-4 rounded-2xl border-2 text-left transition flex flex-col justify-between min-h-[125px] cursor-pointer hover:shadow-md bg-slate-50 border-slate-200/80 hover:border-orange-300"
+                  >
+                    <div className="flex items-center justify-between w-full">
+                      <span className="font-extrabold text-sm text-slate-900">
+                        Table {tableNum}
+                      </span>
+                      <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">
+                        Free
+                      </span>
+                    </div>
+
+                    <div className="mt-4 flex items-center justify-between text-slate-400">
+                      <span className="text-xs">Available</span>
+                      <span className="text-[11px] font-bold text-orange-600">+ Order</span>
+                    </div>
+                  </Link>
+                );
+              }
+
               return (
                 <button
                   key={tableNum}
                   type="button"
-                  onClick={() => {
-                    if (isOccupied) {
-                      setSelectedTableModal(tableNum);
-                    } else {
-                      router.push(`/order/${session.restaurantId}/${tableNum}`);
-                    }
-                  }}
+                  onClick={() => setSelectedTableModal(tableNum)}
                   className={`p-4 rounded-2xl border-2 text-left transition flex flex-col justify-between min-h-[125px] cursor-pointer hover:shadow-md ${
                     hasReady
                       ? 'bg-emerald-50/80 border-emerald-500 shadow-sm'
                       : isAllServed
                       ? 'bg-blue-50/70 border-blue-400 shadow-sm'
-                      : isOccupied
-                      ? 'bg-amber-50/70 border-amber-400 shadow-sm'
-                      : 'bg-slate-50 border-slate-200/80 hover:border-orange-300'
+                      : 'bg-amber-50/70 border-amber-400 shadow-sm'
                   }`}
                 >
                   <div className="flex items-center justify-between w-full">
@@ -1055,54 +1123,39 @@ export default function DashboardPage() {
                           ? 'bg-emerald-600 text-white'
                           : isAllServed
                           ? 'bg-blue-600 text-white'
-                          : isOccupied
-                          ? 'bg-amber-500 text-white'
-                          : 'bg-slate-200 text-slate-600'
+                          : 'bg-amber-500 text-white'
                       }`}
                     >
-                      {hasReady
-                        ? 'Ready'
-                        : isAllServed
-                        ? 'Dining'
-                        : isOccupied
-                        ? 'Cooking'
-                        : 'Free'}
+                      {hasReady ? 'Ready' : isAllServed ? 'Dining' : 'Cooking'}
                     </span>
                   </div>
 
-                  {isOccupied ? (
-                    <div className="mt-2.5">
-                      {guestName && (
-                        <p className="text-[11px] font-extrabold text-slate-900 truncate">
-                          {guestName}
-                        </p>
-                      )}
-                      <p className="text-[11px] font-semibold text-slate-600">
-                        {isAllServed
-                          ? 'Dining • Clear on Exit'
-                          : `${totalDishes} Dish${totalDishes > 1 ? 'es' : ''} Running`}
+                  <div className="mt-2.5">
+                    {guestName && (
+                      <p className="text-[11px] font-extrabold text-slate-900 truncate">
+                        {guestName}
                       </p>
-                      <div className="flex items-center justify-between gap-1 mt-1">
-                        <p className="text-base font-extrabold text-slate-900">
-                          ₹{tableTotal}
-                        </p>
-                        {isTableFullyPaid ? (
-                          <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-300">
-                            PAID ✓
-                          </span>
-                        ) : (
-                          <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-200/80 text-slate-600">
-                            UNPAID
-                          </span>
-                        )}
-                      </div>
+                    )}
+                    <p className="text-[11px] font-semibold text-slate-600">
+                      {isAllServed
+                        ? 'Dining • Clear on Exit'
+                        : `${totalDishes} Dish${totalDishes > 1 ? 'es' : ''} Running`}
+                    </p>
+                    <div className="flex items-center justify-between gap-1 mt-1">
+                      <p className="text-base font-extrabold text-slate-900">
+                        ₹{tableTotal}
+                      </p>
+                      {isTableFullyPaid ? (
+                        <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-300">
+                          PAID ✓
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-200/80 text-slate-600">
+                          UNPAID
+                        </span>
+                      )}
                     </div>
-                  ) : (
-                    <div className="mt-4 flex items-center justify-between text-slate-400">
-                      <span className="text-xs">Available</span>
-                      <span className="text-[11px] font-bold text-orange-600">+ Order</span>
-                    </div>
-                  )}
+                  </div>
                 </button>
               );
             })}
@@ -1153,11 +1206,16 @@ export default function DashboardPage() {
                         )}
                         {isPaid ? (
                           <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-700 border border-emerald-200">
-                            PAID ONLINE ✓ (₹{ord.total_amount})
+                            PAID UPI ✓ (₹{ord.total_amount})
                           </span>
                         ) : (
                           <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200">
                             UNPAID • ₹{ord.total_amount}
+                          </span>
+                        )}
+                        {ord.razorpay_payment_id && (
+                          <span className="text-[10px] font-mono text-emerald-700 font-bold">
+                            Ref: {ord.razorpay_payment_id}
                           </span>
                         )}
                       </div>
@@ -1214,7 +1272,7 @@ export default function DashboardPage() {
                 className="text-xs font-extrabold text-orange-600 hover:underline flex items-center gap-1.5 self-start sm:self-auto"
               >
                 <Search className="w-3.5 h-3.5 shrink-0" />
-                <span>Track by Invoice / Payment ID ({completedOrders.length}) &rarr;</span>
+                <span>Track by Invoice / UTR ID ({completedOrders.length}) &rarr;</span>
               </button>
             </div>
 
@@ -1276,7 +1334,7 @@ export default function DashboardPage() {
 
       {/* OWNER PLAN UPGRADE / RAZORPAY ACTIVATION MODAL */}
       {isOwner && showUpgradeModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[999]">
           <div className="bg-white rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl max-h-[85vh] overflow-y-auto overscroll-contain border border-slate-200">
             <div className="flex items-center justify-between pb-4 border-b border-slate-200">
               <div>
@@ -1356,9 +1414,9 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* OWNER PAYMENT GATEWAY (BYOK RAZORPAY) SETTINGS MODAL */}
+      {/* OWNER PAYMENT SETUP MODAL (MERCHANT UPI ID PRIMARY + OPTIONAL RAZORPAY) */}
       {isOwner && showPaymentSettingsModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[999]">
           <div className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3.5 border-b border-slate-200">
               <div>
@@ -1366,7 +1424,7 @@ export default function DashboardPage() {
                   <KeyRound className="w-5 h-5 text-purple-600" /> Restaurant Payment Setup
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Table QR food payments seedha aapke Razorpay account mein jayenge
+                  0% Fee • Customer ka payment seedha aapke UPI / Bank mein jayega
                 </p>
               </div>
               <button
@@ -1381,10 +1439,11 @@ export default function DashboardPage() {
             <form onSubmit={handleSavePaymentSettings} className="pt-4 space-y-3.5">
               <div>
                 <label className="block text-xs font-extrabold text-slate-700 mb-1">
-                  Account Holder / Business Name
+                  Shop / Merchant Display Name *
                 </label>
                 <input
                   type="text"
+                  required
                   value={ownerBankName}
                   onChange={(e) => setOwnerBankName(e.target.value)}
                   placeholder="e.g. Sharma Family Restaurant"
@@ -1394,43 +1453,51 @@ export default function DashboardPage() {
 
               <div>
                 <label className="block text-xs font-extrabold text-slate-700 mb-1">
-                  Merchant UPI ID (Optional Reference)
+                  Merchant UPI ID (GPay / PhonePe / Paytm Box) *
                 </label>
                 <input
                   type="text"
+                  required={!ownerRzpKeyId}
                   value={ownerUpiId}
                   onChange={(e) => setOwnerUpiId(e.target.value)}
-                  placeholder="e.g. restaurant@okicici"
-                  className="w-full px-3.5 py-2.5 bg-slate-50 focus:bg-white border border-slate-300 focus:border-orange-500 rounded-xl text-xs font-semibold outline-none"
+                  placeholder="e.g. gpay-112233@okbizaxis ya paytmqr...@ptys"
+                  className="w-full px-3.5 py-2.5 bg-emerald-50/40 focus:bg-white border border-emerald-400 focus:border-orange-500 rounded-xl text-xs font-mono font-bold outline-none"
                 />
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Apne Google Pay Business / PhonePe Business / Paytm QR box ki UPI ID daalein.
+                </p>
               </div>
 
-              <div>
-                <label className="block text-xs font-extrabold text-slate-700 mb-1">
-                  Razorpay Key ID *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={ownerRzpKeyId}
-                  onChange={(e) => setOwnerRzpKeyId(e.target.value)}
-                  placeholder="rzp_live_xxxxxxxxxxxxxx"
-                  className="w-full px-3.5 py-2.5 bg-slate-50 focus:bg-white border border-slate-300 focus:border-orange-500 rounded-xl text-xs font-mono font-semibold outline-none"
-                />
-              </div>
+              <div className="pt-2 border-t border-slate-100 space-y-3">
+                <p className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">
+                  Optional: Razorpay Keys (Sirf Card / Auto-Webhook Ke Liye)
+                </p>
 
-              <div>
-                <label className="block text-xs font-extrabold text-slate-700 mb-1">
-                  Razorpay Key Secret *
-                </label>
-                <input
-                  type="password"
-                  required
-                  value={ownerRzpKeySecret}
-                  onChange={(e) => setOwnerRzpKeySecret(e.target.value)}
-                  placeholder="••••••••••••••••••••••••"
-                  className="w-full px-3.5 py-2.5 bg-slate-50 focus:bg-white border border-slate-300 focus:border-orange-500 rounded-xl text-xs font-mono font-semibold outline-none"
-                />
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">
+                    Razorpay Key ID (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={ownerRzpKeyId}
+                    onChange={(e) => setOwnerRzpKeyId(e.target.value)}
+                    placeholder="rzp_live_xxxxxxxxxxxxxx"
+                    className="w-full px-3.5 py-2 bg-slate-50 focus:bg-white border border-slate-200 focus:border-orange-500 rounded-xl text-xs font-mono outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">
+                    Razorpay Key Secret (Optional)
+                  </label>
+                  <input
+                    type="password"
+                    value={ownerRzpKeySecret}
+                    onChange={(e) => setOwnerRzpKeySecret(e.target.value)}
+                    placeholder="••••••••••••••••••••••••"
+                    className="w-full px-3.5 py-2 bg-slate-50 focus:bg-white border border-slate-200 focus:border-orange-500 rounded-xl text-xs font-mono outline-none"
+                  />
+                </div>
               </div>
 
               {paymentSettingsMsg && (
@@ -1444,7 +1511,7 @@ export default function DashboardPage() {
                 disabled={savingPaymentSettings}
                 className="w-full bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white font-extrabold py-3 rounded-xl text-xs shadow-sm transition"
               >
-                {savingPaymentSettings ? 'Saving Keys...' : 'Save Payment Settings ✓'}
+                {savingPaymentSettings ? 'Saving Details...' : 'Save Payment Setup ✓'}
               </button>
             </form>
           </div>
@@ -1453,7 +1520,7 @@ export default function DashboardPage() {
 
       {/* OWNER FULL SALES HISTORY & BILL/INVOICE TRACKER MODAL */}
       {isOwner && showSalesModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 z-50">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 z-[999]">
           <div className="bg-white rounded-3xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl max-h-[88vh] flex flex-col overflow-hidden border border-slate-200">
             <div className="flex items-start justify-between gap-2 pb-3 border-b border-slate-200 shrink-0">
               <div>
@@ -1461,7 +1528,7 @@ export default function DashboardPage() {
                   Bills, Invoice Tracker & Sales History
                 </h3>
                 <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5">
-                  Invoice No., Bill No., Payment ID, Name ya Mobile se bill track karein
+                  Invoice No., Bill No., UTR / Payment ID, Name ya Mobile se bill track karein
                 </p>
               </div>
               <button
@@ -1480,7 +1547,7 @@ export default function DashboardPage() {
                   type="text"
                   value={billSearchQuery}
                   onChange={(e) => setBillSearchQuery(e.target.value)}
-                  placeholder="Search Invoice (INV-...), Bill No, Payment ID (pay_...), Name or Phone..."
+                  placeholder="Search Invoice (INV-...), Bill No, UTR / Ref ID, Name or Phone..."
                   className="w-full pl-10 pr-8 py-2.5 bg-slate-50 focus:bg-white border border-slate-300 focus:border-orange-500 rounded-xl text-xs font-semibold outline-none transition"
                 />
                 {billSearchQuery && (
@@ -1636,7 +1703,7 @@ export default function DashboardPage() {
 
                       {ord.razorpay_payment_id && (
                         <p className="text-[10px] font-mono text-emerald-700 font-bold">
-                          Razorpay ID: {ord.razorpay_payment_id}
+                          Payment / UTR Ref: {ord.razorpay_payment_id}
                         </p>
                       )}
 
@@ -1669,20 +1736,28 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* TABLE ACTION MODAL (Active Tables Only) */}
+      {/* TABLE ACTION MODAL (CONSOLIDATED BILL + INDIVIDUAL KOT TRACKING) */}
       {selectedTableModal !== null && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl max-h-[85vh] flex flex-col overflow-hidden">
+        <div
+          onClick={() => setSelectedTableModal(null)}
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[999]"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl max-h-[85vh] flex flex-col overflow-hidden"
+          >
             <div className="flex items-center justify-between pb-3 border-b border-slate-200 shrink-0">
               <div>
                 <h3 className="text-lg font-extrabold text-slate-900">
                   Table {selectedTableModal}
                 </h3>
                 <p className="text-xs text-slate-500">
-                  {modalTableOrders.length} active order(s) running
+                  {primaryTableGuest ? `${primaryTableGuest} • ` : ''}
+                  {modalTableOrders.length} KOT(s) running
                 </p>
               </div>
               <button
+                type="button"
                 onClick={() => setSelectedTableModal(null)}
                 className="text-xs font-bold text-slate-500 hover:text-slate-800 px-2.5 py-1 rounded-lg bg-slate-100"
               >
@@ -1700,34 +1775,86 @@ export default function DashboardPage() {
               </Link>
             </div>
 
-            {modalTableOrders.length > 0 && (
-              <div className="py-4 space-y-3 overflow-y-auto overscroll-contain flex-1">
-                {modalTableOrders.map((ord) => {
-                  const isPaid = ord.payment_status === 'paid';
+            {modalTableOrders.length === 0 ? (
+              <div className="py-8 text-center text-xs text-slate-500">
+                Is table par abhi koi active order nahi hai.
+              </div>
+            ) : (
+              <div className="py-4 space-y-4 overflow-y-auto overscroll-contain flex-1">
+                {/* 1. CONSOLIDATED BILL SUMMARY */}
+                <div className="bg-orange-50/70 border border-orange-200 rounded-2xl p-3.5 space-y-2">
+                  <div className="flex items-center justify-between border-b border-orange-200/70 pb-1.5">
+                    <span className="text-[11px] font-extrabold uppercase tracking-wider text-orange-800">
+                      Consolidated Table Bill
+                    </span>
+                    <span className="text-[11px] font-bold text-slate-600">
+                      {consolidatedTableItems.reduce((s, i) => s + i.quantity, 0)} Items
+                    </span>
+                  </div>
 
-                  return (
-                    <div
-                      key={ord.id}
-                      className="bg-slate-50 border border-slate-200/80 p-3.5 rounded-2xl space-y-2"
-                    >
-                      {(ord.customer_name || ord.invoice_number) && (
-                        <div className="flex flex-wrap items-center justify-between gap-1 text-[11px] pb-1.5 border-b border-slate-200/70">
-                          <span className="font-extrabold text-slate-800">
-                            {ord.customer_name || 'Guest'}
-                            {ord.customer_phone ? ` • ${ord.customer_phone}` : ''}
-                          </span>
-                          {ord.invoice_number && (
-                            <span className="font-mono font-bold text-slate-500">
-                              {ord.invoice_number}
+                  <div className="space-y-1.5">
+                    {consolidatedTableItems.map((item, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between text-xs text-slate-800"
+                      >
+                        <span>
+                          <strong className="text-slate-900">{item.quantity}×</strong>{' '}
+                          {item.item_name}
+                          {item.notes.length > 0 && (
+                            <span className="text-[11px] text-orange-600 ml-1">
+                              ({item.notes.join(', ')})
                             </span>
                           )}
-                        </div>
-                      )}
+                        </span>
+                        <span className="font-extrabold text-slate-900">
+                          ₹{item.price * item.quantity}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
 
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-1.5 flex-wrap">
+                {/* 2. INDIVIDUAL KOT STATUSES */}
+                <div className="space-y-2">
+                  <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 px-1">
+                    Kitchen KOT Status ({modalTableOrders.length})
+                  </p>
+
+                  {modalTableOrders.map((ord, index) => {
+                    const isPaid = ord.payment_status === 'paid';
+
+                    return (
+                      <div
+                        key={ord.id}
+                        className="bg-slate-50 border border-slate-200/80 p-3 rounded-xl flex items-center justify-between gap-2 text-xs"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="font-extrabold text-slate-700">
+                              KOT #{modalTableOrders.length - index}
+                            </span>
+                            {ord.invoice_number && (
+                              <span className="text-[10px] font-mono text-slate-500">
+                                ({ord.invoice_number})
+                              </span>
+                            )}
+                            {isPaid && (
+                              <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
+                                Paid ✓
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-600 truncate mt-0.5">
+                            {ord.order_items
+                              ?.map((i) => `${i.quantity}× ${i.item_name}`)
+                              .join(', ')}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
                           <span
-                            className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full flex items-center gap-1 ${
+                            className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full flex items-center gap-1 ${
                               ord.status === 'ready'
                                 ? 'bg-emerald-100 text-emerald-700'
                                 : ord.status === 'served'
@@ -1756,48 +1883,20 @@ export default function DashboardPage() {
                             )}
                           </span>
 
-                          {isPaid ? (
-                            <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
-                              Paid Online ✓
-                            </span>
-                          ) : (
-                            <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
-                              Unpaid
-                            </span>
+                          {ord.status === 'ready' && (
+                            <button
+                              type="button"
+                              onClick={() => handleMarkServed(ord.id)}
+                              className="text-[10px] font-extrabold bg-emerald-600 text-white px-2 py-1 rounded-lg hover:bg-emerald-700 transition"
+                            >
+                              Serve ✓
+                            </button>
                           )}
                         </div>
-
-                        {ord.status === 'ready' && (
-                          <button
-                            onClick={() => handleMarkServed(ord.id)}
-                            className="text-[11px] font-extrabold bg-emerald-600 text-white px-2.5 py-1 rounded-lg hover:bg-emerald-700 transition shrink-0"
-                          >
-                            Mark Served ✓
-                          </button>
-                        )}
                       </div>
-
-                      <div className="space-y-1">
-                        {ord.order_items?.map((item) => (
-                          <div
-                            key={item.id}
-                            className="flex items-center justify-between text-xs text-slate-700"
-                          >
-                            <span>
-                              <strong>{item.quantity}×</strong> {item.item_name}
-                              {item.notes && (
-                                <span className="text-[11px] text-orange-600 ml-1">
-                                  ({item.notes})
-                                </span>
-                              )}
-                            </span>
-                            <span className="font-bold">₹{item.price * item.quantity}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
             )}
 
@@ -1811,9 +1910,10 @@ export default function DashboardPage() {
                 {isModalTableFullyPaid ? (
                   <div className="space-y-2.5">
                     <div className="bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-xl p-2.5 text-center text-xs font-extrabold">
-                      ✓ Payment Received Online • Clear table only after guest leaves
+                      ✓ UPI Payment Marked Paid • Clear table only after guest leaves
                     </div>
                     <button
+                      type="button"
                       disabled={settling}
                       onClick={() => handleSettleTable(selectedTableModal, 'upi')}
                       className="w-full bg-blue-600 hover:bg-blue-700 text-white font-extrabold py-3 rounded-xl text-xs transition"
@@ -1826,6 +1926,7 @@ export default function DashboardPage() {
                 ) : (
                   <div className="grid grid-cols-2 gap-2.5">
                     <button
+                      type="button"
                       disabled={settling}
                       onClick={() => handleSettleTable(selectedTableModal, 'cash')}
                       className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-3 rounded-xl text-xs transition"
@@ -1833,6 +1934,7 @@ export default function DashboardPage() {
                       Settle Cash ₹{modalTableTotal}
                     </button>
                     <button
+                      type="button"
                       disabled={settling}
                       onClick={() => handleSettleTable(selectedTableModal, 'upi')}
                       className="bg-slate-900 hover:bg-slate-800 text-white font-extrabold py-3 rounded-xl text-xs transition"
@@ -1849,7 +1951,7 @@ export default function DashboardPage() {
 
       {/* QUICK STOCK AVAILABILITY MODAL */}
       {showStockModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[999]">
           <div className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl max-h-[85vh] flex flex-col overflow-hidden">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200 shrink-0">
               <div>
@@ -1861,6 +1963,7 @@ export default function DashboardPage() {
                 </p>
               </div>
               <button
+                type="button"
                 onClick={() => setShowStockModal(false)}
                 className="p-2 rounded-full hover:bg-slate-100 text-slate-500"
               >
@@ -1907,7 +2010,7 @@ export default function DashboardPage() {
 
       {/* MAX 3 DEVICES LOGOUT / BLOCK DIALOG */}
       {showDeviceLimitModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[999]">
           <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl text-center space-y-4 border border-slate-200">
             <div className="w-12 h-12 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center mx-auto">
               <AlertTriangle className="w-6 h-6" />
@@ -1935,7 +2038,7 @@ export default function DashboardPage() {
 
       {/* 1-HOUR INACTIVITY AUTO-LOGOUT DIALOG */}
       {showInactivityModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[999]">
           <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl text-center space-y-4 border border-slate-200">
             <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center mx-auto">
               <Clock className="w-6 h-6" />
