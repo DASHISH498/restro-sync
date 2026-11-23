@@ -190,13 +190,6 @@ export default function DashboardPage() {
     rzpKeySecret: '',
   });
 
-  // 6-Digit PIN Setup Modal States (Owner / Staff)
-  const [showPinSetupModal, setShowPinSetupModal] = useState(false);
-  const [pinInput, setPinInput] = useState('');
-  const [confirmPinInput, setConfirmPinInput] = useState('');
-  const [pinError, setPinError] = useState<string | null>(null);
-  const [pinSuccessMsg, setPinSuccessMsg] = useState<string | null>(null);
-
   // Max 3 Devices Limit Modal & 1-Hour Inactivity Modal
   const [showDeviceLimitModal, setShowDeviceLimitModal] = useState(false);
   const [showInactivityModal, setShowInactivityModal] = useState(false);
@@ -225,11 +218,6 @@ export default function DashboardPage() {
       if (parsed.totalTables) {
         setActualTablesCount(parsed.totalTables);
       }
-
-      const pinKey = `restro_6digit_pin_${parsed.restaurantId}_${parsed.role}`;
-      if (!localStorage.getItem(pinKey)) {
-        setShowPinSetupModal(true);
-      }
     } catch {
       router.push('/');
     }
@@ -242,7 +230,6 @@ export default function DashboardPage() {
       showPaymentSettingsModal ||
       showStockModal ||
       selectedTableModal !== null ||
-      showPinSetupModal ||
       showDeviceLimitModal ||
       showInactivityModal;
 
@@ -261,7 +248,6 @@ export default function DashboardPage() {
     showPaymentSettingsModal,
     showStockModal,
     selectedTableModal,
-    showPinSetupModal,
     showDeviceLimitModal,
     showInactivityModal,
   ]);
@@ -426,36 +412,6 @@ export default function DashboardPage() {
       clearInterval(interval);
     };
   }, [session?.restaurantId, fetchDashboardData]);
-
-  const handleSaveSixDigitPin = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!session) return;
-
-    const cleanPin = pinInput.replace(/\D/g, '');
-    const cleanConfirm = confirmPinInput.replace(/\D/g, '');
-
-    if (cleanPin.length !== 6) {
-      setPinError('Kripya exact 6-digit ka numeric PIN enter karein.');
-      return;
-    }
-
-    if (cleanPin !== cleanConfirm) {
-      setPinError('Dono PIN match nahi kar rahe hain. Dobara check karein.');
-      return;
-    }
-
-    const pinKey = `restro_6digit_pin_${session.restaurantId}_${session.role}`;
-    localStorage.setItem(pinKey, cleanPin);
-    setPinError(null);
-    setPinSuccessMsg('6-digit PIN successfully set ho gaya hai!');
-
-    setTimeout(() => {
-      setPinSuccessMsg(null);
-      setPinInput('');
-      setConfirmPinInput('');
-      setShowPinSetupModal(false);
-    }, 1000);
-  };
 
   const handleOpenPaymentSettings = () => {
     setOwnerUpiId(savedPaymentInfo.upiId);
@@ -1375,79 +1331,6 @@ export default function DashboardPage() {
           </section>
         )}
       </main>
-
-      {/* 6-DIGIT PIN SETUP MODAL FOR OWNER / STAFF */}
-      {showPinSetupModal && session && (
-        <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-center justify-center p-4 z-[999]">
-          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-              <div>
-                <h3 className="text-base sm:text-lg font-extrabold text-slate-900 flex items-center gap-2">
-                  <KeyRound className="w-5 h-5 text-orange-600" /> Set 6-Digit PIN
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5 capitalize">
-                  {session.role} Account • {session.restaurantName}
-                </p>
-              </div>
-            </div>
-
-            <form onSubmit={handleSaveSixDigitPin} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-extrabold text-slate-700 mb-1">
-                  Enter 6-Digit PIN *
-                </label>
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  maxLength={6}
-                  value={pinInput}
-                  onChange={(e) => {
-                    setPinInput(e.target.value.replace(/\D/g, '').slice(0, 6));
-                    if (pinError) setPinError(null);
-                  }}
-                  placeholder="••••••"
-                  className="w-full px-4 py-2.5 bg-slate-50 focus:bg-white border border-slate-300 focus:border-orange-500 rounded-xl text-center text-lg font-mono font-extrabold tracking-[0.4em] outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-extrabold text-slate-700 mb-1">
-                  Confirm 6-Digit PIN *
-                </label>
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  maxLength={6}
-                  value={confirmPinInput}
-                  onChange={(e) => {
-                    setConfirmPinInput(e.target.value.replace(/\D/g, '').slice(0, 6));
-                    if (pinError) setPinError(null);
-                  }}
-                  placeholder="••••••"
-                  className="w-full px-4 py-2.5 bg-slate-50 focus:bg-white border border-slate-300 focus:border-orange-500 rounded-xl text-center text-lg font-mono font-extrabold tracking-[0.4em] outline-none"
-                />
-              </div>
-
-              {pinError && (
-                <p className="text-xs font-bold text-red-600">{pinError}</p>
-              )}
-
-              {pinSuccessMsg && (
-                <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-3.5 py-2 rounded-xl text-xs font-bold">
-                  {pinSuccessMsg}
-                </div>
-              )}
-
-              <button
-                type="submit"
-                className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-3 rounded-xl text-xs shadow-sm transition"
-              >
-                Save 6-Digit PIN ✓
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* OWNER PLAN UPGRADE / RAZORPAY ACTIVATION MODAL */}
       {isOwner && showUpgradeModal && (

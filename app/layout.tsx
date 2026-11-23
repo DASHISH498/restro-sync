@@ -9,8 +9,9 @@ const plusJakartaSans = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: 'RestroSync — Smart Restaurant POS & Kitchen Display System',
-  description: 'Table se seedha kitchen tak. QR Menu, Live Kitchen Display aur Easy Billing.',
+  title: 'RestroSync',
+  description: 'Smart Restaurant POS & KDS',
+  manifest: '/manifest.json',
 };
 
 export default function RootLayout({
