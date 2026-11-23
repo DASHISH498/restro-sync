@@ -192,7 +192,7 @@ export default function HomePage() {
   const handlePinLogin = async (e?: React.FormEvent, enteredPin?: string) => {
     if (e) e.preventDefault();
     const activePin = enteredPin ?? pin;
-    if (!selectedRestaurant || activePin.length !== 4 || verifying) return;
+    if (!selectedRestaurant || activePin.length !== 6 || verifying) return;
 
     setVerifying(true);
     setErrorMsg('');
@@ -214,18 +214,18 @@ export default function HomePage() {
       );
       router.push('/dashboard');
     } else {
-      setErrorMsg('Galat PIN! Kripya sahi 4-digit PIN dalein.');
+      setErrorMsg('Galat PIN! Kripya sahi 6-digit PIN dalein.');
       setPin('');
       setVerifying(false);
     }
   };
 
   const handlePinChange = (rawVal: string) => {
-    const digitsOnly = rawVal.replace(/\D/g, '').slice(0, 4);
+    const digitsOnly = rawVal.replace(/\D/g, '').slice(0, 6);
     setPin(digitsOnly);
     setErrorMsg('');
 
-    if (digitsOnly.length === 4) {
+    if (digitsOnly.length === 6) {
       handlePinLogin(undefined, digitsOnly);
     }
   };
@@ -241,8 +241,8 @@ export default function HomePage() {
       setErrorMsg('Kripya 10-digit registered mobile number dalein.');
       return;
     }
-    if (newOwnerPin.length !== 4) {
-      setErrorMsg('Naya 4-digit Owner PIN dalein.');
+    if (newOwnerPin.length !== 6) {
+      setErrorMsg('Naya 6-digit Owner PIN dalein.');
       return;
     }
 
@@ -317,12 +317,12 @@ export default function HomePage() {
       setRegError('Kripya sahi 10-digit Owner Mobile Number dalein.');
       return;
     }
-    if (regOwnerPin.length !== 4) {
-      setRegError('4-digit Owner PIN set karna zaroori hai.');
+    if (regOwnerPin.length !== 6) {
+      setRegError('6-digit Owner PIN set karna zaroori hai.');
       return;
     }
-    if (regStaffPin && regStaffPin.length !== 4) {
-      setRegError('Staff PIN bhi 4-digit ka hona chahiye (ya khali chhodein).');
+    if (regStaffPin && regStaffPin.length !== 6) {
+      setRegError('Staff PIN bhi 6-digit ka hona chahiye (ya khali chhodein).');
       return;
     }
 
@@ -425,7 +425,7 @@ export default function HomePage() {
           </h1>
 
           <p className="text-sm sm:text-base text-slate-500 mt-4 leading-relaxed">
-            Apne restaurant ka naam search karein, 4-digit PIN dalein aur turant Table Orders,
+            Apne restaurant ka naam search karein, 6-digit PIN dalein aur turant Table Orders,
             QR Menu aur Live Kitchen Display manage karein.
           </p>
 
@@ -742,21 +742,21 @@ export default function HomePage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Owner PIN (4-Digit) *
+                    Owner PIN (6-Digit) *
                   </label>
                   <div className="relative">
                     <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
                       type="password"
                       inputMode="numeric"
-                      maxLength={4}
+                      maxLength={6}
                       required
                       autoComplete="new-password"
                       value={regOwnerPin}
                       onChange={(e) =>
-                        setRegOwnerPin(e.target.value.replace(/\D/g, '').slice(0, 4))
+                        setRegOwnerPin(e.target.value.replace(/\D/g, '').slice(0, 6))
                       }
-                      placeholder="••••"
+                      placeholder="••••••"
                       className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm font-bold tracking-widest outline-none transition"
                     />
                   </div>
@@ -771,13 +771,13 @@ export default function HomePage() {
                     <input
                       type="password"
                       inputMode="numeric"
-                      maxLength={4}
+                      maxLength={6}
                       autoComplete="new-password"
                       value={regStaffPin}
                       onChange={(e) =>
-                        setRegStaffPin(e.target.value.replace(/\D/g, '').slice(0, 4))
+                        setRegStaffPin(e.target.value.replace(/\D/g, '').slice(0, 6))
                       }
-                      placeholder="••••"
+                      placeholder="••••••"
                       className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm font-bold tracking-widest outline-none transition"
                     />
                   </div>
@@ -826,20 +826,20 @@ export default function HomePage() {
             {!isForgotMode ? (
               <form onSubmit={handlePinLogin} autoComplete="off" className="mt-6 space-y-4">
                 <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
-                  Enter 4-Digit Owner or Staff PIN
+                  Enter 6-Digit Owner or Staff PIN
                 </label>
 
                 <input
                   type="password"
                   inputMode="numeric"
-                  maxLength={4}
+                  maxLength={6}
                   autoFocus
                   autoComplete="new-password"
                   name="restro_pin_code"
                   value={pin}
                   onChange={(e) => handlePinChange(e.target.value)}
-                  placeholder="••••"
-                  className="w-full text-center text-2xl tracking-[0.75em] font-extrabold py-3.5 border-2 border-slate-200 focus:border-orange-500 rounded-2xl outline-none transition"
+                  placeholder="••••••"
+                  className="w-full text-center text-2xl tracking-[0.65em] font-extrabold py-3.5 border-2 border-slate-200 focus:border-orange-500 rounded-2xl outline-none transition"
                 />
 
                 {errorMsg && (
@@ -850,7 +850,7 @@ export default function HomePage() {
 
                 <button
                   type="submit"
-                  disabled={pin.length !== 4 || verifying}
+                  disabled={pin.length !== 6 || verifying}
                   className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-orange-300 text-white font-extrabold py-3.5 rounded-2xl text-sm shadow-md transition"
                 >
                   {verifying ? 'Checking PIN...' : 'Unlock Dashboard'}
@@ -876,7 +876,7 @@ export default function HomePage() {
                 className="mt-5 space-y-3.5 text-left"
               >
                 <p className="text-xs text-slate-500 text-center">
-                  Registered <strong>Owner Mobile Number</strong> verify karke naya 4-digit PIN set karein.
+                  Registered <strong>Owner Mobile Number</strong> verify karke naya 6-digit PIN set karein.
                 </p>
 
                 <div>
@@ -902,21 +902,21 @@ export default function HomePage() {
 
                 <div>
                   <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                    Set New 4-Digit Owner PIN
+                    Set New 6-Digit Owner PIN
                   </label>
                   <div className="relative">
                     <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
                       type="password"
                       inputMode="numeric"
-                      maxLength={4}
+                      maxLength={6}
                       required
                       autoComplete="new-password"
                       value={newOwnerPin}
                       onChange={(e) =>
-                        setNewOwnerPin(e.target.value.replace(/\D/g, '').slice(0, 4))
+                        setNewOwnerPin(e.target.value.replace(/\D/g, '').slice(0, 6))
                       }
-                      placeholder="••••"
+                      placeholder="••••••"
                       className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm font-bold tracking-widest outline-none transition"
                     />
                   </div>
