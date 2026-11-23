@@ -16,7 +16,6 @@ import {
   ChefHat,
   Sparkles,
   MessageSquarePlus,
-  LayoutDashboard,
   BookOpen,
   Flame,
   MapPin,
@@ -619,38 +618,20 @@ function CustomerOrderContent() {
 
       <header className="bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-30">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
-          {hasStaffSession ? (
-            <Link
-              href="/dashboard"
-              className="flex items-center gap-2.5 text-left group cursor-pointer"
-            >
-              <div className="bg-gradient-to-br from-orange-500 to-orange-600 text-white p-2.5 rounded-xl shadow-sm group-hover:scale-105 transition">
-                <UtensilsCrossed className="w-5 h-5" />
-              </div>
-              <div>
-                <h1 className="text-base sm:text-lg font-extrabold text-slate-900 leading-tight group-hover:text-orange-600 transition">
-                  {restaurant.name}
-                </h1>
-                <p className="text-[11px] text-slate-500 flex items-center gap-1">
-                  <MapPin className="w-3 h-3 text-slate-400" /> {restaurant.city}
-                </p>
-              </div>
-            </Link>
-          ) : (
-            <div className="flex items-center gap-2.5 text-left select-none">
-              <div className="bg-gradient-to-br from-orange-500 to-orange-600 text-white p-2.5 rounded-xl shadow-sm">
-                <UtensilsCrossed className="w-5 h-5" />
-              </div>
-              <div>
-                <h1 className="text-base sm:text-lg font-extrabold text-slate-900 leading-tight">
-                  {restaurant.name}
-                </h1>
-                <p className="text-[11px] text-slate-500 flex items-center gap-1">
-                  <MapPin className="w-3 h-3 text-slate-400" /> {restaurant.city}
-                </p>
-              </div>
+          {/* Restaurant branding is non-clickable on customer QR view */}
+          <div className="flex items-center gap-2.5 text-left select-none cursor-default">
+            <div className="bg-gradient-to-br from-orange-500 to-orange-600 text-white p-2.5 rounded-xl shadow-sm">
+              <UtensilsCrossed className="w-5 h-5" />
             </div>
-          )}
+            <div>
+              <h1 className="text-base sm:text-lg font-extrabold text-slate-900 leading-tight">
+                {restaurant.name}
+              </h1>
+              <p className="text-[11px] text-slate-500 flex items-center gap-1">
+                <MapPin className="w-3 h-3 text-slate-400" /> {restaurant.city}
+              </p>
+            </div>
+          </div>
 
           <div className="flex items-center gap-2 order-3 lg:order-2 w-full lg:w-auto lg:flex-1 lg:max-w-md">
             <div className="relative flex-1">
@@ -680,16 +661,6 @@ function CustomerOrderContent() {
           </div>
 
           <div className="flex items-center gap-2 order-2 lg:order-3">
-            {hasStaffSession && (
-              <Link
-                href="/dashboard"
-                className="bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200 px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1 transition"
-              >
-                <LayoutDashboard className="w-3.5 h-3.5" />
-                <span>Dashboard</span>
-              </Link>
-            )}
-
             <div className="bg-slate-900 text-white px-3.5 py-1.5 rounded-full text-xs font-extrabold tracking-wide shadow-sm">
               TABLE {tableNumber}
             </div>
