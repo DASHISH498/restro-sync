@@ -21,6 +21,11 @@ import {
   Flame,
   MapPin,
   ShieldCheck,
+  User,
+  Phone,
+  Printer,
+  Receipt,
+  AlertCircle,
 } from 'lucide-react';
 
 interface RestaurantInfo {
@@ -51,6 +56,10 @@ interface ActiveOrder {
   total_amount: number;
   payment_status?: string;
   payment_method?: string;
+  customer_name?: string | null;
+  customer_phone?: string | null;
+  invoice_number?: string | null;
+  razorpay_payment_id?: string | null;
   created_at: string;
   order_items: {
     id: string;
@@ -58,6 +67,19 @@ interface ActiveOrder {
     quantity: number;
     price: number;
   }[];
+}
+
+function generateInvoiceNumber(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  const rand = Math.floor(1000 + Math.random() * 9000);
+  return `INV-${y}${m}${d}-${rand}`;
+}
+
+function getShortBillNumber(orderId: string): string {
+  return `BILL-${orderId.slice(0, 6).toUpperCase()}`;
 }
 
 function CustomerOrderContent() {
@@ -75,11 +97,19 @@ function CustomerOrderContent() {
   const [vegOnly, setVegOnly] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
 
+  // Customer Details (Mandatory for QR Order)
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [formError, setFormError] = useState<string | null>(null);
+
   // Cart & Checkout States
   const [cart, setCart] = useState<Record<string, CartItem>>({});
   const [showCartModal, setShowCartModal] = useState(false);
   const [placingOrder, setPlacingOrder] = useState(false);
   const [orderSuccessToast, setOrderSuccessToast] = useState(false);
+
+  // Printable Digital Receipt Modal
+  const [receiptOrder, setReceiptOrder] = useState<ActiveOrder | null>(null);
 
   // Live Active Orders on this Table
   const [tableOrders, setTableOrders] = useState<ActiveOrder[]>([]);
@@ -88,6 +118,18 @@ function CustomerOrderContent() {
     const saved = localStorage.getItem('restro_session');
     if (saved) {
       setHasStaffSession(true);
+    }
+
+    // Agar customer ne pehle details bhari thi toh autofill rakhein
+    const savedCust = sessionStorage.getItem('restro_customer_info');
+    if (savedCust) {
+      try {
+        const parsed = JSON.parse(savedCust);
+        if (parsed.name) setCustomerName(parsed.name);
+        if (parsed.phone) setCustomerPhone(parsed.phone);
+      } catch {
+        // Ignore parse error
+      }
     }
   }, []);
 
@@ -123,7 +165,7 @@ function CustomerOrderContent() {
     const { data } = await supabase
       .from('orders')
       .select(
-        'id, status, total_amount, payment_status, payment_method, created_at, order_items(id, item_name, quantity, price)'
+        'id, status, total_amount, payment_status, payment_method, customer_name, customer_phone, invoice_number, razorpay_payment_id, created_at, order_items(id, item_name, quantity, price)'
       )
       .eq('restaurant_id', restaurantId)
       .eq('table_number', tableNumber)
@@ -206,6 +248,28 @@ function CustomerOrderContent() {
     });
   };
 
+  const validateCustomerDetails = (): boolean => {
+    const cleanName = customerName.trim();
+    const cleanPhone = customerPhone.replace(/\D/g, '');
+
+    if (cleanName.length < 2) {
+      setFormError('Kripya apna poora naam (Customer Name) likhein.');
+      return false;
+    }
+
+    if (cleanPhone.length !== 10) {
+      setFormError('Kripya 10-digit ka valid mobile number likhein.');
+      return false;
+    }
+
+    setFormError(null);
+    sessionStorage.setItem(
+      'restro_customer_info',
+      JSON.stringify({ name: cleanName, phone: cleanPhone })
+    );
+    return true;
+  };
+
   // Load Razorpay Checkout Script Dynamically
   const loadRazorpayScript = (): Promise<boolean> => {
     return new Promise((resolve) => {
@@ -235,6 +299,10 @@ function CustomerOrderContent() {
       0
     );
 
+    const invoiceNo = generateInvoiceNumber();
+    const cleanName = customerName.trim() || 'Walk-in Guest';
+    const cleanPhone = customerPhone.replace(/\D/g, '') || null;
+
     const { data: newOrder, error: orderError } = await supabase
       .from('orders')
       .insert([
@@ -245,6 +313,9 @@ function CustomerOrderContent() {
           total_amount: totalAmount,
           payment_method: paymentMethod,
           payment_status: paymentStatus,
+          customer_name: cleanName,
+          customer_phone: cleanPhone,
+          invoice_number: invoiceNo,
           razorpay_payment_id: razorpayPaymentId || null,
         },
       ])
@@ -252,7 +323,7 @@ function CustomerOrderContent() {
       .single();
 
     if (orderError || !newOrder) {
-      alert('Order place karne mein error aaya. Dobara try karein.');
+      setFormError('Order save karne mein error aaya. Dobara try karein.');
       setPlacingOrder(false);
       return;
     }
@@ -280,6 +351,10 @@ function CustomerOrderContent() {
         total_amount: totalAmount,
         payment_status: paymentStatus,
         payment_method: paymentMethod,
+        customer_name: cleanName,
+        customer_phone: cleanPhone,
+        invoice_number: invoiceNo,
+        razorpay_payment_id: razorpayPaymentId || null,
         created_at: newOrder.created_at,
         order_items: (insertedItems || []).map((i) => ({
           id: i.id,
@@ -294,13 +369,20 @@ function CustomerOrderContent() {
       setShowCartModal(false);
       setOrderSuccessToast(true);
       setTimeout(() => setOrderSuccessToast(false), 5000);
+
+      // Customer ne online pay kiya ho toh turant Digital Bill Receipt Modal kholein
+      if (paymentStatus === 'paid') {
+        setReceiptOrder(instantOrder);
+      }
     }
   };
 
-  // Customer QR Prepaid Checkout (Razorpay First -> Then Order Place)
+  // Customer QR Prepaid Checkout (Validate Name/Phone -> Razorpay -> Order & Receipt)
   const handlePrepaidRazorpayOrder = async () => {
     const cartValues = Object.values(cart);
     if (cartValues.length === 0 || !restaurantId || !restaurant) return;
+
+    if (!validateCustomerDetails()) return;
 
     const totalAmount = cartValues.reduce(
       (sum, entry) => sum + Number(entry.menuItem.price) * entry.quantity,
@@ -312,7 +394,7 @@ function CustomerOrderContent() {
     try {
       const loaded = await loadRazorpayScript();
       if (!loaded) {
-        alert('Payment gateway load nahi ho paya. Internet check karein.');
+        setFormError('Payment gateway load nahi ho paya. Internet check karein.');
         setPlacingOrder(false);
         return;
       }
@@ -329,12 +411,11 @@ function CustomerOrderContent() {
 
       const orderData = await res.json();
       if (!res.ok || !orderData.orderId) {
-        alert(orderData.error || 'Payment start karne mein error aaya.');
+        setFormError(orderData.error || 'Payment start karne mein error aaya.');
         setPlacingOrder(false);
         return;
       }
 
-      // Close mobile drawer so Razorpay modal stays cleanly interactive
       setShowCartModal(false);
 
       const options = {
@@ -342,13 +423,16 @@ function CustomerOrderContent() {
         amount: orderData.amount,
         currency: orderData.currency,
         name: restaurant.name,
-        description: `Table ${tableNumber} Food Order`,
+        description: `Table ${tableNumber} • ${customerName.trim()}`,
         order_id: orderData.orderId,
+        prefill: {
+          name: customerName.trim(),
+          contact: customerPhone.replace(/\D/g, ''),
+        },
         theme: {
           color: '#ea580c',
         },
         handler: async function (response: { razorpay_payment_id: string }) {
-          // Payment successful! Ab order kitchen & dashboard par bhejein
           await saveOrderToDatabase('paid', 'upi', response.razorpay_payment_id);
         },
         modal: {
@@ -364,13 +448,14 @@ function CustomerOrderContent() {
       const rzp = new RazorpayConstructor(options);
       rzp.open();
     } catch {
-      alert('Payment process mein dikkat aayi. Dobara try karein.');
+      setFormError('Payment process mein dikkat aayi. Dobara try karein.');
       setPlacingOrder(false);
     }
   };
 
   // Staff/Owner Direct Order (Pay Later at Counter)
   const handleDirectStaffOrder = async () => {
+    setFormError(null);
     setPlacingOrder(true);
     await saveOrderToDatabase('unpaid', 'unpaid');
   };
@@ -411,6 +496,30 @@ function CustomerOrderContent() {
 
   return (
     <div className="min-h-screen bg-slate-50 pb-28 lg:pb-16">
+      {/* Print-Only Styles taaki sirf clean Bill Receipt hi print/PDF save ho */}
+      <style jsx global>{`
+        @media print {
+          body * {
+            visibility: hidden;
+          }
+          #printable-customer-receipt,
+          #printable-customer-receipt * {
+            visibility: visible;
+          }
+          #printable-customer-receipt {
+            position: fixed;
+            left: 0;
+            top: 0;
+            width: 100%;
+            box-shadow: none !important;
+            border: none !important;
+          }
+          .no-print {
+            display: none !important;
+          }
+        }
+      `}</style>
+
       {/* Full-Width Top Sticky Header */}
       <header className="bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-30">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
@@ -510,7 +619,7 @@ function CustomerOrderContent() {
                 Welcome to {restaurant.name}
               </h2>
               <p className="text-xs text-slate-300 mt-1">
-                Apni pasandida dishes select karein, instant payment karein aur seedha kitchen mein order bhejein.
+                Apni pasandida dishes select karein, instant payment karein aur digital invoice download karein.
               </p>
             </div>
             <div className="hidden sm:flex w-14 h-14 rounded-2xl bg-orange-500/20 text-orange-400 items-center justify-center shrink-0">
@@ -520,18 +629,20 @@ function CustomerOrderContent() {
 
           {/* Order Sent Toast */}
           {orderSuccessToast && (
-            <div className="bg-emerald-600 text-white p-4 rounded-2xl shadow-lg flex items-center gap-3">
-              <CheckCircle2 className="w-6 h-6 shrink-0" />
-              <div>
-                <p className="font-bold text-sm">Payment Done & Order Sent to Kitchen!</p>
-                <p className="text-xs text-emerald-100">
-                  Chef ne aapka order receive kar liya hai. Live status tracker dekhein.
-                </p>
+            <div className="bg-emerald-600 text-white p-4 rounded-2xl shadow-lg flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <CheckCircle2 className="w-6 h-6 shrink-0" />
+                <div>
+                  <p className="font-bold text-sm">Payment Done & Order Sent to Kitchen!</p>
+                  <p className="text-xs text-emerald-100">
+                    Chef ne aapka order receive kar liya hai. Digital bill neeche tracker se kabhi bhi download karein.
+                  </p>
+                </div>
               </div>
             </div>
           )}
 
-          {/* Menu Items 2-Column Grid OR Smart Empty State */}
+          {/* Menu Items 2-Column Grid */}
           {menuItems.length === 0 ? (
             <div className="bg-white rounded-3xl p-10 sm:p-14 text-center border border-slate-200 shadow-sm">
               <div className="w-14 h-14 rounded-2xl bg-orange-100 text-orange-600 flex items-center justify-center mx-auto mb-3">
@@ -610,7 +721,6 @@ function CustomerOrderContent() {
                       )}
                     </div>
 
-                    {/* Add / Quantity Controls */}
                     <div className="shrink-0">
                       {!item.is_available ? (
                         <span className="text-xs font-bold text-slate-400 bg-slate-100 px-3 py-1.5 rounded-xl">
@@ -675,11 +785,18 @@ function CustomerOrderContent() {
                   return (
                     <div
                       key={ord.id}
-                      className="bg-slate-50 border border-slate-200/80 p-3.5 rounded-xl space-y-3"
+                      className="bg-slate-50 border border-slate-200/80 p-3.5 rounded-xl space-y-2.5"
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="text-xs text-slate-700 font-medium">
-                          {ord.order_items?.map((i) => `${i.quantity}× ${i.item_name}`).join(', ')}
+                          {ord.customer_name && (
+                            <p className="text-[11px] font-extrabold text-slate-800 mb-0.5">
+                              {ord.customer_name} • {ord.invoice_number || getShortBillNumber(ord.id)}
+                            </p>
+                          )}
+                          <p>
+                            {ord.order_items?.map((i) => `${i.quantity}× ${i.item_name}`).join(', ')}
+                          </p>
                           <div className="flex items-center gap-2 mt-1">
                             <p className="font-extrabold text-slate-900 text-sm">
                               ₹{ord.total_amount}
@@ -751,6 +868,16 @@ function CustomerOrderContent() {
                           </p>
                         </div>
                       </div>
+
+                      {/* Download / Print Bill Button */}
+                      <button
+                        type="button"
+                        onClick={() => setReceiptOrder(ord)}
+                        className="w-full mt-1 bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 font-extrabold text-[11px] py-2 rounded-lg flex items-center justify-center gap-1.5 transition"
+                      >
+                        <Receipt className="w-3.5 h-3.5 text-orange-600" />
+                        <span>View / Download Bill Receipt</span>
+                      </button>
                     </div>
                   );
                 })}
@@ -777,7 +904,7 @@ function CustomerOrderContent() {
               </div>
             ) : (
               <div className="space-y-3 pt-3">
-                <div className="max-h-72 overflow-y-auto space-y-3 pr-1">
+                <div className="max-h-56 overflow-y-auto space-y-2.5 pr-1">
                   {cartEntries.map(({ menuItem, quantity, notes }) => (
                     <div key={menuItem.id} className="bg-slate-50 p-3 rounded-xl space-y-2">
                       <div className="flex items-center justify-between gap-2">
@@ -816,13 +943,51 @@ function CustomerOrderContent() {
                   ))}
                 </div>
 
-                <div className="pt-3 border-t border-slate-200 space-y-2.5">
+                {/* Mandatory Customer Name & Mobile Input */}
+                <div className="bg-orange-50/70 border border-orange-200 p-3 rounded-xl space-y-2">
+                  <p className="text-[11px] font-extrabold text-slate-800">
+                    Your Details (For Bill & Invoice) *
+                  </p>
+                  <div className="relative">
+                    <User className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={customerName}
+                      onChange={(e) => {
+                        setCustomerName(e.target.value);
+                        if (formError) setFormError(null);
+                      }}
+                      placeholder="Your Full Name *"
+                      className="w-full pl-8 pr-3 py-1.5 bg-white border border-slate-300 focus:border-orange-500 rounded-lg text-xs font-semibold outline-none"
+                    />
+                  </div>
+                  <div className="relative">
+                    <Phone className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="tel"
+                      maxLength={10}
+                      value={customerPhone}
+                      onChange={(e) => {
+                        setCustomerPhone(e.target.value.replace(/\D/g, ''));
+                        if (formError) setFormError(null);
+                      }}
+                      placeholder="10-Digit Mobile Number *"
+                      className="w-full pl-8 pr-3 py-1.5 bg-white border border-slate-300 focus:border-orange-500 rounded-lg text-xs font-semibold outline-none"
+                    />
+                  </div>
+                  {formError && (
+                    <p className="text-[11px] font-bold text-red-600 flex items-center gap-1">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {formError}
+                    </p>
+                  )}
+                </div>
+
+                <div className="pt-2 border-t border-slate-200 space-y-2.5">
                   <div className="flex items-center justify-between font-extrabold text-slate-900 text-sm">
                     <span>Total Payable</span>
                     <span>₹{totalCartPrice}</span>
                   </div>
 
-                  {/* Primary: Prepaid Razorpay Payment Button */}
                   <button
                     onClick={handlePrepaidRazorpayOrder}
                     disabled={placingOrder}
@@ -836,7 +1001,6 @@ function CustomerOrderContent() {
                     </span>
                   </button>
 
-                  {/* Secondary: Staff/Owner Counter Pay-Later Option */}
                   {hasStaffSession && (
                     <button
                       onClick={handleDirectStaffOrder}
@@ -879,17 +1043,17 @@ function CustomerOrderContent() {
         </div>
       )}
 
-      {/* Mobile Cart & Cooking Notes Drawer Modal */}
+      {/* Mobile Cart, Customer Details & Cooking Notes Drawer Modal */}
       {showCartModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
-          <div className="bg-white rounded-t-3xl sm:rounded-3xl max-w-lg w-full p-6 shadow-2xl max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+          <div className="bg-white rounded-t-3xl sm:rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl max-h-[92vh] flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 shrink-0">
               <div>
                 <h3 className="text-lg font-extrabold text-slate-900">
                   Your Order • Table {tableNumber}
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Chef ke liye cooking instructions bhi likh sakte hain
+                  Bill aur invoice ke liye apna naam aur mobile number bharein
                 </p>
               </div>
               <button
@@ -900,7 +1064,50 @@ function CustomerOrderContent() {
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto py-4 space-y-4">
+            <div className="flex-1 overflow-y-auto py-3.5 space-y-3.5">
+              {/* Mandatory Customer Info Form */}
+              <div className="bg-orange-50/80 border border-orange-200 p-3.5 rounded-2xl space-y-2.5">
+                <p className="text-xs font-extrabold text-slate-900">
+                  Customer Details (Mandatory) *
+                </p>
+
+                <div className="relative">
+                  <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={customerName}
+                    onChange={(e) => {
+                      setCustomerName(e.target.value);
+                      if (formError) setFormError(null);
+                    }}
+                    placeholder="Enter Your Full Name *"
+                    className="w-full pl-9 pr-3 py-2 bg-white border border-slate-300 focus:border-orange-500 rounded-xl text-xs font-semibold outline-none"
+                  />
+                </div>
+
+                <div className="relative">
+                  <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="tel"
+                    maxLength={10}
+                    value={customerPhone}
+                    onChange={(e) => {
+                      setCustomerPhone(e.target.value.replace(/\D/g, ''));
+                      if (formError) setFormError(null);
+                    }}
+                    placeholder="Enter 10-Digit Mobile Number *"
+                    className="w-full pl-9 pr-3 py-2 bg-white border border-slate-300 focus:border-orange-500 rounded-xl text-xs font-semibold outline-none"
+                  />
+                </div>
+
+                {formError && (
+                  <p className="text-xs font-bold text-red-600 flex items-center gap-1.5">
+                    <AlertCircle className="w-4 h-4 shrink-0" /> {formError}
+                  </p>
+                )}
+              </div>
+
+              {/* Cart Items */}
               {cartEntries.map(({ menuItem, quantity, notes }) => (
                 <div key={menuItem.id} className="bg-slate-50 p-3.5 rounded-2xl space-y-2.5">
                   <div className="flex items-center justify-between">
@@ -935,14 +1142,14 @@ function CustomerOrderContent() {
                       value={notes}
                       onChange={(e) => updateItemNote(menuItem.id, e.target.value)}
                       placeholder="Add note for chef (e.g., Less spicy, No onion)..."
-                      className="w-full pl-8 pr-3 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:border-orange-500"
+                      className="w-full pl-8 pr-3 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:border-orange-500 bg-white"
                     />
                   </div>
                 </div>
               ))}
             </div>
 
-            <div className="pt-3 border-t border-slate-200 space-y-2.5">
+            <div className="pt-3 border-t border-slate-200 space-y-2.5 shrink-0">
               <div className="flex items-center justify-between text-base font-extrabold text-slate-900">
                 <span>Total Payable</span>
                 <span>₹{totalCartPrice}</span>
@@ -970,6 +1177,135 @@ function CustomerOrderContent() {
                   Send KOT Only (Pay Later at Counter)
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PRINTABLE / DOWNLOADABLE DIGITAL BILL RECEIPT MODAL */}
+      {receiptOrder && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div
+            id="printable-customer-receipt"
+            className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto space-y-4"
+          >
+            {/* Receipt Header */}
+            <div className="text-center border-b border-dashed border-slate-300 pb-4 relative">
+              <button
+                type="button"
+                onClick={() => setReceiptOrder(null)}
+                className="no-print absolute right-0 top-0 p-1.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+
+              <div className="w-11 h-11 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto mb-2">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+              <h3 className="text-lg font-extrabold text-slate-900">{restaurant.name}</h3>
+              <p className="text-xs text-slate-500">{restaurant.city}</p>
+              <span className="inline-block mt-2 text-[10px] font-extrabold uppercase tracking-wider px-3 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                {receiptOrder.payment_status === 'paid' ? 'PAID TAX INVOICE ✓' : 'ORDER RECEIPT'}
+              </span>
+            </div>
+
+            {/* Invoice, Bill & Customer Meta */}
+            <div className="bg-slate-50 rounded-2xl p-3.5 text-xs space-y-1.5 border border-slate-200/80">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Invoice No:</span>
+                <span className="font-extrabold text-slate-900">
+                  {receiptOrder.invoice_number || `INV-${receiptOrder.id.slice(0, 8).toUpperCase()}`}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Bill No:</span>
+                <span className="font-extrabold text-slate-900">
+                  {getShortBillNumber(receiptOrder.id)}
+                </span>
+              </div>
+              {receiptOrder.razorpay_payment_id && (
+                <div className="flex justify-between gap-2">
+                  <span className="text-slate-500 shrink-0">Payment ID:</span>
+                  <span className="font-mono font-bold text-slate-800 text-[11px] break-all text-right">
+                    {receiptOrder.razorpay_payment_id}
+                  </span>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <span className="text-slate-500">Table:</span>
+                <span className="font-bold text-slate-900">Table {tableNumber}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Customer:</span>
+                <span className="font-bold text-slate-900">
+                  {receiptOrder.customer_name || customerName || 'Walk-in Guest'}
+                </span>
+              </div>
+              {(receiptOrder.customer_phone || customerPhone) && (
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Mobile:</span>
+                  <span className="font-bold text-slate-900">
+                    +91 {receiptOrder.customer_phone || customerPhone}
+                  </span>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <span className="text-slate-500">Date & Time:</span>
+                <span className="font-semibold text-slate-700">
+                  {new Date(receiptOrder.created_at).toLocaleString('en-IN', {
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </span>
+              </div>
+            </div>
+
+            {/* Ordered Items Table */}
+            <div className="border-t border-b border-dashed border-slate-300 py-3 space-y-2">
+              <div className="flex justify-between text-[11px] font-extrabold uppercase text-slate-400">
+                <span>Item</span>
+                <span>Amount</span>
+              </div>
+              {receiptOrder.order_items?.map((item) => (
+                <div key={item.id} className="flex justify-between text-xs text-slate-800">
+                  <span>
+                    <strong>{item.quantity}×</strong> {item.item_name}
+                  </span>
+                  <span className="font-bold">₹{item.price * item.quantity}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Grand Total */}
+            <div className="flex items-center justify-between text-base font-extrabold text-slate-900">
+              <span>Grand Total Paid</span>
+              <span className="text-emerald-700">₹{receiptOrder.total_amount}</span>
+            </div>
+
+            <p className="text-[11px] text-center text-slate-400">
+              Thank you for dining at {restaurant.name}! Save or screenshot this receipt for your reference.
+            </p>
+
+            {/* Print / Download PDF Button */}
+            <div className="no-print grid grid-cols-2 gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="bg-slate-900 hover:bg-slate-800 text-white font-extrabold py-3 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Print / Save PDF</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setReceiptOrder(null)}
+                className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold py-3 rounded-xl text-xs transition"
+              >
+                Done
+              </button>
             </div>
           </div>
         </div>

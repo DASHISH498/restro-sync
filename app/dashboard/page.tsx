@@ -34,6 +34,9 @@ import {
   Crown,
   MessageCircle,
   AlertTriangle,
+  Search,
+  User,
+  Phone,
 } from 'lucide-react';
 
 interface SessionData {
@@ -58,6 +61,10 @@ interface OrderRecord {
   total_amount: number;
   payment_method: string;
   payment_status?: string;
+  customer_name?: string | null;
+  customer_phone?: string | null;
+  invoice_number?: string | null;
+  razorpay_payment_id?: string | null;
   created_at: string;
   order_items: {
     id: string;
@@ -76,7 +83,6 @@ interface MenuStockItem {
   is_available: boolean;
 }
 
-// Yahan apna WhatsApp number (91 + 10 digits) dalein
 const ADMIN_WHATSAPP = '919079083101';
 
 const UPGRADE_PLANS = [
@@ -111,12 +117,13 @@ export default function DashboardPage() {
   const [stockItems, setStockItems] = useState<MenuStockItem[]>([]);
   const [loadingStock, setLoadingStock] = useState(false);
 
-  // Owner Sales History Modal & Date Filters
+  // Owner Sales History Modal, Date Filters & Bill Search
   const [todayIso, setTodayIso] = useState<string>('');
   const [showSalesModal, setShowSalesModal] = useState(false);
   const [salesFilter, setSalesFilter] = useState<'today' | '7days' | 'all' | 'custom'>('today');
   const [customFromDate, setCustomFromDate] = useState<string>('');
   const [customToDate, setCustomToDate] = useState<string>('');
+  const [billSearchQuery, setBillSearchQuery] = useState<string>('');
 
   // Owner Plan Upgrade Modal
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
@@ -139,7 +146,6 @@ export default function DashboardPage() {
     try {
       const parsed: SessionData = JSON.parse(raw);
 
-      // Staff ko dashboard ki zaroorat nahi — seedha Kitchen Display (KDS) par bhejein
       if (parsed.role === 'staff') {
         router.replace(`/kitchen/${parsed.restaurantId}`);
         return;
@@ -154,7 +160,6 @@ export default function DashboardPage() {
     }
   }, [router]);
 
-  // LOCK BACKGROUND PAGE SCROLL WHEN ANY MODAL IS OPEN
   useEffect(() => {
     const anyModalOpen =
       showSalesModal ||
@@ -228,7 +233,7 @@ export default function DashboardPage() {
       supabase
         .from('orders')
         .select(
-          'id, table_number, status, total_amount, payment_method, payment_status, created_at, order_items(id, item_name, quantity, price, notes)'
+          'id, table_number, status, total_amount, payment_method, payment_status, customer_name, customer_phone, invoice_number, razorpay_payment_id, created_at, order_items(id, item_name, quantity, price, notes)'
         )
         .eq('restaurant_id', session.restaurantId)
         .order('created_at', { ascending: false }),
@@ -379,7 +384,26 @@ export default function DashboardPage() {
   );
   const todayRevenue = todayCompleted.reduce((sum, o) => sum + Number(o.total_amount), 0);
 
-  const filteredSalesOrders = completedOrders.filter((ord) => {
+  // Search by Invoice No, Bill No, Razorpay Payment ID, Customer Name or Mobile
+  const cleanSearch = billSearchQuery.trim().toLowerCase();
+
+  const filteredSalesOrders = (cleanSearch ? orders : completedOrders).filter((ord) => {
+    if (cleanSearch) {
+      const inv = (ord.invoice_number || '').toLowerCase();
+      const billNo = `bill-${ord.id.slice(0, 6).toLowerCase()}`;
+      const payId = (ord.razorpay_payment_id || '').toLowerCase();
+      const custName = (ord.customer_name || '').toLowerCase();
+      const custPhone = (ord.customer_phone || '').toLowerCase();
+
+      return (
+        inv.includes(cleanSearch) ||
+        billNo.includes(cleanSearch) ||
+        payId.includes(cleanSearch) ||
+        custName.includes(cleanSearch) ||
+        custPhone.includes(cleanSearch)
+      );
+    }
+
     const ordDate = new Date(ord.created_at);
 
     if (salesFilter === 'today') {
@@ -489,7 +513,7 @@ export default function DashboardPage() {
                   className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition"
                 >
                   <IndianRupee className="w-4 h-4" />
-                  <span>Sales History</span>
+                  <span>Bills & Sales</span>
                 </button>
 
                 <Link
@@ -585,14 +609,14 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between text-slate-600 text-xs font-bold">
               <span>Today&apos;s Total Sale</span>
               <span className="flex items-center gap-1 text-emerald-600 font-extrabold">
-                View History <ArrowUpRight className="w-4 h-4 group-hover:translate-x-0.5 transition" />
+                Track Bills <ArrowUpRight className="w-4 h-4 group-hover:translate-x-0.5 transition" />
               </span>
             </div>
             <p className="text-2xl font-extrabold text-slate-900 mt-2">
               ₹{todayRevenue.toLocaleString('en-IN')}
             </p>
             <p className="text-[11px] text-emerald-700 font-semibold mt-1">
-              {todayCompleted.length} Bills Settled Today • Tap for Calendar
+              {todayCompleted.length} Bills Settled Today • Search Invoice / ID
             </p>
           </button>
 
@@ -702,6 +726,7 @@ export default function DashboardPage() {
               );
               const isTableFullyPaid =
                 isOccupied && tOrders.every((o) => o.payment_status === 'paid');
+              const guestName = tOrders[0]?.customer_name;
 
               return (
                 <button
@@ -714,7 +739,7 @@ export default function DashboardPage() {
                       router.push(`/order/${session.restaurantId}/${tableNum}`);
                     }
                   }}
-                  className={`p-4 rounded-2xl border-2 text-left transition flex flex-col justify-between min-h-[120px] cursor-pointer hover:shadow-md ${
+                  className={`p-4 rounded-2xl border-2 text-left transition flex flex-col justify-between min-h-[125px] cursor-pointer hover:shadow-md ${
                     hasReady
                       ? 'bg-emerald-50/80 border-emerald-500 shadow-sm'
                       : isAllServed
@@ -750,10 +775,15 @@ export default function DashboardPage() {
                   </div>
 
                   {isOccupied ? (
-                    <div className="mt-3">
-                      <p className="text-xs font-bold text-slate-700">
+                    <div className="mt-2.5">
+                      {guestName && (
+                        <p className="text-[11px] font-extrabold text-slate-900 truncate">
+                          {guestName}
+                        </p>
+                      )}
+                      <p className="text-[11px] font-semibold text-slate-600">
                         {isAllServed
-                          ? 'Guest Dining • Clear on Exit'
+                          ? 'Dining • Clear on Exit'
                           : `${totalDishes} Dish${totalDishes > 1 ? 'es' : ''} Running`}
                       </p>
                       <div className="flex items-center justify-between gap-1 mt-1">
@@ -814,6 +844,17 @@ export default function DashboardPage() {
                         <span className="inline-block font-extrabold text-slate-900 bg-slate-100 px-2 py-0.5 rounded-md">
                           Table {ord.table_number}
                         </span>
+                        {ord.customer_name && (
+                          <span className="font-bold text-slate-800">
+                            {ord.customer_name}
+                            {ord.customer_phone ? ` (${ord.customer_phone})` : ''}
+                          </span>
+                        )}
+                        {ord.invoice_number && (
+                          <span className="text-[10px] font-mono font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                            {ord.invoice_number}
+                          </span>
+                        )}
                         {isPaid ? (
                           <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-700 border border-emerald-200">
                             PAID ONLINE ✓ (₹{ord.total_amount})
@@ -876,8 +917,8 @@ export default function DashboardPage() {
                 onClick={() => setShowSalesModal(true)}
                 className="text-xs font-extrabold text-orange-600 hover:underline flex items-center gap-1.5 self-start sm:self-auto"
               >
-                <Calendar className="w-3.5 h-3.5 shrink-0" />
-                <span>View All & Filter ({completedOrders.length}) &rarr;</span>
+                <Search className="w-3.5 h-3.5 shrink-0" />
+                <span>Track by Invoice / Payment ID ({completedOrders.length}) &rarr;</span>
               </button>
             </div>
 
@@ -893,9 +934,21 @@ export default function DashboardPage() {
                     className="py-3 flex items-start justify-between gap-3 text-xs"
                   >
                     <div className="min-w-0 flex-1">
-                      <span className="font-extrabold text-slate-900 block">
-                        Table {ord.table_number}
-                      </span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-extrabold text-slate-900">
+                          Table {ord.table_number}
+                        </span>
+                        {ord.customer_name && (
+                          <span className="font-bold text-slate-700">
+                            • {ord.customer_name}
+                          </span>
+                        )}
+                        {ord.invoice_number && (
+                          <span className="text-[10px] font-mono font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                            {ord.invoice_number}
+                          </span>
+                        )}
+                      </div>
                       <p className="text-slate-500 mt-0.5 leading-relaxed break-words">
                         {ord.order_items
                           ?.map((i) => `${i.quantity}× ${i.item_name}`)
@@ -987,17 +1040,17 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* OWNER FULL SALES HISTORY MODAL */}
+      {/* OWNER FULL SALES HISTORY & BILL/INVOICE TRACKER MODAL */}
       {isOwner && showSalesModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 z-50">
-          <div className="bg-white rounded-3xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl max-h-[85vh] flex flex-col overflow-hidden border border-slate-200">
-            <div className="flex items-start justify-between gap-2 pb-3.5 border-b border-slate-200 shrink-0">
+          <div className="bg-white rounded-3xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl max-h-[88vh] flex flex-col overflow-hidden border border-slate-200">
+            <div className="flex items-start justify-between gap-2 pb-3 border-b border-slate-200 shrink-0">
               <div>
                 <h3 className="text-base sm:text-lg font-extrabold text-slate-900">
-                  Sales & Billing History
+                  Bills, Invoice Tracker & Sales History
                 </h3>
                 <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5">
-                  {session.restaurantName} • Date-wise Revenue Breakdown
+                  Invoice No., Bill No., Payment ID, Name ya Mobile se bill track karein
                 </p>
               </div>
               <button
@@ -1009,32 +1062,57 @@ export default function DashboardPage() {
               </button>
             </div>
 
-            <div className="flex items-center gap-2 pt-3.5 overflow-x-auto pb-1 shrink-0 no-scrollbar">
-              {(
-                [
-                  { id: 'today', label: 'Today' },
-                  { id: '7days', label: 'Last 7 Days' },
-                  { id: 'all', label: 'All Time' },
-                  { id: 'custom', label: 'Custom Date' },
-                ] as const
-              ).map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setSalesFilter(tab.id)}
-                  className={`px-3 sm:px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-                    salesFilter === tab.id
-                      ? 'bg-slate-900 text-white shadow-sm'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                  }`}
-                >
-                  {tab.id === 'custom' && <Calendar className="w-3.5 h-3.5" />}
-                  <span>{tab.label}</span>
-                </button>
-              ))}
+            {/* Search Input for Bill / Invoice / Payment ID / Mobile */}
+            <div className="pt-3 shrink-0">
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={billSearchQuery}
+                  onChange={(e) => setBillSearchQuery(e.target.value)}
+                  placeholder="Search Invoice (INV-...), Bill No, Payment ID (pay_...), Name or Phone..."
+                  className="w-full pl-10 pr-8 py-2.5 bg-slate-50 focus:bg-white border border-slate-300 focus:border-orange-500 rounded-xl text-xs font-semibold outline-none transition"
+                />
+                {billSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setBillSearchQuery('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
             </div>
 
-            {salesFilter === 'custom' && (
+            {!cleanSearch && (
+              <div className="flex items-center gap-2 pt-3 overflow-x-auto pb-1 shrink-0 no-scrollbar">
+                {(
+                  [
+                    { id: 'today', label: 'Today' },
+                    { id: '7days', label: 'Last 7 Days' },
+                    { id: 'all', label: 'All Time' },
+                    { id: 'custom', label: 'Custom Date' },
+                  ] as const
+                ).map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setSalesFilter(tab.id)}
+                    className={`px-3 sm:px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                      salesFilter === tab.id
+                        ? 'bg-slate-900 text-white shadow-sm'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {tab.id === 'custom' && <Calendar className="w-3.5 h-3.5" />}
+                    <span>{tab.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {!cleanSearch && salesFilter === 'custom' && (
               <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-2xl grid grid-cols-2 gap-2.5 shrink-0">
                 <div>
                   <label className="block text-[10px] sm:text-[11px] font-bold text-slate-600 mb-1">
@@ -1065,10 +1143,12 @@ export default function DashboardPage() {
               </div>
             )}
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-3 my-3.5 shrink-0">
-              <div className="col-span-2 sm:col-span-1 bg-emerald-50 border border-emerald-200 p-3 sm:p-3.5 rounded-2xl flex sm:block items-center justify-between">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-3 my-3 shrink-0">
+              <div className="col-span-2 sm:col-span-1 bg-emerald-50 border border-emerald-200 p-3 rounded-2xl flex sm:block items-center justify-between">
                 <div>
-                  <p className="text-[11px] font-bold text-emerald-700">Total Revenue</p>
+                  <p className="text-[11px] font-bold text-emerald-700">
+                    {cleanSearch ? 'Matched Amount' : 'Total Revenue'}
+                  </p>
                   <p className="text-xl font-extrabold text-emerald-900 mt-0.5">
                     ₹{filteredTotalSales.toLocaleString('en-IN')}
                   </p>
@@ -1078,7 +1158,7 @@ export default function DashboardPage() {
                 </span>
               </div>
 
-              <div className="bg-slate-50 border border-slate-200 p-3 sm:p-3.5 rounded-2xl">
+              <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl">
                 <p className="text-[11px] font-bold text-slate-600 flex items-center gap-1">
                   <Banknote className="w-3.5 h-3.5 text-emerald-600" /> Cash
                 </p>
@@ -1087,7 +1167,7 @@ export default function DashboardPage() {
                 </p>
               </div>
 
-              <div className="bg-slate-50 border border-slate-200 p-3 sm:p-3.5 rounded-2xl">
+              <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl">
                 <p className="text-[11px] font-bold text-slate-600 flex items-center gap-1">
                   <Smartphone className="w-3.5 h-3.5 text-blue-600" /> UPI / Online
                 </p>
@@ -1100,7 +1180,7 @@ export default function DashboardPage() {
             <div className="flex-1 overflow-y-auto overscroll-contain divide-y divide-slate-100 border-t border-slate-100 pr-1 pb-2">
               {filteredSalesOrders.length === 0 ? (
                 <p className="text-xs text-slate-400 text-center py-10">
-                  Is selected date range mein koi settled bill nahi hai.
+                  Koi matching bill ya invoice nahi mila.
                 </p>
               ) : (
                 filteredSalesOrders.map((ord) => (
@@ -1108,12 +1188,18 @@ export default function DashboardPage() {
                     key={ord.id}
                     className="py-3 flex items-start justify-between gap-3 text-xs"
                   >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
                         <span className="font-extrabold text-slate-900">
                           Table {ord.table_number}
                         </span>
-                        <span className="text-[10px] sm:text-[11px] text-slate-400">
+                        <span className="text-[10px] font-mono font-extrabold bg-orange-50 text-orange-700 border border-orange-200 px-1.5 py-0.5 rounded">
+                          {ord.invoice_number || `INV-${ord.id.slice(0, 6).toUpperCase()}`}
+                        </span>
+                        <span className="text-[10px] font-mono font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                          BILL-{ord.id.slice(0, 6).toUpperCase()}
+                        </span>
+                        <span className="text-[10px] text-slate-400">
                           {new Date(ord.created_at).toLocaleString('en-IN', {
                             day: '2-digit',
                             month: 'short',
@@ -1122,19 +1208,41 @@ export default function DashboardPage() {
                           })}
                         </span>
                       </div>
-                      <p className="text-slate-600 mt-1 leading-relaxed break-words">
+
+                      {(ord.customer_name || ord.customer_phone) && (
+                        <p className="text-[11px] font-bold text-slate-700 flex flex-wrap items-center gap-2">
+                          {ord.customer_name && (
+                            <span className="flex items-center gap-1">
+                              <User className="w-3 h-3 text-slate-400" /> {ord.customer_name}
+                            </span>
+                          )}
+                          {ord.customer_phone && (
+                            <span className="flex items-center gap-1">
+                              <Phone className="w-3 h-3 text-slate-400" /> {ord.customer_phone}
+                            </span>
+                          )}
+                        </p>
+                      )}
+
+                      {ord.razorpay_payment_id && (
+                        <p className="text-[10px] font-mono text-emerald-700 font-bold">
+                          Razorpay ID: {ord.razorpay_payment_id}
+                        </p>
+                      )}
+
+                      <p className="text-slate-600 leading-relaxed break-words">
                         {ord.order_items
                           ?.map((i) => `${i.quantity}× ${i.item_name}`)
                           .join(', ')}
                       </p>
                     </div>
 
-                    <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1.5 sm:gap-2.5 shrink-0">
+                    <div className="flex flex-col items-end gap-1 shrink-0">
                       <span className="font-extrabold text-slate-900 text-sm">
                         ₹{ord.total_amount}
                       </span>
                       <span
-                        className={`uppercase text-[9px] sm:text-[10px] font-extrabold px-2 py-0.5 rounded-md ${
+                        className={`uppercase text-[9px] font-extrabold px-2 py-0.5 rounded-md ${
                           (ord.payment_method || '').toLowerCase() === 'upi'
                             ? 'bg-blue-50 text-blue-700'
                             : 'bg-emerald-50 text-emerald-700'
@@ -1192,6 +1300,20 @@ export default function DashboardPage() {
                       key={ord.id}
                       className="bg-slate-50 border border-slate-200/80 p-3.5 rounded-2xl space-y-2"
                     >
+                      {(ord.customer_name || ord.invoice_number) && (
+                        <div className="flex flex-wrap items-center justify-between gap-1 text-[11px] pb-1.5 border-b border-slate-200/70">
+                          <span className="font-extrabold text-slate-800">
+                            {ord.customer_name || 'Guest'}
+                            {ord.customer_phone ? ` • ${ord.customer_phone}` : ''}
+                          </span>
+                          {ord.invoice_number && (
+                            <span className="font-mono font-bold text-slate-500">
+                              {ord.invoice_number}
+                            </span>
+                          )}
+                        </div>
+                      )}
+
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span
