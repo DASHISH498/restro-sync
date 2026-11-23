@@ -246,7 +246,7 @@ export default function MenuManagerPage() {
         {/* Left Column: Add New Dish Form (Owner + Desktop Web Only Sticky) */}
         <section
           className={`bg-white border border-slate-200 rounded-2xl p-5 h-fit shadow-sm ${
-            isOwnerWeb ? 'lg:sticky lg:top-24' : ''
+            isOwnerWeb ? 'lg:sticky lg:top-21' : ''
           }`}
         >
           <h2 className="text-base font-extrabold text-slate-900 mb-4 flex items-center gap-2">
@@ -357,7 +357,7 @@ export default function MenuManagerPage() {
           <div
             className={
               isOwnerWeb
-                ? 'lg:sticky lg:top-20 lg:z-20 pt-3 pb-3 bg-slate-50'
+                ? 'lg:sticky lg:top-[72px] lg:z-20 pt-3 pb-3 bg-slate-50'
                 : 'pt-1 pb-2'
             }
           >
