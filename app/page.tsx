@@ -156,7 +156,7 @@ const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
     subtitle: 'Up to 2 Outlets • Monthly',
     price: '₹1,115',
     perMonth: '₹1,115 / month',
-    amount: 1115,
+    amount: 1,
     durationDays: 30,
     maxOutlets: 2,
     badge: '7% Below Market',
