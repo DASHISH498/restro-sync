@@ -40,6 +40,7 @@ import {
   Phone,
   KeyRound,
   Store,
+  Building2,
 } from 'lucide-react';
 
 interface SessionData {
@@ -106,17 +107,26 @@ interface MergedBillItem {
   notes: string[];
 }
 
+interface UpgradePlanOption {
+  id: string;
+  name: string;
+  price: string;
+  amount: number;
+  durationDays: number;
+  tag: string;
+}
+
 const ADMIN_WHATSAPP = '919079083101';
 const MASTER_PASS_STORAGE_KEY = 'restro_master_sales_password';
 
-const UPGRADE_PLANS = [
+const SINGLE_UPGRADE_PLANS: UpgradePlanOption[] = [
   {
     id: '1_month',
     name: '1 Month Plan',
     price: '₹599',
     amount: 599,
     durationDays: 30,
-    tag: 'Monthly (Test)',
+    tag: 'Monthly',
   },
   {
     id: '3_months',
@@ -124,7 +134,7 @@ const UPGRADE_PLANS = [
     price: '₹1,699',
     amount: 1699,
     durationDays: 90,
-    tag: 'Quarterly (Test)',
+    tag: 'Quarterly',
   },
   {
     id: '6_months',
@@ -132,7 +142,7 @@ const UPGRADE_PLANS = [
     price: '₹3,299',
     amount: 3299,
     durationDays: 180,
-    tag: 'Half-Yearly (Test)',
+    tag: 'Half-Yearly',
   },
   {
     id: 'yearly',
@@ -140,7 +150,7 @@ const UPGRADE_PLANS = [
     price: '₹5,499',
     amount: 5499,
     durationDays: 365,
-    tag: 'Most Popular (Test)',
+    tag: 'Most Popular',
   },
   {
     id: 'lifetime',
@@ -148,7 +158,50 @@ const UPGRADE_PLANS = [
     price: '₹19,999',
     amount: 19999,
     durationDays: 36500,
-    tag: 'One-Time Pay (Test)',
+    tag: 'One-Time Pay',
+  },
+];
+
+const MULTI_UPGRADE_PLANS: UpgradePlanOption[] = [
+  {
+    id: 'multi_1_month',
+    name: '1 Month Plan',
+    price: '₹1,115',
+    amount: 1115,
+    durationDays: 30,
+    tag: '7% Below Market',
+  },
+  {
+    id: 'multi_3_months',
+    name: '3 Months Plan',
+    price: '₹11,159',
+    amount: 11159,
+    durationDays: 90,
+    tag: '7% Below ₹12k Tier',
+  },
+  {
+    id: 'multi_6_months',
+    name: '6 Months Plan',
+    price: '₹18,599',
+    amount: 18599,
+    durationDays: 180,
+    tag: '7% Below ₹20k Tier',
+  },
+  {
+    id: 'multi_yearly',
+    name: 'Yearly Plan (12 Months)',
+    price: '₹27,899',
+    amount: 27899,
+    durationDays: 365,
+    tag: '7% Below ₹30k Tier',
+  },
+  {
+    id: 'multi_lifetime',
+    name: 'Lifetime License',
+    price: '₹37,199',
+    amount: 37199,
+    durationDays: 36500,
+    tag: '7% Below ₹40k Tier',
   },
 ];
 
@@ -212,6 +265,7 @@ export default function DashboardPage() {
 
   // Owner Plan Upgrade Modal & Razorpay State
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [upgradeModeTab, setUpgradeModeTab] = useState<'single' | 'multiple'>('single');
   const [upgradingPlanId, setUpgradingPlanId] = useState<string | null>(null);
   const [upgradeSuccessBanner, setUpgradeSuccessBanner] = useState<string | null>(null);
   const [upgradeErrorMsg, setUpgradeErrorMsg] = useState<string | null>(null);
@@ -257,6 +311,7 @@ export default function DashboardPage() {
       }
 
       setSession(parsed);
+      setUpgradeModeTab(parsed.outletMode === 'multiple' ? 'multiple' : 'single');
       if (parsed.totalTables) {
         setActualTablesCount(parsed.totalTables);
       }
@@ -410,6 +465,9 @@ export default function DashboardPage() {
       }
       if (restData.owner_phone) {
         resolvedOwnerPhone = String(restData.owner_phone);
+      }
+      if (restData.outlet_mode === 'multiple') {
+        setUpgradeModeTab('multiple');
       }
 
       const upi = restData.upi_id || '';
@@ -718,7 +776,10 @@ export default function DashboardPage() {
     });
   };
 
-  const handleRazorpayPlanUpgrade = async (plan: (typeof UPGRADE_PLANS)[number]) => {
+  const handleRazorpayPlanUpgrade = async (
+    plan: UpgradePlanOption,
+    mode: 'single' | 'multiple'
+  ) => {
     if (!session) return;
     setUpgradeErrorMsg(null);
     setUpgradingPlanId(plan.id);
@@ -738,6 +799,7 @@ export default function DashboardPage() {
           amount: plan.amount,
           planId: plan.id,
           planName: plan.name,
+          outletMode: mode,
           restaurantId: session.restaurantId,
           restaurantName: session.restaurantName,
         }),
@@ -757,7 +819,9 @@ export default function DashboardPage() {
         amount: orderData.amount,
         currency: orderData.currency,
         name: 'RestroSync POS',
-        description: `${plan.name} (${plan.price}) • ${session.restaurantName}`,
+        description: `${plan.name} (${plan.price}) • ${
+          mode === 'multiple' ? 'Multiple Outlets' : 'Single Outlet'
+        }`,
         order_id: orderData.orderId,
         theme: {
           color: '#ea580c',
@@ -767,19 +831,27 @@ export default function DashboardPage() {
             Date.now() + plan.durationDays * 24 * 60 * 60 * 1000
           ).toISOString();
 
-          await supabase
-            .from('restaurants')
-            .update({
-              subscription_status: 'active',
-              plan_type: plan.id,
-              selected_plan: `${plan.name} (${plan.price})`,
-              trial_ends_at: newExpiry,
-            })
-            .eq('id', session.restaurantId);
+          const subPayload = {
+            subscription_status: 'active',
+            plan_type: plan.id,
+            selected_plan: `${plan.name} (${plan.price})`,
+            trial_ends_at: newExpiry,
+          };
+
+          const targetIds =
+            mode === 'multiple' && ownerOutlets.length > 0
+              ? Array.from(new Set([session.restaurantId, ...ownerOutlets.map((o) => o.id)]))
+              : [session.restaurantId];
+
+          await supabase.from('restaurants').update(subPayload).in('id', targetIds);
 
           setUpgradingPlanId(null);
           setUpgradeSuccessBanner(
-            `${plan.name} (${plan.price}) has been activated successfully!`
+            `${plan.name} (${plan.price}) has been activated for ${
+              mode === 'multiple' && targetIds.length > 1
+                ? `all ${targetIds.length} outlets`
+                : session.restaurantName
+            }!`
           );
           fetchDashboardData();
           setTimeout(() => setUpgradeSuccessBanner(null), 7000);
@@ -869,6 +941,9 @@ export default function DashboardPage() {
     hasMultipleOwnerOutlets && salesScope === 'all_outlets' && combinedSalesUnlocked
       ? 'all_outlets'
       : 'current';
+
+  const activeUpgradePlans =
+    upgradeModeTab === 'multiple' ? MULTI_UPGRADE_PLANS : SINGLE_UPGRADE_PLANS;
 
   const outletNameById: Record<string, string> = {};
   ownerOutlets.forEach((o) => {
@@ -1171,6 +1246,11 @@ export default function DashboardPage() {
               type="button"
               onClick={() => {
                 setUpgradeErrorMsg(null);
+                setUpgradeModeTab(
+                  session.outletMode === 'multiple' || ownerOutlets.length > 1
+                    ? 'multiple'
+                    : 'single'
+                );
                 setShowUpgradeModal(true);
               }}
               className="bg-orange-600 hover:bg-orange-700 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center gap-1.5"
@@ -1609,6 +1689,33 @@ export default function DashboardPage() {
               </button>
             </div>
 
+            <div className="grid grid-cols-2 gap-2 mt-4">
+              <button
+                type="button"
+                onClick={() => setUpgradeModeTab('single')}
+                className={`py-2 px-3 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 border transition ${
+                  upgradeModeTab === 'single'
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                <Store className="w-3.5 h-3.5" />
+                <span>Single Outlet</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setUpgradeModeTab('multiple')}
+                className={`py-2 px-3 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 border transition ${
+                  upgradeModeTab === 'multiple'
+                    ? 'bg-orange-600 text-white border-orange-600'
+                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                <Building2 className="w-3.5 h-3.5" />
+                <span>Multiple Outlets</span>
+              </button>
+            </div>
+
             {upgradeErrorMsg && (
               <div className="mt-3 bg-red-50 border border-red-200 text-red-700 px-3.5 py-2.5 rounded-xl text-xs font-bold">
                 {upgradeErrorMsg}
@@ -1616,7 +1723,7 @@ export default function DashboardPage() {
             )}
 
             <div className="py-4 space-y-2.5">
-              {UPGRADE_PLANS.map((plan) => {
+              {activeUpgradePlans.map((plan) => {
                 const isSelected = subInfo.selectedPlan.includes(plan.price);
                 return (
                   <div
@@ -1642,7 +1749,7 @@ export default function DashboardPage() {
                     <button
                       type="button"
                       disabled={upgradingPlanId === plan.id}
-                      onClick={() => handleRazorpayPlanUpgrade(plan)}
+                      onClick={() => handleRazorpayPlanUpgrade(plan, upgradeModeTab)}
                       className="bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 shadow-sm transition shrink-0"
                     >
                       <Crown className="w-4 h-4" />

@@ -38,14 +38,28 @@ interface Restaurant {
 }
 
 type ResetTargetRole = 'owner' | 'staff';
+type OutletTabMode = 'single' | 'multiple';
 
-const PRICING_PLANS = [
+interface PricingPlan {
+  id: string;
+  duration: string;
+  subtitle: string;
+  price: string;
+  amount: number;
+  durationDays: number;
+  badge: string | null;
+  popular: boolean;
+  features: string[];
+}
+
+const SINGLE_OUTLET_PLANS: PricingPlan[] = [
   {
     id: '1_month',
     duration: '1 Month',
     subtitle: 'Starter Monthly',
     price: '₹599',
-    perMonth: '₹599 / month',
+    amount: 599,
+    durationDays: 30,
     badge: null,
     popular: false,
     features: [
@@ -60,7 +74,8 @@ const PRICING_PLANS = [
     duration: '3 Months',
     subtitle: 'Quarterly Plan',
     price: '₹1,699',
-    perMonth: '₹566 / month',
+    amount: 1699,
+    durationDays: 90,
     badge: 'Save ₹98',
     popular: false,
     features: [
@@ -75,7 +90,8 @@ const PRICING_PLANS = [
     duration: '6 Months',
     subtitle: 'Half-Yearly Plan',
     price: '₹3,299',
-    perMonth: '₹550 / month',
+    amount: 3299,
+    durationDays: 180,
     badge: 'Save ₹295',
     popular: false,
     features: [
@@ -90,7 +106,8 @@ const PRICING_PLANS = [
     duration: 'Yearly',
     subtitle: '12 Months Pro',
     price: '₹5,499',
-    perMonth: '₹458 / month',
+    amount: 5499,
+    durationDays: 365,
     badge: 'Save ₹1,689',
     popular: true,
     features: [
@@ -105,7 +122,8 @@ const PRICING_PLANS = [
     duration: 'Lifetime',
     subtitle: 'One-Time Payment',
     price: '₹19,999',
-    perMonth: 'Pay once, use forever',
+    amount: 19999,
+    durationDays: 36500,
     badge: 'Zero Renewal',
     popular: false,
     features: [
@@ -113,6 +131,89 @@ const PRICING_PLANS = [
       'No Monthly or Yearly Fees',
       'VIP Priority Support',
       'All Future Pro Features Free',
+    ],
+  },
+];
+
+const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
+  {
+    id: 'multi_1_month',
+    duration: '1 Month',
+    subtitle: 'Multi-Outlet Monthly',
+    price: '₹1,115',
+    amount: 1115,
+    durationDays: 30,
+    badge: '7% Below Market',
+    popular: false,
+    features: [
+      'Multiple Outlets Under One Owner',
+      'All Outlets Combined Sales View',
+      'Master Password Protected Summary',
+      'Per-Outlet KDS & Table QRs',
+    ],
+  },
+  {
+    id: 'multi_3_months',
+    duration: '3 Months',
+    subtitle: 'Multi-Outlet Quarterly',
+    price: '₹11,159',
+    amount: 11159,
+    durationDays: 90,
+    badge: '7% Below ₹12k Tier',
+    popular: false,
+    features: [
+      'Everything in 1 Month Multi Plan',
+      'Branches Linked by Owner Phone',
+      'Outlet-Wise & Combined Bill Search',
+      'Priority WhatsApp Support',
+    ],
+  },
+  {
+    id: 'multi_6_months',
+    duration: '6 Months',
+    subtitle: 'Multi-Outlet Half-Yearly',
+    price: '₹18,599',
+    amount: 18599,
+    durationDays: 180,
+    badge: '7% Below ₹20k Tier',
+    popular: false,
+    features: [
+      'Everything in 3 Months Multi Plan',
+      'Custom Date Range Multi-Branch Reports',
+      'Unlimited Tables & Dishes',
+      'Free Multi-Outlet Setup Support',
+    ],
+  },
+  {
+    id: 'multi_yearly',
+    duration: 'Yearly',
+    subtitle: 'Multi-Outlet 12 Months',
+    price: '₹27,899',
+    amount: 27899,
+    durationDays: 365,
+    badge: '7% Below ₹30k Tier',
+    popular: true,
+    features: [
+      'Full 12 Months Multi-Outlet Access',
+      'Combined + Outlet-Wise Revenue',
+      'Dedicated Multi-Branch Onboarding',
+      'All Future Updates Included',
+    ],
+  },
+  {
+    id: 'multi_lifetime',
+    duration: 'Lifetime',
+    subtitle: 'Multi-Outlet One-Time',
+    price: '₹37,199',
+    amount: 37199,
+    durationDays: 36500,
+    badge: '7% Below ₹40k Tier',
+    popular: false,
+    features: [
+      'One-Time Multi-Outlet License',
+      'Combined Sales & Master Lock',
+      'VIP Priority Support',
+      'No Recurring Renewal Fees',
     ],
   },
 ];
@@ -132,6 +233,19 @@ export default function HomePage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
 
+  // Pricing Tab & Plan Payment States
+  const [pricingTab, setPricingTab] = useState<OutletTabMode>('single');
+  const [payingPlanId, setPayingPlanId] = useState<string | null>(null);
+  const [planBannerMsg, setPlanBannerMsg] = useState<string | null>(null);
+  const [planErrorMsg, setPlanErrorMsg] = useState<string | null>(null);
+  const [verifiedPlanCheckout, setVerifiedPlanCheckout] = useState<{
+    planId: string;
+    planLabel: string;
+    outletMode: OutletTabMode;
+    durationDays: number;
+    paymentId?: string;
+  } | null>(null);
+
   // PIN Login Modal States
   const [selectedRestaurant, setSelectedRestaurant] = useState<Restaurant | null>(null);
   const [pin, setPin] = useState('');
@@ -149,7 +263,7 @@ export default function HomePage() {
   // Register Restaurant Modal States
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [selectedPlanLabel, setSelectedPlanLabel] = useState<string>('Yearly (₹5,499)');
-  const [outletMode, setOutletMode] = useState<'single' | 'multiple'>('single');
+  const [outletMode, setOutletMode] = useState<OutletTabMode>('single');
   const [outletLabel, setOutletLabel] = useState('');
   const [regName, setRegName] = useState('');
   const [regCity, setRegCity] = useState('');
@@ -340,9 +454,119 @@ export default function HomePage() {
     }, 1500);
   };
 
-  const handleOpenRegisterModal = (planName = 'Yearly (₹5,499)') => {
+  const loadRazorpayScript = (): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if ((window as unknown as { Razorpay?: unknown }).Razorpay) {
+        resolve(true);
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
+  const handlePayAndSelectPlan = async (plan: PricingPlan, mode: OutletTabMode) => {
+    setPlanErrorMsg(null);
+    setPlanBannerMsg(null);
+    setPayingPlanId(plan.id);
+
+    const label = `${plan.duration} (${plan.price})`;
+
+    try {
+      const loaded = await loadRazorpayScript();
+      if (!loaded) {
+        setPlanErrorMsg('Unable to load Razorpay gateway. Please check your connection.');
+        setPayingPlanId(null);
+        return;
+      }
+
+      const res = await fetch('/api/razorpay/create-subscription-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: plan.amount,
+          planId: plan.id,
+          planName: plan.duration,
+          outletMode: mode,
+        }),
+      });
+
+      const orderData = await res.json();
+      if (!res.ok || !orderData.orderId) {
+        setPlanErrorMsg(orderData.error || 'Unable to initiate subscription payment.');
+        setPayingPlanId(null);
+        return;
+      }
+
+      const options = {
+        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+        amount: orderData.amount,
+        currency: orderData.currency || 'INR',
+        name: 'RestroSync POS',
+        description: `${label} • ${
+          mode === 'multiple' ? 'Multiple Outlets' : 'Single Outlet'
+        }`,
+        order_id: orderData.orderId,
+        theme: {
+          color: '#ea580c',
+        },
+        handler: function (response: { razorpay_payment_id?: string }) {
+          const verified = {
+            planId: plan.id,
+            planLabel: label,
+            outletMode: mode,
+            durationDays: plan.durationDays,
+            paymentId: response?.razorpay_payment_id,
+          };
+
+          setVerifiedPlanCheckout(verified);
+          localStorage.setItem('restro_selected_plan', JSON.stringify(verified));
+          setPayingPlanId(null);
+          setPlanBannerMsg(
+            `${label} (${
+              mode === 'multiple' ? 'Multiple Outlets' : 'Single Outlet'
+            }) payment verified! Complete registration to launch your outlet.`
+          );
+
+          setSelectedPlanLabel(label);
+          setOutletMode(mode);
+          setOutletLabel('');
+          setRegName('');
+          setRegCity('');
+          setRegPhone('');
+          setRegTables(10);
+          setRegOwnerPin('');
+          setRegStaffPin('');
+          setRegError('');
+          setShowRegisterModal(true);
+        },
+        modal: {
+          ondismiss: function () {
+            setPayingPlanId(null);
+          },
+        },
+      };
+
+      const RazorpayConstructor = (
+        window as unknown as { Razorpay: new (opts: unknown) => { open: () => void } }
+      ).Razorpay;
+      const rzp = new RazorpayConstructor(options);
+      rzp.open();
+    } catch {
+      setPlanErrorMsg('Something went wrong while opening Razorpay.');
+      setPayingPlanId(null);
+    }
+  };
+
+  const handleOpenRegisterModal = (
+    planName = 'Yearly (₹5,499)',
+    mode: OutletTabMode = 'single'
+  ) => {
     setSelectedPlanLabel(planName);
-    setOutletMode('single');
+    setOutletMode(mode);
     setOutletLabel('');
     setRegName('');
     setRegCity('');
@@ -385,8 +609,15 @@ export default function HomePage() {
     setRegistering(true);
 
     const finalTables = regTables > 0 ? regTables : 10;
-    const trialEnd = new Date();
-    trialEnd.setDate(trialEnd.getDate() + 14);
+    const isPaidForThisPlan =
+      verifiedPlanCheckout &&
+      verifiedPlanCheckout.planLabel === selectedPlanLabel &&
+      verifiedPlanCheckout.outletMode === outletMode;
+
+    const expiryDate = new Date();
+    expiryDate.setDate(
+      expiryDate.getDate() + (isPaidForThisPlan ? verifiedPlanCheckout.durationDays : 14)
+    );
 
     const basePayload = {
       name: regName.trim(),
@@ -396,12 +627,12 @@ export default function HomePage() {
       total_tables: finalTables,
       owner_pin: regOwnerPin,
       staff_pin: regStaffPin || null,
-      subscription_status: 'free_trial',
+      subscription_status: isPaidForThisPlan ? 'active' : 'free_trial',
       selected_plan: selectedPlanLabel,
-      trial_ends_at: trialEnd.toISOString(),
+      trial_ends_at: expiryDate.toISOString(),
     };
 
-    let savedOutletMode: 'single' | 'multiple' = outletMode;
+    let savedOutletMode: OutletTabMode = outletMode;
     let savedOutletLabel: string | null =
       outletMode === 'multiple' ? cleanOutletLabel : null;
 
@@ -480,6 +711,8 @@ export default function HomePage() {
   });
 
   const activeResetLabel = resetTargetRole === 'owner' ? 'Owner' : 'Staff';
+  const displayedPlans =
+    pricingTab === 'single' ? SINGLE_OUTLET_PLANS : MULTIPLE_OUTLET_PLANS;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -504,7 +737,7 @@ export default function HomePage() {
 
             <button
               type="button"
-              onClick={() => handleOpenRegisterModal('Yearly (₹5,499)')}
+              onClick={() => handleOpenRegisterModal('Yearly (₹5,499)', 'single')}
               className="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 shadow-sm transition"
             >
               <Plus className="w-4 h-4" />
@@ -587,7 +820,7 @@ export default function HomePage() {
             <div className="mt-4">
               <button
                 type="button"
-                onClick={() => handleOpenRegisterModal('Yearly (₹5,499)')}
+                onClick={() => handleOpenRegisterModal('Yearly (₹5,499)', 'single')}
                 className="text-xs font-bold text-orange-600 hover:underline"
               >
                 New restaurant? Register for free here &rarr;
@@ -643,104 +876,179 @@ export default function HomePage() {
         </section>
 
         <section id="pricing" className="mt-24 scroll-mt-24">
-          <div className="text-center max-w-2xl mx-auto mb-10">
-            <span className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-extrabold px-3.5 py-1 rounded-full mb-3">
-              <Sparkles className="w-3.5 h-3.5" /> Simple & Transparent Plans
-            </span>
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900">
-              Choose the Best Plan for Your Restaurant
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-500 mt-2">
-              Every plan includes a <strong>14-Day Free Trial</strong> with zero setup fee or hidden
-              charges.
-            </p>
-          </div>
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
+            <div>
+              <span className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-extrabold px-3.5 py-1 rounded-full mb-2.5">
+                <Sparkles className="w-3.5 h-3.5" /> Simple & Transparent Plans
+              </span>
+              <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900">
+                Choose the Best Plan for Your Restaurant
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-500 mt-1.5">
+                Every plan includes a <strong>14-Day Free Trial</strong> or instant activation via
+                Razorpay.
+              </p>
+            </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-            {PRICING_PLANS.map((plan) => (
-              <div
-                key={plan.id}
-                className={`rounded-3xl p-5 flex flex-col justify-between transition relative ${
-                  plan.popular
-                    ? 'bg-slate-900 text-white border-2 border-orange-500 shadow-xl'
-                    : plan.id === 'lifetime'
-                    ? 'bg-gradient-to-b from-amber-50/80 to-white text-slate-900 border-2 border-amber-300 shadow-sm'
-                    : 'bg-white text-slate-900 border border-slate-200 shadow-sm hover:border-orange-300'
+            <div className="inline-flex bg-slate-200/80 p-1 rounded-2xl border border-slate-300/70 self-start md:self-auto shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setPricingTab('single');
+                  setPlanErrorMsg(null);
+                }}
+                className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold flex items-center gap-2 transition cursor-pointer ${
+                  pricingTab === 'single'
+                    ? 'bg-slate-900 text-white shadow-sm'
+                    : 'text-slate-700 hover:text-slate-900'
                 }`}
               >
-                {plan.popular && (
-                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-orange-600 text-white text-[10px] font-extrabold uppercase tracking-wider px-3 py-1 rounded-full shadow whitespace-nowrap">
-                    Most Popular
-                  </span>
-                )}
+                <Store className="w-4 h-4" />
+                <span>Single Outlet</span>
+              </button>
 
-                <div>
-                  <div className="flex items-center justify-between gap-1">
-                    <h3 className="text-base font-extrabold">{plan.duration}</h3>
-                    {plan.badge && (
-                      <span
-                        className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full whitespace-nowrap ${
-                          plan.popular
-                            ? 'bg-orange-500/20 text-orange-300'
-                            : plan.id === 'lifetime'
-                            ? 'bg-amber-200/70 text-amber-900'
-                            : 'bg-emerald-50 text-emerald-700'
-                        }`}
-                      >
-                        {plan.badge}
-                      </span>
-                    )}
-                  </div>
-                  <p
-                    className={`text-[11px] mt-0.5 ${
-                      plan.popular ? 'text-slate-400' : 'text-slate-500'
-                    }`}
-                  >
-                    {plan.subtitle}
-                  </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setPricingTab('multiple');
+                  setPlanErrorMsg(null);
+                }}
+                className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold flex items-center gap-2 transition cursor-pointer ${
+                  pricingTab === 'multiple'
+                    ? 'bg-orange-600 text-white shadow-sm'
+                    : 'text-slate-700 hover:text-slate-900'
+                }`}
+              >
+                <Building2 className="w-4 h-4" />
+                <span>Multiple Outlets</span>
+              </button>
+            </div>
+          </div>
 
-                  <div className="mt-4 pb-4 border-b border-slate-200/30">
-                    <span className="text-2xl sm:text-3xl font-extrabold">{plan.price}</span>
-                    <span
-                      className={`block text-[11px] mt-1 ${
+          {planBannerMsg && (
+            <div className="mb-6 bg-emerald-600 text-white px-4 py-3 rounded-2xl text-xs sm:text-sm font-extrabold shadow-sm flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <span>{planBannerMsg}</span>
+            </div>
+          )}
+
+          {planErrorMsg && (
+            <div className="mb-6 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl text-xs sm:text-sm font-bold">
+              {planErrorMsg}
+            </div>
+          )}
+
+          <div
+            className={`grid grid-cols-1 sm:grid-cols-2 ${
+              pricingTab === 'single' ? 'lg:grid-cols-4' : 'lg:grid-cols-4'
+            } gap-4`}
+          >
+            {displayedPlans.map((plan) => {
+              const isLifetime = plan.id.includes('lifetime');
+              return (
+                <div
+                  key={plan.id}
+                  className={`rounded-3xl p-5 flex flex-col justify-between transition relative ${
+                    plan.popular
+                      ? 'bg-slate-900 text-white border-2 border-orange-500 shadow-xl'
+                      : isLifetime
+                      ? 'bg-gradient-to-b from-amber-50/80 to-white text-slate-900 border-2 border-amber-300 shadow-sm'
+                      : 'bg-white text-slate-900 border border-slate-200 shadow-sm hover:border-orange-300'
+                  }`}
+                >
+                  {plan.popular && (
+                    <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-orange-600 text-white text-[10px] font-extrabold uppercase tracking-wider px-3 py-1 rounded-full shadow whitespace-nowrap">
+                      Most Popular
+                    </span>
+                  )}
+
+                  <div>
+                    <div className="flex items-center justify-between gap-1">
+                      <h3 className="text-base font-extrabold">{plan.duration}</h3>
+                      {plan.badge && (
+                        <span
+                          className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full whitespace-nowrap ${
+                            plan.popular
+                              ? 'bg-orange-500/20 text-orange-300'
+                              : isLifetime
+                              ? 'bg-amber-200/70 text-amber-900'
+                              : 'bg-emerald-50 text-emerald-700'
+                          }`}
+                        >
+                          {plan.badge}
+                        </span>
+                      )}
+                    </div>
+                    <p
+                      className={`text-[11px] mt-0.5 ${
                         plan.popular ? 'text-slate-400' : 'text-slate-500'
                       }`}
                     >
-                      {plan.perMonth}
-                    </span>
+                      {plan.subtitle}
+                    </p>
+
+                    <div className="mt-4 pb-4 border-b border-slate-200/30">
+                      <span className="text-2xl sm:text-3xl font-extrabold">{plan.price}</span>
+                      <span
+                        className={`block text-[11px] mt-1 ${
+                          plan.popular ? 'text-slate-400' : 'text-slate-500'
+                        }`}
+                      >
+                        {plan.perMonth}
+                      </span>
+                    </div>
+
+                    <ul className="mt-4 space-y-2 text-xs">
+                      {plan.features.map((feat) => (
+                        <li key={feat} className="flex items-start gap-2">
+                          <Check
+                            className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${
+                              plan.popular ? 'text-orange-400' : 'text-emerald-600'
+                            }`}
+                          />
+                          <span className={plan.popular ? 'text-slate-200' : 'text-slate-600'}>
+                            {feat}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
 
-                  <ul className="mt-4 space-y-2 text-xs">
-                    {plan.features.map((feat) => (
-                      <li key={feat} className="flex items-start gap-2">
-                        <Check
-                          className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${
-                            plan.popular ? 'text-orange-400' : 'text-emerald-600'
-                          }`}
-                        />
-                        <span className={plan.popular ? 'text-slate-200' : 'text-slate-600'}>
-                          {feat}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+                  <div className="mt-6 space-y-2">
+                    <button
+                      type="button"
+                      disabled={payingPlanId === plan.id}
+                      onClick={() => handlePayAndSelectPlan(plan, pricingTab)}
+                      className={`w-full py-2.5 rounded-2xl text-xs font-extrabold transition disabled:opacity-50 ${
+                        plan.popular
+                          ? 'bg-orange-600 hover:bg-orange-700 text-white shadow-md'
+                          : isLifetime
+                          ? 'bg-amber-500 hover:bg-amber-600 text-slate-950'
+                          : 'bg-slate-900 hover:bg-slate-800 text-white'
+                      }`}
+                    >
+                      {payingPlanId === plan.id
+                        ? 'Opening Payment...'
+                        : `Pay ${plan.price} & Register →`}
+                    </button>
 
-                <button
-                  type="button"
-                  onClick={() => handleOpenRegisterModal(`${plan.duration} (${plan.price})`)}
-                  className={`mt-6 w-full py-2.5 rounded-2xl text-xs font-extrabold transition ${
-                    plan.popular
-                      ? 'bg-orange-600 hover:bg-orange-700 text-white shadow-md'
-                      : plan.id === 'lifetime'
-                      ? 'bg-amber-500 hover:bg-amber-600 text-slate-950'
-                      : 'bg-slate-900 hover:bg-slate-800 text-white'
-                  }`}
-                >
-                  Start Free Trial &rarr;
-                </button>
-              </div>
-            ))}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleOpenRegisterModal(`${plan.duration} (${plan.price})`, pricingTab)
+                      }
+                      className={`w-full py-1.5 rounded-xl text-[11px] font-bold transition ${
+                        plan.popular
+                          ? 'text-slate-300 hover:text-white'
+                          : 'text-slate-500 hover:text-slate-900'
+                      }`}
+                    >
+                      Start 14-Day Free Trial
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </section>
       </main>
@@ -758,7 +1066,11 @@ export default function HomePage() {
 
             <div className="text-center mb-5">
               <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full mb-2">
-                <CheckCircle2 className="w-3.5 h-3.5" /> 14-Day Trial • {selectedPlanLabel}
+                <CheckCircle2 className="w-3.5 h-3.5" />{' '}
+                {verifiedPlanCheckout?.planLabel === selectedPlanLabel &&
+                verifiedPlanCheckout?.outletMode === outletMode
+                  ? `Paid & Active • ${selectedPlanLabel}`
+                  : `14-Day Trial • ${selectedPlanLabel}`}
               </span>
               <h3 className="text-xl font-extrabold text-slate-900">Register Restaurant</h3>
               <p className="text-xs text-slate-500 mt-0.5">
