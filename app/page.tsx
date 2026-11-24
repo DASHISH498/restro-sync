@@ -141,12 +141,12 @@ const SINGLE_OUTLET_PLANS: PricingPlan[] = [
   },
 ];
 
-// Same 5 durations as Single Outlet, priced ~7% below reference tiers
+// Same 5 durations as Single Outlet, priced ~7% below reference tiers with distinct multi-outlet features
 const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
   {
     id: 'multi_1_month',
     duration: '1 Month',
-    subtitle: 'Multi-Outlet Monthly',
+    subtitle: 'Up to 2 Outlets • Monthly',
     price: '₹1,115',
     perMonth: '₹1,115 / month',
     amount: 1115,
@@ -154,16 +154,16 @@ const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
     badge: '7% Below Market',
     popular: false,
     features: [
-      'Multiple Outlets Under One Owner',
-      'All Outlets Combined Sales View',
+      'Up to 2 Outlets Linked by Phone',
+      'Combined Sales View Across Outlets',
       'Master Password Protected Summary',
-      'Per-Outlet KDS & Table QRs',
+      'Separate Table QRs & KDS per Branch',
     ],
   },
   {
     id: 'multi_3_months',
     duration: '3 Months',
-    subtitle: 'Multi-Outlet Quarterly',
+    subtitle: 'Up to 5 Outlets • Quarterly',
     price: '₹11,159',
     perMonth: '₹3,720 / month',
     amount: 11159,
@@ -172,15 +172,15 @@ const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
     popular: false,
     features: [
       'Everything in 1 Month Multi Plan',
-      'Branches Linked by Owner Phone',
-      'Outlet-Wise & Combined Bill Search',
-      'Priority WhatsApp Support',
+      'Up to 5 Outlets Under One Owner',
+      'Outlet-Wise Revenue Breakdown',
+      'Invoice & UTR Search Across Branches',
     ],
   },
   {
     id: 'multi_6_months',
     duration: '6 Months',
-    subtitle: 'Multi-Outlet Half-Yearly',
+    subtitle: 'Up to 8 Outlets • Half-Yearly',
     price: '₹18,599',
     perMonth: '₹3,100 / month',
     amount: 18599,
@@ -189,15 +189,15 @@ const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
     popular: false,
     features: [
       'Everything in 3 Months Multi Plan',
-      'Custom Date Range Multi-Branch Reports',
-      'Unlimited Tables & Dishes',
-      'Free Multi-Outlet Setup Support',
+      'Up to 8 Active Outlets Supported',
+      'Custom Date-Range Multi-Branch Reports',
+      'Per-Outlet Quick Stock Control',
     ],
   },
   {
     id: 'multi_yearly',
     duration: 'Yearly',
-    subtitle: 'Multi-Outlet 12 Months',
+    subtitle: 'Up to 15 Outlets • 12 Months',
     price: '₹27,899',
     perMonth: '₹2,325 / month',
     amount: 27899,
@@ -205,16 +205,16 @@ const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
     badge: '7% Below ₹30k Tier',
     popular: true,
     features: [
-      'Full 12 Months Multi-Outlet Access',
-      'Combined + Outlet-Wise Revenue',
-      'Dedicated Multi-Branch Onboarding',
-      'All Future Updates Included',
+      'Everything in 6 Months Multi Plan',
+      'Up to 15 Outlets Under One Owner',
+      'Full-Year Chain Sales & Cash/UPI Split',
+      'Priority Multi-Outlet Setup Help',
     ],
   },
   {
     id: 'multi_lifetime',
     duration: 'Lifetime',
-    subtitle: 'Multi-Outlet One-Time',
+    subtitle: 'Unlimited Outlets • One-Time',
     price: '₹37,199',
     perMonth: 'Pay once, use forever',
     amount: 37199,
@@ -222,10 +222,10 @@ const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
     badge: '7% Below ₹40k Tier',
     popular: false,
     features: [
-      'One-Time Multi-Outlet License',
-      'Combined Sales & Master Lock',
-      'VIP Priority Support',
-      'No Recurring Renewal Fees',
+      'Unlimited Outlets Under Owner Phone',
+      'One-Time Fee • Zero Renewal Charges',
+      'All Chain Analytics & Master Lock',
+      'Dedicated VIP Support Included',
     ],
   },
 ];

@@ -3,9 +3,11 @@ import Razorpay from 'razorpay';
 
 export async function POST(req: Request) {
   try {
-    const { amount, planId, planName, restaurantId, restaurantName } = await req.json();
+    const { amount, planId, planName, outletMode, restaurantId, restaurantName } =
+      await req.json();
 
-    if (!amount || amount <= 0 || !restaurantId || !planId) {
+    const numericAmount = Number(amount);
+    if (!numericAmount || numericAmount <= 0 || !planId) {
       return NextResponse.json(
         { error: 'Invalid subscription plan details' },
         { status: 400 }
@@ -27,16 +29,24 @@ export async function POST(req: Request) {
       key_secret: keySecret,
     });
 
+    const safeRestaurantId =
+      typeof restaurantId === 'string' && restaurantId.trim().length > 0
+        ? restaurantId.trim()
+        : 'pre_register';
+
+    const resolvedOutletMode = outletMode === 'multiple' ? 'multiple' : 'single';
+
     const order = await razorpay.orders.create({
-      amount: Math.round(Number(amount) * 100),
+      amount: Math.round(numericAmount * 100),
       currency: 'INR',
-      receipt: `sub_${restaurantId.slice(0, 8)}_${Date.now()}`,
+      receipt: `sub_${safeRestaurantId.slice(0, 8)}_${Date.now()}`,
       notes: {
         type: 'saas_subscription',
-        restaurantId,
+        outletMode: resolvedOutletMode,
+        restaurantId: safeRestaurantId,
         restaurantName: restaurantName || 'Restaurant',
         planId,
-        planName,
+        planName: planName || planId,
       },
     });
 

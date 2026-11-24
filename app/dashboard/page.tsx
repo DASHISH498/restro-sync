@@ -41,6 +41,8 @@ import {
   KeyRound,
   Store,
   Building2,
+  Plus,
+  Lock,
 } from 'lucide-react';
 
 interface SessionData {
@@ -59,12 +61,14 @@ interface OutletMeta {
   id: string;
   name: string;
   city: string;
+  total_tables?: number;
   outlet_mode?: string | null;
   outlet_label?: string | null;
 }
 
 interface SubscriptionInfo {
   status: string;
+  planType: string;
   selectedPlan: string;
   daysLeft: number;
   isExpired: boolean;
@@ -113,6 +117,7 @@ interface UpgradePlanOption {
   price: string;
   amount: number;
   durationDays: number;
+  maxOutlets: number | null; // null = Unlimited
   tag: string;
 }
 
@@ -126,7 +131,8 @@ const SINGLE_UPGRADE_PLANS: UpgradePlanOption[] = [
     price: '₹599',
     amount: 599,
     durationDays: 30,
-    tag: 'Monthly',
+    maxOutlets: 1,
+    tag: '1 Outlet • Monthly',
   },
   {
     id: '3_months',
@@ -134,7 +140,8 @@ const SINGLE_UPGRADE_PLANS: UpgradePlanOption[] = [
     price: '₹1,699',
     amount: 1699,
     durationDays: 90,
-    tag: 'Quarterly',
+    maxOutlets: 1,
+    tag: '1 Outlet • Quarterly',
   },
   {
     id: '6_months',
@@ -142,7 +149,8 @@ const SINGLE_UPGRADE_PLANS: UpgradePlanOption[] = [
     price: '₹3,299',
     amount: 3299,
     durationDays: 180,
-    tag: 'Half-Yearly',
+    maxOutlets: 1,
+    tag: '1 Outlet • Half-Yearly',
   },
   {
     id: 'yearly',
@@ -150,7 +158,8 @@ const SINGLE_UPGRADE_PLANS: UpgradePlanOption[] = [
     price: '₹5,499',
     amount: 5499,
     durationDays: 365,
-    tag: 'Most Popular',
+    maxOutlets: 1,
+    tag: '1 Outlet • Most Popular',
   },
   {
     id: 'lifetime',
@@ -158,7 +167,8 @@ const SINGLE_UPGRADE_PLANS: UpgradePlanOption[] = [
     price: '₹19,999',
     amount: 19999,
     durationDays: 36500,
-    tag: 'One-Time Pay',
+    maxOutlets: 1,
+    tag: '1 Outlet • One-Time Pay',
   },
 ];
 
@@ -169,7 +179,8 @@ const MULTI_UPGRADE_PLANS: UpgradePlanOption[] = [
     price: '₹1,115',
     amount: 1115,
     durationDays: 30,
-    tag: '7% Below Market',
+    maxOutlets: 2,
+    tag: 'Up to 2 Outlets',
   },
   {
     id: 'multi_3_months',
@@ -177,7 +188,8 @@ const MULTI_UPGRADE_PLANS: UpgradePlanOption[] = [
     price: '₹11,159',
     amount: 11159,
     durationDays: 90,
-    tag: '7% Below ₹12k Tier',
+    maxOutlets: 5,
+    tag: 'Up to 5 Outlets',
   },
   {
     id: 'multi_6_months',
@@ -185,7 +197,8 @@ const MULTI_UPGRADE_PLANS: UpgradePlanOption[] = [
     price: '₹18,599',
     amount: 18599,
     durationDays: 180,
-    tag: '7% Below ₹20k Tier',
+    maxOutlets: 8,
+    tag: 'Up to 8 Outlets',
   },
   {
     id: 'multi_yearly',
@@ -193,7 +206,8 @@ const MULTI_UPGRADE_PLANS: UpgradePlanOption[] = [
     price: '₹27,899',
     amount: 27899,
     durationDays: 365,
-    tag: '7% Below ₹30k Tier',
+    maxOutlets: 15,
+    tag: 'Up to 15 Outlets',
   },
   {
     id: 'multi_lifetime',
@@ -201,9 +215,38 @@ const MULTI_UPGRADE_PLANS: UpgradePlanOption[] = [
     price: '₹37,199',
     amount: 37199,
     durationDays: 36500,
-    tag: '7% Below ₹40k Tier',
+    maxOutlets: null,
+    tag: 'Unlimited Outlets',
   },
 ];
+
+function getMaxOutletsForPlan(
+  planType: string,
+  selectedPlanLabel: string,
+  outletMode?: string | null
+): number | null {
+  const combined = `${planType || ''} ${selectedPlanLabel || ''}`.toLowerCase();
+
+  if (combined.includes('multi_lifetime') || combined.includes('37,199')) {
+    return null;
+  }
+  if (combined.includes('multi_yearly') || combined.includes('27,899')) {
+    return 15;
+  }
+  if (combined.includes('multi_6_months') || combined.includes('18,599')) {
+    return 8;
+  }
+  if (combined.includes('multi_3_months') || combined.includes('11,159')) {
+    return 5;
+  }
+  if (combined.includes('multi_1_month') || combined.includes('1,115')) {
+    return 2;
+  }
+  if (outletMode === 'multiple') {
+    return 2;
+  }
+  return 1;
+}
 
 function formatOutletTitle(outlet: {
   name: string;
@@ -225,6 +268,7 @@ export default function DashboardPage() {
   const [actualTablesCount, setActualTablesCount] = useState<number>(5);
   const [subInfo, setSubInfo] = useState<SubscriptionInfo>({
     status: 'free_trial',
+    planType: 'yearly',
     selectedPlan: 'Yearly (₹5,499)',
     daysLeft: 14,
     isExpired: false,
@@ -235,6 +279,16 @@ export default function DashboardPage() {
   const [allOutletOrders, setAllOutletOrders] = useState<OrderRecord[]>([]);
   const [salesScope, setSalesScope] = useState<'current' | 'all_outlets'>('current');
   const [loading, setLoading] = useState(true);
+
+  // Add Linked Outlet Modal (Enforces Plan Outlet Limit)
+  const [showAddOutletModal, setShowAddOutletModal] = useState(false);
+  const [newOutletLabel, setNewOutletLabel] = useState('');
+  const [newOutletCity, setNewOutletCity] = useState('');
+  const [newOutletTables, setNewOutletTables] = useState<number>(10);
+  const [newOutletOwnerPin, setNewOutletOwnerPin] = useState('');
+  const [newOutletStaffPin, setNewOutletStaffPin] = useState('');
+  const [addingOutlet, setAddingOutlet] = useState(false);
+  const [addOutletError, setAddOutletError] = useState('');
 
   // Master Password Lock for Combined Sales (resets when Bills & Sales modal closes)
   const [combinedSalesUnlocked, setCombinedSalesUnlocked] = useState(false);
@@ -311,6 +365,7 @@ export default function DashboardPage() {
       }
 
       setSession(parsed);
+      setNewOutletCity(parsed.city || '');
       setUpgradeModeTab(parsed.outletMode === 'multiple' ? 'multiple' : 'single');
       if (parsed.totalTables) {
         setActualTablesCount(parsed.totalTables);
@@ -324,6 +379,7 @@ export default function DashboardPage() {
     const anyModalOpen =
       showSalesModal ||
       showUpgradeModal ||
+      showAddOutletModal ||
       showPaymentSettingsModal ||
       showStockModal ||
       showMasterPassModal ||
@@ -343,6 +399,7 @@ export default function DashboardPage() {
   }, [
     showSalesModal,
     showUpgradeModal,
+    showAddOutletModal,
     showPaymentSettingsModal,
     showStockModal,
     showMasterPassModal,
@@ -444,7 +501,7 @@ export default function DashboardPage() {
       supabase
         .from('restaurants')
         .select(
-          'id, name, city, total_tables, owner_phone, outlet_mode, outlet_label, subscription_status, selected_plan, trial_ends_at, razorpay_key_id, razorpay_key_secret, upi_id, bank_account_name'
+          'id, name, city, total_tables, owner_phone, outlet_mode, outlet_label, subscription_status, plan_type, selected_plan, trial_ends_at, razorpay_key_id, razorpay_key_secret, upi_id, bank_account_name'
         )
         .eq('id', session.restaurantId)
         .single(),
@@ -487,6 +544,7 @@ export default function DashboardPage() {
       setIsPaymentConfigured(hasUpi || hasRzp);
 
       const status = restData.subscription_status || 'free_trial';
+      const planType = restData.plan_type || 'yearly';
       const selectedPlan = restData.selected_plan || 'Yearly (₹5,499)';
       let daysLeft = 14;
       let isExpired = false;
@@ -499,7 +557,7 @@ export default function DashboardPage() {
         }
       }
 
-      setSubInfo({ status, selectedPlan, daysLeft, isExpired });
+      setSubInfo({ status, planType, selectedPlan, daysLeft, isExpired });
     }
 
     const currentOutletOrders = ((ordersData || []) as OrderRecord[]).map((o) => ({
@@ -511,7 +569,7 @@ export default function DashboardPage() {
     if (session.role === 'owner' && resolvedOwnerPhone) {
       const { data: siblingOutlets } = await supabase
         .from('restaurants')
-        .select('id, name, city, outlet_mode, outlet_label')
+        .select('id, name, city, total_tables, outlet_mode, outlet_label')
         .eq('owner_phone', resolvedOwnerPhone);
 
       const outletsList: OutletMeta[] =
@@ -522,6 +580,7 @@ export default function DashboardPage() {
                 id: session.restaurantId,
                 name: session.brandName || session.restaurantName,
                 city: session.city,
+                total_tables: session.totalTables,
                 outlet_mode: session.outletMode,
                 outlet_label: session.outletLabel,
               },
@@ -589,6 +648,115 @@ export default function DashboardPage() {
       clearInterval(interval);
     };
   }, [session?.restaurantId, fetchDashboardData]);
+
+  const maxAllowedOutlets = getMaxOutletsForPlan(
+    subInfo.planType,
+    subInfo.selectedPlan,
+    session?.outletMode
+  );
+  const currentOutletCount = Math.max(1, ownerOutlets.length);
+  const isAtOutletLimit =
+    maxAllowedOutlets !== null && currentOutletCount >= maxAllowedOutlets;
+
+  const handleOpenAddOutletModal = () => {
+    if (!session) return;
+    if (isAtOutletLimit) {
+      setUpgradeErrorMsg(
+        `Your current plan (${subInfo.selectedPlan}) allows up to ${maxAllowedOutlets} outlet${
+          maxAllowedOutlets === 1 ? '' : 's'
+        }. Upgrade to add more outlets.`
+      );
+      setUpgradeModeTab('multiple');
+      setShowUpgradeModal(true);
+      return;
+    }
+
+    setNewOutletLabel('');
+    setNewOutletCity(session.city || '');
+    setNewOutletTables(10);
+    setNewOutletOwnerPin('');
+    setNewOutletStaffPin('');
+    setAddOutletError('');
+    setShowAddOutletModal(true);
+  };
+
+  const handleCreateLinkedOutlet = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!session) return;
+    setAddOutletError('');
+
+    if (isAtOutletLimit) {
+      setAddOutletError(
+        `Plan limit reached (${maxAllowedOutlets} outlets max). Upgrade your plan first.`
+      );
+      return;
+    }
+
+    const cleanLabel = newOutletLabel.trim();
+    const cleanCity = newOutletCity.trim();
+    const cleanPhone = (session.ownerPhone || '').replace(/\D/g, '');
+
+    if (!cleanLabel) {
+      setAddOutletError('Please enter an Outlet / Branch Name.');
+      return;
+    }
+    if (!cleanCity) {
+      setAddOutletError('City is required.');
+      return;
+    }
+    if (cleanPhone.length !== 10) {
+      setAddOutletError('Registered owner phone missing. Please re-login from home.');
+      return;
+    }
+    if (newOutletOwnerPin.length !== 6) {
+      setAddOutletError('Enter a 6-digit Owner PIN for this outlet.');
+      return;
+    }
+    if (newOutletStaffPin && newOutletStaffPin.length !== 6) {
+      setAddOutletError('Staff PIN must be 6 digits (or left blank).');
+      return;
+    }
+
+    setAddingOutlet(true);
+
+    const brandName = session.brandName || session.restaurantName.split(' — ')[0];
+    const tablesVal = newOutletTables > 0 ? newOutletTables : 10;
+
+    const { data, error } = await supabase
+      .from('restaurants')
+      .insert([
+        {
+          name: brandName,
+          city: cleanCity,
+          phone: cleanPhone,
+          owner_phone: cleanPhone,
+          total_tables: tablesVal,
+          owner_pin: newOutletOwnerPin,
+          staff_pin: newOutletStaffPin || null,
+          outlet_mode: 'multiple',
+          outlet_label: cleanLabel,
+          subscription_status: subInfo.status,
+          plan_type: subInfo.planType,
+          selected_plan: subInfo.selectedPlan,
+        },
+      ])
+      .select()
+      .single();
+
+    setAddingOutlet(false);
+
+    if (error || !data) {
+      setAddOutletError(error?.message || 'Failed to add linked outlet.');
+      return;
+    }
+
+    setShowAddOutletModal(false);
+    setUpgradeSuccessBanner(
+      `New outlet "${brandName} — ${cleanLabel}" added under your owner account!`
+    );
+    setTimeout(() => setUpgradeSuccessBanner(null), 6000);
+    fetchDashboardData();
+  };
 
   const handleOpenSalesModal = () => {
     setSalesScope('current');
@@ -836,6 +1004,7 @@ export default function DashboardPage() {
             plan_type: plan.id,
             selected_plan: `${plan.name} (${plan.price})`,
             trial_ends_at: newExpiry,
+            outlet_mode: mode,
           };
 
           const targetIds =
@@ -847,11 +1016,11 @@ export default function DashboardPage() {
 
           setUpgradingPlanId(null);
           setUpgradeSuccessBanner(
-            `${plan.name} (${plan.price}) has been activated for ${
-              mode === 'multiple' && targetIds.length > 1
-                ? `all ${targetIds.length} outlets`
-                : session.restaurantName
-            }!`
+            `${plan.name} (${plan.price}) activated! Limit: ${
+              plan.maxOutlets === null
+                ? 'Unlimited outlets'
+                : `Up to ${plan.maxOutlets} outlet${plan.maxOutlets === 1 ? '' : 's'}`
+            }.`
           );
           fetchDashboardData();
           setTimeout(() => setUpgradeSuccessBanner(null), 7000);
@@ -1107,16 +1276,22 @@ export default function DashboardPage() {
               <UtensilsCrossed className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-base sm:text-lg font-extrabold text-slate-900">
                   {session.restaurantName}
                 </h1>
                 <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full flex items-center gap-1 bg-amber-100 text-amber-800 border border-amber-200">
                   <ShieldCheck className="w-3 h-3" /> Owner
                 </span>
+                {isOwner && (
+                  <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                    Outlets: {currentOutletCount}/
+                    {maxAllowedOutlets === null ? '∞' : maxAllowedOutlets}
+                  </span>
+                )}
               </div>
               <p className="text-xs text-slate-500">
-                {session.city} • {actualTablesCount} Tables
+                {session.city} • {actualTablesCount} Tables • {subInfo.selectedPlan}
               </p>
             </div>
           </div>
@@ -1141,6 +1316,15 @@ export default function DashboardPage() {
 
             {isOwner && (
               <>
+                <button
+                  type="button"
+                  onClick={handleOpenAddOutletModal}
+                  className="bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Add Outlet</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={handleOpenSalesModal}
@@ -1285,6 +1469,81 @@ export default function DashboardPage() {
             >
               Add Merchant UPI ID &rarr;
             </button>
+          </section>
+        )}
+
+        {isOwner && ownerOutlets.length > 0 && (
+          <section className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-4 sm:p-5 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3.5">
+              <div>
+                <h2 className="text-sm sm:text-base font-extrabold text-slate-900 flex items-center gap-2">
+                  <Building2 className="w-4 h-4 text-orange-600" />
+                  <span>
+                    Linked Outlets ({currentOutletCount}/
+                    {maxAllowedOutlets === null ? 'Unlimited' : maxAllowedOutlets})
+                  </span>
+                </h2>
+                <p className="text-[11px] text-slate-500">
+                  Separate Table QRs & KDS per branch • Combined Sales protected by Master Password
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {isAtOutletLimit && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUpgradeErrorMsg(null);
+                      setUpgradeModeTab('multiple');
+                      setShowUpgradeModal(true);
+                    }}
+                    className="bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs px-3 py-1.5 rounded-xl transition"
+                  >
+                    Upgrade Limit
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleOpenAddOutletModal}
+                  className="bg-orange-600 hover:bg-orange-700 text-white font-extrabold text-xs px-3.5 py-1.5 rounded-xl flex items-center gap-1 transition"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Branch</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {ownerOutlets.map((out) => {
+                const isCurrent = out.id === session.restaurantId;
+                return (
+                  <div
+                    key={out.id}
+                    className={`p-3.5 rounded-2xl border flex items-center justify-between gap-2 ${
+                      isCurrent
+                        ? 'bg-orange-50/60 border-orange-300'
+                        : 'bg-slate-50 border-slate-200'
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <p className="text-xs font-extrabold text-slate-900 truncate">
+                        {formatOutletTitle(out)}
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        {out.city} • {out.total_tables || 10} Tables{' '}
+                        {isCurrent ? '• Current' : ''}
+                      </p>
+                    </div>
+                    <Link
+                      href={`/kitchen/${out.id}`}
+                      className="text-[11px] font-extrabold text-slate-800 bg-white hover:bg-slate-100 border border-slate-200 px-2.5 py-1.5 rounded-xl shrink-0 transition"
+                    >
+                      KDS &rarr;
+                    </Link>
+                  </div>
+                );
+              })}
+            </div>
           </section>
         )}
 
@@ -1668,6 +1927,131 @@ export default function DashboardPage() {
         )}
       </main>
 
+      {isOwner && showAddOutletModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[999]">
+          <div className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3.5 border-b border-slate-200">
+              <div>
+                <h3 className="text-base sm:text-lg font-extrabold text-slate-900 flex items-center gap-2">
+                  <Building2 className="w-5 h-5 text-orange-600" /> Add Linked Outlet
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Plan Limit: {currentOutletCount}/
+                  {maxAllowedOutlets === null ? 'Unlimited' : maxAllowedOutlets} outlets used
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddOutletModal(false)}
+                className="p-2 rounded-full hover:bg-slate-100 text-slate-500"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateLinkedOutlet} className="pt-4 space-y-3.5">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Outlet / Branch Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newOutletLabel}
+                  onChange={(e) => setNewOutletLabel(e.target.value)}
+                  placeholder="e.g. Branch 2 (Malviya Nagar)"
+                  className="w-full px-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">City *</label>
+                <input
+                  type="text"
+                  required
+                  value={newOutletCity}
+                  onChange={(e) => setNewOutletCity(e.target.value)}
+                  placeholder="e.g. Jaipur"
+                  className="w-full px-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Number of Tables *
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  required
+                  value={newOutletTables || ''}
+                  onChange={(e) => setNewOutletTables(parseInt(e.target.value, 10) || 0)}
+                  className="w-full px-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Owner PIN (6-Digit) *
+                  </label>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      maxLength={6}
+                      required
+                      value={newOutletOwnerPin}
+                      onChange={(e) =>
+                        setNewOutletOwnerPin(e.target.value.replace(/\D/g, '').slice(0, 6))
+                      }
+                      placeholder="••••••"
+                      className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm font-bold tracking-widest outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Staff PIN (Optional)
+                  </label>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      maxLength={6}
+                      value={newOutletStaffPin}
+                      onChange={(e) =>
+                        setNewOutletStaffPin(e.target.value.replace(/\D/g, '').slice(0, 6))
+                      }
+                      placeholder="••••••"
+                      className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm font-bold tracking-widest outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {addOutletError && (
+                <p className="text-xs font-bold text-red-600 bg-red-50 py-2 px-3 rounded-xl text-center">
+                  {addOutletError}
+                </p>
+              )}
+
+              <button
+                type="submit"
+                disabled={addingOutlet}
+                className="w-full bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white font-extrabold py-3 rounded-xl text-xs shadow-sm transition"
+              >
+                {addingOutlet ? 'Adding Outlet...' : 'Create Linked Outlet ✓'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
       {isOwner && showUpgradeModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[999]">
           <div className="bg-white rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl max-h-[85vh] overflow-y-auto overscroll-contain border border-slate-200">
@@ -1677,7 +2061,7 @@ export default function DashboardPage() {
                   <Crown className="w-5 h-5 text-orange-600" /> Activate RestroSync Plan
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Your plan activates immediately upon completing payment
+                  Current Outlets: {currentOutletCount} • Plan activates immediately after payment
                 </p>
               </div>
               <button
@@ -1725,6 +2109,11 @@ export default function DashboardPage() {
             <div className="py-4 space-y-2.5">
               {activeUpgradePlans.map((plan) => {
                 const isSelected = subInfo.selectedPlan.includes(plan.price);
+                const isBelowCurrentOutlets =
+                  upgradeModeTab === 'multiple' &&
+                  plan.maxOutlets !== null &&
+                  currentOutletCount > plan.maxOutlets;
+
                 return (
                   <div
                     key={plan.id}
@@ -1744,11 +2133,16 @@ export default function DashboardPage() {
                       <p className="text-base font-extrabold text-orange-600 mt-0.5">
                         {plan.price}
                       </p>
+                      {isBelowCurrentOutlets && (
+                        <p className="text-[10px] font-bold text-red-600 mt-0.5">
+                          You already have {currentOutletCount} outlets (needs ≥ {currentOutletCount} limit)
+                        </p>
+                      )}
                     </div>
 
                     <button
                       type="button"
-                      disabled={upgradingPlanId === plan.id}
+                      disabled={upgradingPlanId === plan.id || isBelowCurrentOutlets}
                       onClick={() => handleRazorpayPlanUpgrade(plan, upgradeModeTab)}
                       className="bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 shadow-sm transition shrink-0"
                     >
