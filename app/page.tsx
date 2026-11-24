@@ -25,6 +25,7 @@ import {
   Store,
   AlertTriangle,
   Crown,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface Restaurant {
@@ -41,6 +42,7 @@ interface Restaurant {
 
 type ResetTargetRole = 'owner' | 'staff';
 type OutletTabMode = 'single' | 'multiple';
+type LoginStep = 'choose_role' | 'branch_pin' | 'malik_master';
 
 interface PricingPlan {
   id: string;
@@ -50,11 +52,14 @@ interface PricingPlan {
   perMonth?: string;
   amount: number;
   durationDays: number;
-  maxOutlets: number | null; // null = Unlimited
+  maxOutlets: number | null;
   badge: string | null;
   popular: boolean;
   features: string[];
 }
+
+const MASTER_PASS_STORAGE_KEY = 'restro_master_sales_password';
+const MALIK_VAULT_UNLOCKED_KEY = 'restro_malik_vault_unlocked';
 
 const SINGLE_OUTLET_PLANS: PricingPlan[] = [
   {
@@ -156,7 +161,7 @@ const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
     subtitle: 'Up to 2 Outlets • Monthly',
     price: '₹1,115',
     perMonth: '₹1,115 / month',
-    amount: 1,
+    amount: 1115,
     durationDays: 30,
     maxOutlets: 2,
     badge: '7% Below Market',
@@ -272,7 +277,6 @@ export default function HomePage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
 
-  // Pricing Tab & Plan Payment States
   const [pricingTab, setPricingTab] = useState<OutletTabMode>('single');
   const [payingPlanId, setPayingPlanId] = useState<string | null>(null);
   const [planBannerMsg, setPlanBannerMsg] = useState<string | null>(null);
@@ -286,7 +290,6 @@ export default function HomePage() {
     paymentId?: string;
   } | null>(null);
 
-  // Outlet Limit Exceeded Dialog State (Shown before payment/registration if limit reached)
   const [limitDialog, setLimitDialog] = useState<{
     open: boolean;
     phone: string;
@@ -301,8 +304,11 @@ export default function HomePage() {
     planLabel: '1 Month (₹1,115)',
   });
 
-  // PIN Login Modal States
+  // Login Modal States
   const [selectedRestaurant, setSelectedRestaurant] = useState<Restaurant | null>(null);
+  const [loginStep, setLoginStep] = useState<LoginStep>('branch_pin');
+  const [malikMasterPass, setMalikMasterPass] = useState('');
+  const [isSettingMalikPass, setIsSettingMalikPass] = useState(false);
   const [pin, setPin] = useState('');
   const [verifying, setVerifying] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -366,7 +372,6 @@ export default function HomePage() {
     fetchRestaurants();
   }, []);
 
-  // Checks existing outlet count for a phone number before starting payment or registration
   const checkOutletLimitBeforeProceed = async (
     phoneDigits: string,
     mode: OutletTabMode,
@@ -376,7 +381,7 @@ export default function HomePage() {
     if (mode !== 'multiple') return true;
 
     const maxOutlets = getPlanMaxOutlets(planId, planLabel, mode);
-    if (maxOutlets === null) return true; // Unlimited plan
+    if (maxOutlets === null) return true;
 
     const cleanPhone = phoneDigits.replace(/\D/g, '');
     if (cleanPhone.length !== 10) return true;
@@ -392,7 +397,6 @@ export default function HomePage() {
     ).length;
     const existingCount = Math.max(dbCount, localCount);
 
-    // Adding 1 new outlet would make total = existingCount + 1
     if (existingCount + 1 > maxOutlets) {
       setLimitDialog({
         open: true,
@@ -408,7 +412,15 @@ export default function HomePage() {
   };
 
   const handleOpenPinModal = (rest: Restaurant) => {
+    const savedMaster =
+      typeof window !== 'undefined'
+        ? localStorage.getItem(MASTER_PASS_STORAGE_KEY)
+        : null;
+
     setSelectedRestaurant(rest);
+    setLoginStep(rest.outlet_mode === 'multiple' ? 'choose_role' : 'branch_pin');
+    setIsSettingMalikPass(!savedMaster);
+    setMalikMasterPass('');
     setPin('');
     setErrorMsg('');
     setVerifying(false);
@@ -421,6 +433,8 @@ export default function HomePage() {
 
   const handleClosePinModal = () => {
     setSelectedRestaurant(null);
+    setLoginStep('branch_pin');
+    setMalikMasterPass('');
     setPin('');
     setErrorMsg('');
     setVerifying(false);
@@ -440,6 +454,51 @@ export default function HomePage() {
     setResetSuccessMsg('');
   };
 
+  const handleMalikMasterLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedRestaurant || verifying) return;
+
+    const cleanPass = malikMasterPass.trim();
+    if (cleanPass.length < 4) {
+      setErrorMsg('Master Password must be at least 4 characters.');
+      return;
+    }
+
+    const savedMaster = localStorage.getItem(MASTER_PASS_STORAGE_KEY);
+    if (savedMaster && cleanPass !== savedMaster) {
+      setErrorMsg('Incorrect Master Password!');
+      return;
+    }
+
+    setVerifying(true);
+    setErrorMsg('');
+
+    if (!savedMaster) {
+      localStorage.setItem(MASTER_PASS_STORAGE_KEY, cleanPass);
+    }
+
+    localStorage.setItem(MALIK_VAULT_UNLOCKED_KEY, '1');
+    await claimSingleRoleSession(selectedRestaurant.id, 'owner');
+
+    const displayName = formatRestaurantDisplayName(selectedRestaurant);
+    localStorage.setItem(
+      'restro_session',
+      JSON.stringify({
+        restaurantId: selectedRestaurant.id,
+        restaurantName: displayName,
+        brandName: selectedRestaurant.name,
+        outletLabel: selectedRestaurant.outlet_label || null,
+        outletMode: 'multiple',
+        ownerPhone: selectedRestaurant.owner_phone || null,
+        city: selectedRestaurant.city,
+        totalTables: selectedRestaurant.total_tables,
+        role: 'owner',
+      })
+    );
+
+    router.push('/dashboard');
+  };
+
   const handlePinLogin = async (e?: React.FormEvent, enteredPin?: string) => {
     if (e) e.preventDefault();
     const activePin = enteredPin ?? pin;
@@ -454,6 +513,7 @@ export default function HomePage() {
 
     if (isOwner || isStaff) {
       const role: 'owner' | 'staff' = isOwner ? 'owner' : 'staff';
+      localStorage.removeItem(MALIK_VAULT_UNLOCKED_KEY);
       await claimSingleRoleSession(selectedRestaurant.id, role);
 
       const displayName = formatRestaurantDisplayName(selectedRestaurant);
@@ -496,7 +556,7 @@ export default function HomePage() {
     setErrorMsg('');
     setResetSuccessMsg('');
 
-    const roleLabel = resetTargetRole === 'owner' ? 'Owner' : 'Staff';
+    const roleLabel = resetTargetRole === 'owner' ? 'Branch' : 'Staff';
     const cleanPhone = recoveryPhone.replace(/\D/g, '');
     if (cleanPhone.length !== 10) {
       setErrorMsg('Please enter a valid 10-digit registered owner mobile number.');
@@ -655,8 +715,6 @@ export default function HomePage() {
     setPayingPlanId(plan.id);
 
     const label = `${plan.duration} (${plan.price})`;
-
-    // If a phone number is already entered in the register modal, check limit before opening Razorpay
     const cleanPhone = regPhone.replace(/\D/g, '');
     if (cleanPhone.length === 10) {
       const allowed = await checkOutletLimitBeforeProceed(cleanPhone, mode, plan.id, label);
@@ -845,7 +903,6 @@ export default function HomePage() {
       return;
     }
 
-    // 1. Check outlet count for this mobile number BEFORE payment or registration
     setRegistering(true);
     const allowed = await checkOutletLimitBeforeProceed(
       cleanPhone,
@@ -871,7 +928,6 @@ export default function HomePage() {
         verifiedPlanCheckout.outletMode === outletMode
     );
 
-    // 2. If user clicked "Pay & Register" from pricing card, complete Razorpay payment first
     const shouldPayNow =
       selectedPlanLabel.includes('Pay ') ||
       (outletMode === 'multiple' && !isPaidForThisPlan && !selectedPlanLabel.startsWith('Trial'));
@@ -915,9 +971,10 @@ export default function HomePage() {
     );
   });
 
-  const activeResetLabel = resetTargetRole === 'owner' ? 'Owner' : 'Staff';
+  const activeResetLabel = resetTargetRole === 'owner' ? 'Branch' : 'Staff';
   const displayedPlans =
     pricingTab === 'single' ? SINGLE_OUTLET_PLANS : MULTIPLE_OUTLET_PLANS;
+  const isSelectedMultiOutlet = selectedRestaurant?.outlet_mode === 'multiple';
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -937,7 +994,7 @@ export default function HomePage() {
               href="#pricing"
               className="hidden sm:inline-block text-xs font-extrabold text-slate-600 hover:text-orange-600 transition"
             >
-              Plans & Pricing
+              Plans &amp; Pricing
             </a>
 
             <button
@@ -960,7 +1017,7 @@ export default function HomePage() {
 
           <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-slate-900 leading-tight">
             From Table Straight to Kitchen —{' '}
-            <span className="text-orange-600">Smart Restaurant POS & KDS</span>
+            <span className="text-orange-600">Smart Restaurant POS &amp; KDS</span>
           </h1>
 
           <p className="text-sm sm:text-base text-slate-500 mt-4 leading-relaxed">
@@ -1013,7 +1070,7 @@ export default function HomePage() {
                         </div>
 
                         <span className="text-xs font-extrabold text-orange-600 flex items-center gap-1">
-                          Select & Login <ArrowRight className="w-3.5 h-3.5" />
+                          Select &amp; Login <ArrowRight className="w-3.5 h-3.5" />
                         </span>
                       </button>
                     ))}
@@ -1045,7 +1102,7 @@ export default function HomePage() {
                 <QrCode className="w-5 h-5" />
               </div>
               <h3 className="font-extrabold text-slate-900 text-base">
-                1. Auto Table QR & Cart
+                1. Auto Table QR &amp; Cart
               </h3>
               <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
                 Dedicated QR code for every table. Customers scan and order directly without
@@ -1071,7 +1128,7 @@ export default function HomePage() {
                 <Receipt className="w-5 h-5" />
               </div>
               <h3 className="font-extrabold text-slate-900 text-base">
-                3. Easy Menu & Billing
+                3. Easy Menu &amp; Billing
               </h3>
               <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
                 Real-time dish availability toggle, Cash/UPI settlement, and daily sales tracking.
@@ -1084,7 +1141,7 @@ export default function HomePage() {
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
             <div>
               <span className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-extrabold px-3.5 py-1 rounded-full mb-2.5">
-                <Sparkles className="w-3.5 h-3.5" /> Simple & Transparent Plans
+                <Sparkles className="w-3.5 h-3.5" /> Simple &amp; Transparent Plans
               </span>
               <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900">
                 Choose the Best Plan for Your Restaurant
@@ -1281,7 +1338,7 @@ export default function HomePage() {
               </span>
               <h3 className="text-xl font-extrabold text-slate-900">Register Restaurant</h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Fill in your details to launch your POS & QR Menu right away.
+                Fill in your details to launch your POS &amp; QR Menu right away.
               </p>
             </div>
 
@@ -1376,7 +1433,7 @@ export default function HomePage() {
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Owner Mobile Number (For Forgot PIN & Combined Sales) *
+                  Owner Mobile Number (For Forgot PIN &amp; Combined Sales) *
                 </label>
                 <div className="relative">
                   <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -1417,7 +1474,7 @@ export default function HomePage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Owner PIN (6-Digit) *
+                    Branch PIN (6-Digit) *
                   </label>
                   <div className="relative">
                     <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -1479,7 +1536,6 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Outlet Limit Exceeded Dialog (Shown Before Payment / Registration) */}
       {limitDialog.open && (
         <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
           <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-red-200 text-center space-y-4">
@@ -1495,8 +1551,7 @@ export default function HomePage() {
                 Mobile number <strong>{limitDialog.phone}</strong> already has{' '}
                 <strong>{limitDialog.existingCount}</strong> outlet(s). Selected plan{' '}
                 <strong>{limitDialog.planLabel}</strong> allows up to{' '}
-                <strong>{limitDialog.maxOutlets}</strong> outlet(s), so adding another outlet is
-                not allowed without upgrading.
+                <strong>{limitDialog.maxOutlets}</strong> outlet(s).
               </p>
             </div>
 
@@ -1538,7 +1593,13 @@ export default function HomePage() {
             </button>
 
             <div className="w-12 h-12 rounded-2xl bg-orange-100 text-orange-600 flex items-center justify-center mx-auto mb-3">
-              {isForgotMode ? <KeyRound className="w-6 h-6" /> : <Lock className="w-6 h-6" />}
+              {isForgotMode ? (
+                <KeyRound className="w-6 h-6" />
+              ) : loginStep === 'malik_master' ? (
+                <ShieldCheck className="w-6 h-6" />
+              ) : (
+                <Lock className="w-6 h-6" />
+              )}
             </div>
 
             <h3 className="text-lg font-extrabold text-slate-900">
@@ -1546,57 +1607,50 @@ export default function HomePage() {
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">{selectedRestaurant.city}</p>
 
-            {!isForgotMode ? (
-              <form onSubmit={handlePinLogin} autoComplete="off" className="mt-6 space-y-4">
-                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
-                  Enter 6-Digit Owner or Staff PIN
-                </label>
-
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  maxLength={6}
-                  autoFocus
-                  autoComplete="new-password"
-                  name="restro_pin_code"
-                  value={pin}
-                  onChange={(e) => handlePinChange(e.target.value)}
-                  placeholder="••••••"
-                  className="w-full text-center text-2xl tracking-[0.65em] font-extrabold py-3.5 border-2 border-slate-200 focus:border-orange-500 rounded-2xl outline-none transition"
-                />
-
-                {errorMsg && (
-                  <p className="text-xs font-bold text-red-600 bg-red-50 py-2 px-3 rounded-xl">
-                    {errorMsg}
-                  </p>
-                )}
+            {/* Step 1 for Multi-Outlet: Choose Branch Manager/Staff vs Malik */}
+            {isSelectedMultiOutlet && loginStep === 'choose_role' && !isForgotMode ? (
+              <div className="mt-5 space-y-3 text-left">
+                <p className="text-xs text-slate-500 text-center">
+                  Select how you want to login:
+                </p>
 
                 <button
-                  type="submit"
-                  disabled={pin.length !== 6 || verifying}
-                  className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-orange-300 text-white font-extrabold py-3.5 rounded-2xl text-sm shadow-md transition"
+                  type="button"
+                  onClick={() => {
+                    setLoginStep('branch_pin');
+                    setErrorMsg('');
+                  }}
+                  className="w-full p-4 rounded-2xl border-2 border-slate-200 hover:border-orange-500 hover:bg-orange-50/50 transition flex items-center justify-between"
                 >
-                  {verifying ? 'Checking PIN...' : 'Unlock Dashboard'}
+                  <div>
+                    <p className="font-extrabold text-sm text-slate-900">
+                      Branch Manager / Staff
+                    </p>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Login with 6-digit Branch or Staff PIN
+                    </p>
+                  </div>
+                  <ArrowRight className="w-4 h-4 text-orange-600 shrink-0" />
                 </button>
 
-                <div className="pt-1 flex flex-col items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => handleStartForgotMode('owner')}
-                    className="text-xs font-bold text-slate-500 hover:text-orange-600 transition"
-                  >
-                    Forgot Owner PIN? Reset Here &rarr;
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleStartForgotMode('staff')}
-                    className="text-xs font-bold text-slate-500 hover:text-orange-600 transition"
-                  >
-                    Forgot Staff PIN? Reset Here &rarr;
-                  </button>
-                </div>
-              </form>
-            ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginStep('malik_master');
+                    setErrorMsg('');
+                  }}
+                  className="w-full p-4 rounded-2xl border-2 border-slate-900 bg-slate-900 text-white hover:bg-slate-800 transition flex items-center justify-between"
+                >
+                  <div>
+                    <p className="font-extrabold text-sm">Outlets Owner</p>
+                    <p className="text-[11px] text-slate-300 mt-0.5">
+                      Master Password for all outlets &amp; sales report
+                    </p>
+                  </div>
+                  <ShieldCheck className="w-5 h-5 text-amber-400 shrink-0" />
+                </button>
+              </div>
+            ) : isForgotMode ? (
               <form
                 onSubmit={handleResetPin}
                 autoComplete="off"
@@ -1683,6 +1737,119 @@ export default function HomePage() {
                   >
                     &larr; Back to PIN Login
                   </button>
+                </div>
+              </form>
+            ) : isSelectedMultiOutlet && loginStep === 'malik_master' ? (
+              <form onSubmit={handleMalikMasterLogin} autoComplete="off" className="mt-5 space-y-4">
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
+                  {isSettingMalikPass
+                    ? 'Set Malik Master Password (min 4 chars)'
+                    : 'Enter Malik Master Password'}
+                </label>
+
+                <input
+                  type="password"
+                  autoFocus
+                  value={malikMasterPass}
+                  onChange={(e) => {
+                    setMalikMasterPass(e.target.value);
+                    setErrorMsg('');
+                  }}
+                  placeholder="Enter master password"
+                  className="w-full text-center text-base font-extrabold py-3 px-4 border-2 border-slate-200 focus:border-slate-900 rounded-2xl outline-none transition"
+                />
+
+                {errorMsg && (
+                  <p className="text-xs font-bold text-red-600 bg-red-50 py-2 px-3 rounded-xl">
+                    {errorMsg}
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={verifying}
+                  className="w-full bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-extrabold py-3.5 rounded-2xl text-sm shadow-md transition"
+                >
+                  {verifying
+                    ? 'Opening Dashboard...'
+                    : isSettingMalikPass
+                    ? 'Save & Open Malik Dashboard'
+                    : 'Open Outlets Owner Dashboard'}
+                </button>
+
+                <div className="text-center pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLoginStep('choose_role');
+                      setErrorMsg('');
+                    }}
+                    className="text-xs font-bold text-slate-500 hover:text-slate-800 transition"
+                  >
+                    &larr; Switch Login Type
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <form onSubmit={handlePinLogin} autoComplete="off" className="mt-5 space-y-4">
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+                  Enter 6-Digit Branch or Staff PIN
+                </label>
+
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={6}
+                  autoFocus
+                  autoComplete="new-password"
+                  name="restro_pin_code"
+                  value={pin}
+                  onChange={(e) => handlePinChange(e.target.value)}
+                  placeholder="••••••"
+                  className="w-full text-center text-2xl tracking-[0.65em] font-extrabold py-3.5 border-2 border-slate-200 focus:border-orange-500 rounded-2xl outline-none transition"
+                />
+
+                {errorMsg && (
+                  <p className="text-xs font-bold text-red-600 bg-red-50 py-2 px-3 rounded-xl">
+                    {errorMsg}
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={pin.length !== 6 || verifying}
+                  className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-orange-300 text-white font-extrabold py-3.5 rounded-2xl text-sm shadow-md transition"
+                >
+                  {verifying ? 'Checking PIN...' : 'Unlock Dashboard'}
+                </button>
+
+                <div className="pt-1 flex flex-col items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleStartForgotMode('owner')}
+                    className="text-xs font-bold text-slate-500 hover:text-orange-600 transition"
+                  >
+                    Forgot Branch PIN? Reset Here &rarr;
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleStartForgotMode('staff')}
+                    className="text-xs font-bold text-slate-500 hover:text-orange-600 transition"
+                  >
+                    Forgot Staff PIN? Reset Here &rarr;
+                  </button>
+                  {isSelectedMultiOutlet && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLoginStep('choose_role');
+                        setErrorMsg('');
+                      }}
+                      className="text-xs font-bold text-slate-500 hover:text-slate-800 transition mt-1"
+                    >
+                      &larr; Switch Login Type
+                    </button>
+                  )}
                 </div>
               </form>
             )}

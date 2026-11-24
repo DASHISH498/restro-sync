@@ -1,15 +1,15 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+import React, { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 import {
   isRoleSessionActive,
   releaseRoleSessionIfOwner,
   clearLocalSessionToken,
-} from '@/lib/roleSessionGuard';
-import SessionReplacedDialog from '@/components/SessionReplacedDialog';
+} from "@/lib/roleSessionGuard";
+import SessionReplacedDialog from "@/components/SessionReplacedDialog";
 import {
   UtensilsCrossed,
   LogOut,
@@ -39,23 +39,26 @@ import {
   User,
   Phone,
   KeyRound,
-  Store,
   Building2,
   Plus,
   Lock,
   Trash2,
-} from 'lucide-react';
+  Eye,
+  EyeOff,
+  MapPin,
+  Store,
+} from "lucide-react";
 
 interface SessionData {
   restaurantId: string;
   restaurantName: string;
   brandName?: string;
   outletLabel?: string | null;
-  outletMode?: 'single' | 'multiple';
+  outletMode?: "single" | "multiple";
   ownerPhone?: string | null;
   city: string;
   totalTables: number;
-  role: 'owner' | 'staff';
+  role: "owner" | "staff";
 }
 
 interface OutletMeta {
@@ -65,6 +68,8 @@ interface OutletMeta {
   total_tables?: number;
   outlet_mode?: string | null;
   outlet_label?: string | null;
+  owner_pin?: string | null;
+  staff_pin?: string | null;
 }
 
 interface SubscriptionInfo {
@@ -79,7 +84,7 @@ interface OrderRecord {
   id: string;
   restaurant_id?: string;
   table_number: number;
-  status: 'pending' | 'preparing' | 'ready' | 'served' | 'completed';
+  status: "pending" | "preparing" | "ready" | "served" | "completed";
   total_amount: number;
   payment_method: string;
   payment_status?: string;
@@ -122,128 +127,128 @@ interface UpgradePlanOption {
   tag: string;
 }
 
-const ADMIN_WHATSAPP = '919079083101';
-const MASTER_PASS_STORAGE_KEY = 'restro_master_sales_password';
+const ADMIN_WHATSAPP = "919079083101";
+const MALIK_VAULT_UNLOCKED_KEY = "restro_malik_vault_unlocked";
 
 const SINGLE_UPGRADE_PLANS: UpgradePlanOption[] = [
   {
-    id: '1_month',
-    name: '1 Month Plan',
-    price: '₹599',
+    id: "1_month",
+    name: "1 Month Plan",
+    price: "₹599",
     amount: 599,
     durationDays: 30,
     maxOutlets: 1,
-    tag: 'Monthly',
+    tag: "Monthly",
   },
   {
-    id: '3_months',
-    name: '3 Months Plan',
-    price: '₹1,699',
+    id: "3_months",
+    name: "3 Months Plan",
+    price: "₹1,699",
     amount: 1699,
     durationDays: 90,
     maxOutlets: 1,
-    tag: 'Quarterly',
+    tag: "Quarterly",
   },
   {
-    id: '6_months',
-    name: '6 Months Plan',
-    price: '₹3,299',
+    id: "6_months",
+    name: "6 Months Plan",
+    price: "₹3,299",
     amount: 3299,
     durationDays: 180,
     maxOutlets: 1,
-    tag: 'Half-Yearly',
+    tag: "Half-Yearly",
   },
   {
-    id: 'yearly',
-    name: 'Yearly Plan (12 Months)',
-    price: '₹5,499',
+    id: "yearly",
+    name: "Yearly Plan (12 Months)",
+    price: "₹5,499",
     amount: 5499,
     durationDays: 365,
     maxOutlets: 1,
-    tag: 'Most Popular',
+    tag: "Most Popular",
   },
   {
-    id: 'lifetime',
-    name: 'Lifetime License',
-    price: '₹19,999',
+    id: "lifetime",
+    name: "Lifetime License",
+    price: "₹19,999",
     amount: 19999,
     durationDays: 36500,
     maxOutlets: 1,
-    tag: 'One-Time Pay',
+    tag: "One-Time Pay",
   },
 ];
 
 const MULTI_UPGRADE_PLANS: UpgradePlanOption[] = [
   {
-    id: 'multi_1_month',
-    name: '1 Month Plan',
-    price: '₹1,115',
+    id: "multi_1_month",
+    name: "1 Month Plan",
+    price: "₹1,115",
     amount: 1115,
     durationDays: 30,
     maxOutlets: 2,
-    tag: 'Up to 2 Outlets',
+    tag: "Up to 2 Outlets",
   },
   {
-    id: 'multi_3_months',
-    name: '3 Months Plan',
-    price: '₹11,159',
+    id: "multi_3_months",
+    name: "3 Months Plan",
+    price: "₹11,159",
     amount: 11159,
     durationDays: 90,
     maxOutlets: 5,
-    tag: 'Up to 5 Outlets',
+    tag: "Up to 5 Outlets",
   },
   {
-    id: 'multi_6_months',
-    name: '6 Months Plan',
-    price: '₹18,599',
+    id: "multi_6_months",
+    name: "6 Months Plan",
+    price: "₹18,599",
     amount: 18599,
     durationDays: 180,
     maxOutlets: 8,
-    tag: 'Up to 8 Outlets',
+    tag: "Up to 8 Outlets",
   },
   {
-    id: 'multi_yearly',
-    name: 'Yearly Plan (12 Months)',
-    price: '₹27,899',
+    id: "multi_yearly",
+    name: "Yearly Plan (12 Months)",
+    price: "₹27,899",
     amount: 27899,
     durationDays: 365,
     maxOutlets: 15,
-    tag: 'Up to 15 Outlets',
+    tag: "Up to 15 Outlets",
   },
   {
-    id: 'multi_lifetime',
-    name: 'Lifetime License',
-    price: '₹37,199',
+    id: "multi_lifetime",
+    name: "Lifetime License",
+    price: "₹37,199",
     amount: 37199,
     durationDays: 36500,
     maxOutlets: null,
-    tag: 'Unlimited Outlets',
+    tag: "Unlimited Outlets",
   },
 ];
 
 function getMaxOutletsForPlan(
   planType: string,
   selectedPlanLabel: string,
-  outletMode?: string | null
+  outletMode?: string | null,
 ): number | null {
-  const combined = `${planType || ''} ${selectedPlanLabel || ''}`.toLowerCase();
+  const combined = `${planType || ""} ${selectedPlanLabel || ""}`.toLowerCase();
 
-  if (combined.includes('multi_lifetime') || combined.includes('37,199')) {
+  if (combined.includes("multi_lifetime") || combined.includes("37,199")) {
     return null;
   }
-  if (combined.includes('multi_yearly') || combined.includes('27,899')) {
+  if (combined.includes("multi_yearly") || combined.includes("27,899")) {
     return 15;
   }
-  if (combined.includes('multi_6_months') || combined.includes('18,599')) {
+  if (combined.includes("multi_6_months") || combined.includes("18,599")) {
     return 8;
   }
-  if (combined.includes('multi_3_months') || combined.includes('11,159')) {
+  if (combined.includes("multi_3_months") || combined.includes("11,159")) {
     return 5;
   }
-  if (combined.includes('multi_1_month') || combined.includes('1,115')) {
+  if (combined.includes("multi_1_month") || combined.includes("1,115")) {
     return 2;
   }
-  if (outletMode === 'multiple') {
+  if (outletMode === "multiple") {
     return 2;
   }
   return 1;
@@ -256,7 +261,7 @@ function formatOutletTitle(outlet: {
   outlet_label?: string | null;
 }): string {
   const label = outlet.outlet_label?.trim();
-  if (outlet.outlet_mode === 'multiple' && label) {
+  if (outlet.outlet_mode === "multiple" && label) {
     return `${outlet.name} — ${label}`;
   }
   return outlet.city ? `${outlet.name} (${outlet.city})` : outlet.name;
@@ -268,9 +273,9 @@ export default function DashboardPage() {
   const [session, setSession] = useState<SessionData | null>(null);
   const [actualTablesCount, setActualTablesCount] = useState<number>(5);
   const [subInfo, setSubInfo] = useState<SubscriptionInfo>({
-    status: 'free_trial',
-    planType: 'yearly',
-    selectedPlan: 'Yearly (₹5,499)',
+    status: "free_trial",
+    planType: "yearly",
+    selectedPlan: "Yearly (₹5,499)",
     daysLeft: 14,
     isExpired: false,
   });
@@ -278,38 +283,36 @@ export default function DashboardPage() {
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [ownerOutlets, setOwnerOutlets] = useState<OutletMeta[]>([]);
   const [allOutletOrders, setAllOutletOrders] = useState<OrderRecord[]>([]);
-  const [salesScope, setSalesScope] = useState<'current' | 'all_outlets'>('current');
   const [loading, setLoading] = useState(true);
 
-  // Master Access (Asli Malik) — Only unlocked via Master Password, locked on modal close/logout
-  const [masterUnlocked, setMasterUnlocked] = useState(false);
+  // Malik (Super Owner) Mode
+  const [isMalikMode, setIsMalikMode] = useState(false);
+  const [showOutletPins, setShowOutletPins] = useState(false);
+  const [malikReportFilter, setMalikReportFilter] = useState<
+    "today" | "7days" | "all" | "custom"
+  >("today");
+  const [malikFromDate, setMalikFromDate] = useState<string>("");
+  const [malikToDate, setMalikToDate] = useState<string>("");
 
-  // Add Linked Outlet Modal (Master-only)
+  // Add Linked Outlet Modal (Malik-only)
   const [showAddOutletModal, setShowAddOutletModal] = useState(false);
-  const [newOutletLabel, setNewOutletLabel] = useState('');
-  const [newOutletCity, setNewOutletCity] = useState('');
+  const [newOutletLabel, setNewOutletLabel] = useState("");
+  const [newOutletCity, setNewOutletCity] = useState("");
   const [newOutletTables, setNewOutletTables] = useState<number>(10);
-  const [newOutletOwnerPin, setNewOutletOwnerPin] = useState('');
-  const [newOutletStaffPin, setNewOutletStaffPin] = useState('');
+  const [newOutletOwnerPin, setNewOutletOwnerPin] = useState("");
+  const [newOutletStaffPin, setNewOutletStaffPin] = useState("");
   const [addingOutlet, setAddingOutlet] = useState(false);
-  const [addOutletError, setAddOutletError] = useState('');
+  const [addOutletError, setAddOutletError] = useState("");
 
-  // Remove Linked Outlet Modal (Master-only)
+  // Remove Linked Outlet Modal (Malik-only)
   const [outletToRemove, setOutletToRemove] = useState<OutletMeta | null>(null);
   const [removingOutletId, setRemovingOutletId] = useState<string | null>(null);
-  const [removeOutletError, setRemoveOutletError] = useState('');
-
-  // Master Password Modal
-  const [showMasterPassModal, setShowMasterPassModal] = useState(false);
-  const [masterPassInput, setMasterPassInput] = useState('');
-  const [masterPassError, setMasterPassError] = useState('');
-  const [isSettingFirstMasterPass, setIsSettingFirstMasterPass] = useState(false);
-  const [isForgotMasterPass, setIsForgotMasterPass] = useState(false);
-  const [masterRecoveryPhone, setMasterRecoveryPhone] = useState('');
-  const [newMasterPassInput, setNewMasterPassInput] = useState('');
+  const [removeOutletError, setRemoveOutletError] = useState("");
 
   // Table Action Modal
-  const [selectedTableModal, setSelectedTableModal] = useState<number | null>(null);
+  const [selectedTableModal, setSelectedTableModal] = useState<number | null>(
+    null,
+  );
   const [settling, setSettling] = useState(false);
 
   // Quick Stock Toggle Modal
@@ -317,35 +320,44 @@ export default function DashboardPage() {
   const [stockItems, setStockItems] = useState<MenuStockItem[]>([]);
   const [loadingStock, setLoadingStock] = useState(false);
 
-  // Owner Sales History Modal, Date Filters & Bill Search
-  const [todayIso, setTodayIso] = useState<string>('');
+  // Branch Bills & Sales Modal
+  const [todayIso, setTodayIso] = useState<string>("");
   const [showSalesModal, setShowSalesModal] = useState(false);
-  const [salesFilter, setSalesFilter] = useState<'today' | '7days' | 'all' | 'custom'>('today');
-  const [customFromDate, setCustomFromDate] = useState<string>('');
-  const [customToDate, setCustomToDate] = useState<string>('');
-  const [billSearchQuery, setBillSearchQuery] = useState<string>('');
+  const [salesFilter, setSalesFilter] = useState<
+    "today" | "7days" | "all" | "custom"
+  >("today");
+  const [customFromDate, setCustomFromDate] = useState<string>("");
+  const [customToDate, setCustomToDate] = useState<string>("");
+  const [billSearchQuery, setBillSearchQuery] = useState<string>("");
 
-  // Owner Plan Upgrade Modal & Razorpay State
+  // Plan Upgrade Modal & Razorpay State
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
-  const [upgradeModeTab, setUpgradeModeTab] = useState<'single' | 'multiple'>('single');
+  const [upgradeModeTab, setUpgradeModeTab] = useState<"single" | "multiple">(
+    "single",
+  );
   const [upgradingPlanId, setUpgradingPlanId] = useState<string | null>(null);
-  const [upgradeSuccessBanner, setUpgradeSuccessBanner] = useState<string | null>(null);
+  const [upgradeSuccessBanner, setUpgradeSuccessBanner] = useState<
+    string | null
+  >(null);
   const [upgradeErrorMsg, setUpgradeErrorMsg] = useState<string | null>(null);
 
-  // Owner Payment Setup Modal (Merchant UPI ID + Optional Razorpay)
-  const [showPaymentSettingsModal, setShowPaymentSettingsModal] = useState(false);
-  const [ownerUpiId, setOwnerUpiId] = useState('');
-  const [ownerBankName, setOwnerBankName] = useState('');
-  const [ownerRzpKeyId, setOwnerRzpKeyId] = useState('');
-  const [ownerRzpKeySecret, setOwnerRzpKeySecret] = useState('');
+  // Payment Setup Modal
+  const [showPaymentSettingsModal, setShowPaymentSettingsModal] =
+    useState(false);
+  const [ownerUpiId, setOwnerUpiId] = useState("");
+  const [ownerBankName, setOwnerBankName] = useState("");
+  const [ownerRzpKeyId, setOwnerRzpKeyId] = useState("");
+  const [ownerRzpKeySecret, setOwnerRzpKeySecret] = useState("");
   const [savingPaymentSettings, setSavingPaymentSettings] = useState(false);
-  const [paymentSettingsMsg, setPaymentSettingsMsg] = useState<string | null>(null);
+  const [paymentSettingsMsg, setPaymentSettingsMsg] = useState<string | null>(
+    null,
+  );
   const [isPaymentConfigured, setIsPaymentConfigured] = useState<boolean>(true);
   const [savedPaymentInfo, setSavedPaymentInfo] = useState({
-    upiId: '',
-    bankName: '',
-    rzpKeyId: '',
-    rzpKeySecret: '',
+    upiId: "",
+    bankName: "",
+    rzpKeyId: "",
+    rzpKeySecret: "",
   });
 
   // 1-Hour Inactivity Modal & Session Replaced Dialog
@@ -353,33 +365,43 @@ export default function DashboardPage() {
   const [sessionReplaced, setSessionReplaced] = useState(false);
 
   useEffect(() => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Date().toISOString().split("T")[0];
     setTodayIso(today);
     setCustomFromDate(today);
     setCustomToDate(today);
+    setMalikFromDate(today);
+    setMalikToDate(today);
 
-    const raw = localStorage.getItem('restro_session');
+    const raw = localStorage.getItem("restro_session");
     if (!raw) {
-      router.push('/');
+      router.push("/");
       return;
     }
 
     try {
       const parsed: SessionData = JSON.parse(raw);
 
-      if (parsed.role === 'staff') {
+      if (parsed.role === "staff") {
         router.replace(`/kitchen/${parsed.restaurantId}`);
         return;
       }
 
+      const malikUnlocked =
+        localStorage.getItem(MALIK_VAULT_UNLOCKED_KEY) === "1";
+
       setSession(parsed);
-      setNewOutletCity(parsed.city || '');
-      setUpgradeModeTab(parsed.outletMode === 'multiple' ? 'multiple' : 'single');
+      setIsMalikMode(malikUnlocked);
+      setNewOutletCity(parsed.city || "");
+      setUpgradeModeTab(
+        parsed.outletMode === "multiple" || malikUnlocked
+          ? "multiple"
+          : "single",
+      );
       if (parsed.totalTables) {
         setActualTablesCount(parsed.totalTables);
       }
     } catch {
-      router.push('/');
+      router.push("/");
     }
   }, [router]);
 
@@ -391,19 +413,18 @@ export default function DashboardPage() {
       outletToRemove !== null ||
       showPaymentSettingsModal ||
       showStockModal ||
-      showMasterPassModal ||
       selectedTableModal !== null ||
       showInactivityModal ||
       sessionReplaced;
 
     if (anyModalOpen) {
-      document.body.style.overflow = 'hidden';
+      document.body.style.overflow = "hidden";
     } else {
-      document.body.style.overflow = '';
+      document.body.style.overflow = "";
     }
 
     return () => {
-      document.body.style.overflow = '';
+      document.body.style.overflow = "";
     };
   }, [
     showSalesModal,
@@ -412,7 +433,6 @@ export default function DashboardPage() {
     outletToRemove,
     showPaymentSettingsModal,
     showStockModal,
-    showMasterPassModal,
     selectedTableModal,
     showInactivityModal,
     sessionReplaced,
@@ -420,14 +440,18 @@ export default function DashboardPage() {
 
   // SINGLE OWNER SESSION GUARD
   useEffect(() => {
-    if (!session?.restaurantId || session.role !== 'owner') return;
+    if (!session?.restaurantId || session.role !== "owner") return;
 
     let cancelled = false;
 
     const enforceSingleOwner = async () => {
-      const stillActive = await isRoleSessionActive(session.restaurantId, 'owner');
+      const stillActive = await isRoleSessionActive(
+        session.restaurantId,
+        "owner",
+      );
       if (!stillActive && !cancelled) {
-        localStorage.removeItem('restro_session');
+        localStorage.removeItem("restro_session");
+        localStorage.removeItem(MALIK_VAULT_UNLOCKED_KEY);
         clearLocalSessionToken();
         setSessionReplaced(true);
       }
@@ -438,19 +462,19 @@ export default function DashboardPage() {
     const sessionChannel = supabase
       .channel(`owner-single-session-${session.restaurantId}`)
       .on(
-        'postgres_changes',
+        "postgres_changes",
         {
-          event: '*',
-          schema: 'public',
-          table: 'active_role_sessions',
+          event: "*",
+          schema: "public",
+          table: "active_role_sessions",
           filter: `restaurant_id=eq.${session.restaurantId}`,
         },
         (payload) => {
           const row = payload.new as { role?: string } | null;
-          if (!row || row.role === 'owner') {
+          if (!row || row.role === "owner") {
             enforceSingleOwner();
           }
-        }
+        },
       )
       .subscribe();
 
@@ -465,34 +489,38 @@ export default function DashboardPage() {
 
   // 1-HOUR INACTIVITY AUTO LOGOUT
   useEffect(() => {
-    if (!session?.restaurantId || session.role !== 'owner') return;
+    if (!session?.restaurantId || session.role !== "owner") return;
 
     const INACTIVITY_LIMIT_MS = 60 * 60 * 1000;
     let inactivityTimer: ReturnType<typeof setTimeout>;
 
     const triggerInactivityLogout = async () => {
-      await releaseRoleSessionIfOwner(session.restaurantId, 'owner');
-      localStorage.removeItem('restro_session');
-      setMasterUnlocked(false);
+      await releaseRoleSessionIfOwner(session.restaurantId, "owner");
+      localStorage.removeItem("restro_session");
+      localStorage.removeItem(MALIK_VAULT_UNLOCKED_KEY);
+      setIsMalikMode(false);
       setShowInactivityModal(true);
     };
 
     const resetInactivityTimer = () => {
       clearTimeout(inactivityTimer);
-      inactivityTimer = setTimeout(triggerInactivityLogout, INACTIVITY_LIMIT_MS);
+      inactivityTimer = setTimeout(
+        triggerInactivityLogout,
+        INACTIVITY_LIMIT_MS,
+      );
     };
 
     const activityEvents = [
-      'mousemove',
-      'mousedown',
-      'keydown',
-      'touchstart',
-      'scroll',
-      'click',
+      "mousemove",
+      "mousedown",
+      "keydown",
+      "touchstart",
+      "scroll",
+      "click",
     ];
 
     activityEvents.forEach((event) =>
-      window.addEventListener(event, resetInactivityTimer, { passive: true })
+      window.addEventListener(event, resetInactivityTimer, { passive: true }),
     );
 
     resetInactivityTimer();
@@ -500,7 +528,7 @@ export default function DashboardPage() {
     return () => {
       clearTimeout(inactivityTimer);
       activityEvents.forEach((event) =>
-        window.removeEventListener(event, resetInactivityTimer)
+        window.removeEventListener(event, resetInactivityTimer),
       );
     };
   }, [session?.restaurantId, session?.role]);
@@ -510,22 +538,22 @@ export default function DashboardPage() {
 
     const [{ data: restData }, { data: ordersData }] = await Promise.all([
       supabase
-        .from('restaurants')
+        .from("restaurants")
         .select(
-          'id, name, city, total_tables, owner_phone, outlet_mode, outlet_label, subscription_status, plan_type, selected_plan, trial_ends_at, razorpay_key_id, razorpay_key_secret, upi_id, bank_account_name'
+          "id, name, city, total_tables, owner_phone, outlet_mode, outlet_label, owner_pin, staff_pin, subscription_status, plan_type, selected_plan, trial_ends_at, razorpay_key_id, razorpay_key_secret, upi_id, bank_account_name",
         )
-        .eq('id', session.restaurantId)
+        .eq("id", session.restaurantId)
         .single(),
       supabase
-        .from('orders')
+        .from("orders")
         .select(
-          'id, restaurant_id, table_number, status, total_amount, payment_method, payment_status, customer_name, customer_phone, invoice_number, razorpay_payment_id, created_at, order_items(id, item_name, quantity, price, notes)'
+          "id, restaurant_id, table_number, status, total_amount, payment_method, payment_status, customer_name, customer_phone, invoice_number, razorpay_payment_id, created_at, order_items(id, item_name, quantity, price, notes)",
         )
-        .eq('restaurant_id', session.restaurantId)
-        .order('created_at', { ascending: false }),
+        .eq("restaurant_id", session.restaurantId)
+        .order("created_at", { ascending: false }),
     ]);
 
-    let resolvedOwnerPhone = session.ownerPhone || '';
+    let resolvedOwnerPhone = session.ownerPhone || "";
 
     if (restData) {
       if (restData.total_tables) {
@@ -534,14 +562,14 @@ export default function DashboardPage() {
       if (restData.owner_phone) {
         resolvedOwnerPhone = String(restData.owner_phone);
       }
-      if (restData.outlet_mode === 'multiple') {
-        setUpgradeModeTab('multiple');
+      if (restData.outlet_mode === "multiple") {
+        setUpgradeModeTab("multiple");
       }
 
-      const upi = restData.upi_id || '';
-      const bank = restData.bank_account_name || '';
-      const keyId = restData.razorpay_key_id || '';
-      const keySecret = restData.razorpay_key_secret || '';
+      const upi = restData.upi_id || "";
+      const bank = restData.bank_account_name || "";
+      const keyId = restData.razorpay_key_id || "";
+      const keySecret = restData.razorpay_key_secret || "";
 
       setSavedPaymentInfo({
         upiId: upi,
@@ -554,16 +582,16 @@ export default function DashboardPage() {
       const hasRzp = Boolean(keyId && keySecret);
       setIsPaymentConfigured(hasUpi || hasRzp);
 
-      const status = restData.subscription_status || 'free_trial';
-      const planType = restData.plan_type || 'yearly';
-      const selectedPlan = restData.selected_plan || 'Yearly (₹5,499)';
+      const status = restData.subscription_status || "free_trial";
+      const planType = restData.plan_type || "yearly";
+      const selectedPlan = restData.selected_plan || "Yearly (₹5,499)";
       let daysLeft = 14;
       let isExpired = false;
 
       if (restData.trial_ends_at) {
         const diffMs = new Date(restData.trial_ends_at).getTime() - Date.now();
         daysLeft = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
-        if (status === 'free_trial' && diffMs <= 0) {
+        if (status === "free_trial" && diffMs <= 0) {
           isExpired = true;
         }
       }
@@ -571,17 +599,21 @@ export default function DashboardPage() {
       setSubInfo({ status, planType, selectedPlan, daysLeft, isExpired });
     }
 
-    const currentOutletOrders = ((ordersData || []) as OrderRecord[]).map((o) => ({
-      ...o,
-      restaurant_id: o.restaurant_id || session.restaurantId,
-    }));
+    const currentOutletOrders = ((ordersData || []) as OrderRecord[]).map(
+      (o) => ({
+        ...o,
+        restaurant_id: o.restaurant_id || session.restaurantId,
+      }),
+    );
     setOrders(currentOutletOrders);
 
-    if (session.role === 'owner' && resolvedOwnerPhone) {
+    if (session.role === "owner" && resolvedOwnerPhone) {
       const { data: siblingOutlets } = await supabase
-        .from('restaurants')
-        .select('id, name, city, total_tables, outlet_mode, outlet_label')
-        .eq('owner_phone', resolvedOwnerPhone);
+        .from("restaurants")
+        .select(
+          "id, name, city, total_tables, outlet_mode, outlet_label, owner_pin, staff_pin",
+        )
+        .eq("owner_phone", resolvedOwnerPhone);
 
       const outletsList: OutletMeta[] =
         siblingOutlets && siblingOutlets.length > 0
@@ -600,25 +632,22 @@ export default function DashboardPage() {
       setOwnerOutlets(outletsList);
 
       const outletIds = outletsList.map((o) => o.id);
-      if (outletIds.length > 1) {
+      if (outletIds.length > 0) {
         const { data: combinedOrders } = await supabase
-          .from('orders')
+          .from("orders")
           .select(
-            'id, restaurant_id, table_number, status, total_amount, payment_method, payment_status, customer_name, customer_phone, invoice_number, razorpay_payment_id, created_at, order_items(id, item_name, quantity, price, notes)'
+            "id, restaurant_id, table_number, status, total_amount, payment_method, payment_status, customer_name, customer_phone, invoice_number, razorpay_payment_id, created_at, order_items(id, item_name, quantity, price, notes)",
           )
-          .in('restaurant_id', outletIds)
-          .order('created_at', { ascending: false });
+          .in("restaurant_id", outletIds)
+          .order("created_at", { ascending: false });
 
         if (combinedOrders) {
           setAllOutletOrders(combinedOrders as OrderRecord[]);
         }
-      } else {
-        setAllOutletOrders(currentOutletOrders);
       }
     } else {
       setOwnerOutlets([]);
       setAllOutletOrders(currentOutletOrders);
-      setSalesScope('current');
     }
 
     setLoading(false);
@@ -628,27 +657,21 @@ export default function DashboardPage() {
     if (!session?.restaurantId) return;
 
     setLoading(true);
-    setOrders([]);
-    setAllOutletOrders([]);
-    setOwnerOutlets([]);
-    setSalesScope('current');
-    setMasterUnlocked(false);
-
     fetchDashboardData();
 
     const channel = supabase
       .channel(`dashboard-orders-${session.restaurantId}`)
       .on(
-        'postgres_changes',
+        "postgres_changes",
         {
-          event: '*',
-          schema: 'public',
-          table: 'orders',
+          event: "*",
+          schema: "public",
+          table: "orders",
           filter: `restaurant_id=eq.${session.restaurantId}`,
         },
         () => {
           fetchDashboardData();
-        }
+        },
       )
       .subscribe();
 
@@ -660,85 +683,88 @@ export default function DashboardPage() {
     };
   }, [session?.restaurantId, fetchDashboardData]);
 
-  const isOwner = session?.role === 'owner';
+  const isOwner = session?.role === "owner";
   const isMultiOutletMode =
-    isOwner && (session?.outletMode === 'multiple' || ownerOutlets.length > 1);
+    isOwner && (session?.outletMode === "multiple" || ownerOutlets.length > 1);
 
   const maxAllowedOutlets = getMaxOutletsForPlan(
     subInfo.planType,
     subInfo.selectedPlan,
-    session?.outletMode
+    session?.outletMode,
   );
   const currentOutletCount = Math.max(1, ownerOutlets.length);
   const isAtOutletLimit =
     maxAllowedOutlets !== null && currentOutletCount >= maxAllowedOutlets;
 
   const handleOpenAddOutletModal = () => {
-    if (!session || !isMultiOutletMode || !masterUnlocked) return;
+    if (!session || !isMalikMode) return;
     if (isAtOutletLimit) {
       setUpgradeErrorMsg(
         `Your current plan (${subInfo.selectedPlan}) allows up to ${maxAllowedOutlets} outlet${
-          maxAllowedOutlets === 1 ? '' : 's'
-        }. Upgrade to add more outlets.`
+          maxAllowedOutlets === 1 ? "" : "s"
+        }. Upgrade to add more outlets.`,
       );
-      setUpgradeModeTab('multiple');
+      setUpgradeModeTab("multiple");
       setShowUpgradeModal(true);
       return;
     }
 
-    setNewOutletLabel('');
-    setNewOutletCity(session.city || '');
+    setNewOutletLabel("");
+    setNewOutletCity(session.city || "");
     setNewOutletTables(10);
-    setNewOutletOwnerPin('');
-    setNewOutletStaffPin('');
-    setAddOutletError('');
+    setNewOutletOwnerPin("");
+    setNewOutletStaffPin("");
+    setAddOutletError("");
     setShowAddOutletModal(true);
   };
 
   const handleCreateLinkedOutlet = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!session || !isMultiOutletMode || !masterUnlocked) return;
-    setAddOutletError('');
+    if (!session || !isMalikMode) return;
+    setAddOutletError("");
 
     if (isAtOutletLimit) {
       setAddOutletError(
-        `Plan limit reached (${maxAllowedOutlets} outlets max). Upgrade your plan first.`
+        `Plan limit reached (${maxAllowedOutlets} outlets max). Upgrade your plan first.`,
       );
       return;
     }
 
     const cleanLabel = newOutletLabel.trim();
     const cleanCity = newOutletCity.trim();
-    const cleanPhone = (session.ownerPhone || '').replace(/\D/g, '');
+    const cleanPhone = (session.ownerPhone || "").replace(/\D/g, "");
 
     if (!cleanLabel) {
-      setAddOutletError('Please enter an Outlet / Branch Name.');
+      setAddOutletError("Please enter an Outlet / Branch Name.");
       return;
     }
     if (!cleanCity) {
-      setAddOutletError('City is required.');
+      setAddOutletError("City is required.");
       return;
     }
     if (cleanPhone.length !== 10) {
-      setAddOutletError('Registered owner phone missing. Please re-login from home.');
+      setAddOutletError(
+        "Registered owner phone missing. Please re-login from home.",
+      );
       return;
     }
     if (newOutletOwnerPin.length !== 6) {
-      setAddOutletError('Enter a 6-digit Branch PIN for this outlet.');
+      setAddOutletError("Enter a 6-digit Branch PIN for this outlet.");
       return;
     }
     if (newOutletStaffPin && newOutletStaffPin.length !== 6) {
-      setAddOutletError('Staff PIN must be 6 digits (or left blank).');
+      setAddOutletError("Staff PIN must be 6 digits (or left blank).");
       return;
     }
 
     setAddingOutlet(true);
 
-    const brandName = session.brandName || session.restaurantName.split(' — ')[0];
+    const brandName =
+      session.brandName || session.restaurantName.split(" — ")[0];
     const tablesVal = newOutletTables > 0 ? newOutletTables : 10;
 
     const { data, error } = await supabase
-      .from('restaurants')
+      .from("restaurants")
       .insert([
         {
           name: brandName,
@@ -748,7 +774,7 @@ export default function DashboardPage() {
           total_tables: tablesVal,
           owner_pin: newOutletOwnerPin,
           staff_pin: newOutletStaffPin || null,
-          outlet_mode: 'multiple',
+          outlet_mode: "multiple",
           outlet_label: cleanLabel,
           subscription_status: subInfo.status,
           plan_type: subInfo.planType,
@@ -761,60 +787,63 @@ export default function DashboardPage() {
     setAddingOutlet(false);
 
     if (error || !data) {
-      setAddOutletError(error?.message || 'Failed to add linked outlet.');
+      setAddOutletError(error?.message || "Failed to add linked outlet.");
       return;
     }
 
     setShowAddOutletModal(false);
     setUpgradeSuccessBanner(
-      `New outlet "${brandName} — ${cleanLabel}" added under your owner account!`
+      `New outlet "${brandName} — ${cleanLabel}" added under your owner account!`,
     );
     setTimeout(() => setUpgradeSuccessBanner(null), 6000);
     fetchDashboardData();
   };
 
   const handleConfirmRemoveOutlet = async () => {
-    if (!session || !outletToRemove || !isMultiOutletMode || !masterUnlocked) return;
+    if (!session || !outletToRemove || !isMalikMode) return;
     setRemovingOutletId(outletToRemove.id);
-    setRemoveOutletError('');
+    setRemoveOutletError("");
 
     const targetId = outletToRemove.id;
     const targetTitle = formatOutletTitle(outletToRemove);
     const isCurrentOutlet = targetId === session.restaurantId;
 
     const { data: outletOrders } = await supabase
-      .from('orders')
-      .select('id')
-      .eq('restaurant_id', targetId);
+      .from("orders")
+      .select("id")
+      .eq("restaurant_id", targetId);
 
     const orderIds = (outletOrders || []).map((o) => o.id);
     if (orderIds.length > 0) {
-      await supabase.from('order_items').delete().in('order_id', orderIds);
-      await supabase.from('orders').delete().eq('restaurant_id', targetId);
+      await supabase.from("order_items").delete().in("order_id", orderIds);
+      await supabase.from("orders").delete().eq("restaurant_id", targetId);
     }
 
-    await supabase.from('menu_items').delete().eq('restaurant_id', targetId);
-    await supabase.from('active_role_sessions').delete().eq('restaurant_id', targetId);
+    await supabase.from("menu_items").delete().eq("restaurant_id", targetId);
+    await supabase
+      .from("active_role_sessions")
+      .delete()
+      .eq("restaurant_id", targetId);
 
     const { error } = await supabase
-      .from('restaurants')
+      .from("restaurants")
       .delete()
-      .eq('id', targetId);
+      .eq("id", targetId);
 
     setRemovingOutletId(null);
 
     if (error) {
-      setRemoveOutletError(error.message || 'Could not remove this outlet.');
+      setRemoveOutletError(error.message || "Could not remove this outlet.");
       return;
     }
 
     setOutletToRemove(null);
 
     if (isCurrentOutlet) {
-      await releaseRoleSessionIfOwner(targetId, 'owner');
-      localStorage.removeItem('restro_session');
-      setMasterUnlocked(false);
-      router.replace('/');
+      await releaseRoleSessionIfOwner(targetId, "owner");
+      localStorage.removeItem("restro_session");
+      localStorage.removeItem(MALIK_VAULT_UNLOCKED_KEY);
+      router.replace("/");
       return;
     }
 
@@ -824,104 +853,10 @@ export default function DashboardPage() {
   };
 
   const handleOpenSalesModal = () => {
-    setSalesScope('current');
-    setMasterUnlocked(false);
     setShowSalesModal(true);
     if (session?.restaurantId) {
       fetchDashboardData();
     }
-  };
-
-  const handleCloseSalesModal = () => {
-    setSalesScope('current');
-    setMasterUnlocked(false);
-    setShowSalesModal(false);
-  };
-
-  const handleRequestCombinedSales = () => {
-    if (masterUnlocked) {
-      setSalesScope('all_outlets');
-      return;
-    }
-
-    const savedMasterPass =
-      typeof window !== 'undefined'
-        ? localStorage.getItem(MASTER_PASS_STORAGE_KEY)
-        : null;
-
-    setIsForgotMasterPass(false);
-    setMasterRecoveryPhone('');
-    setNewMasterPassInput('');
-    setIsSettingFirstMasterPass(!savedMasterPass);
-    setMasterPassInput('');
-    setMasterPassError('');
-    setShowMasterPassModal(true);
-  };
-
-  const handleVerifyOrSetMasterPass = (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanInput = masterPassInput.trim();
-
-    if (cleanInput.length < 4) {
-      setMasterPassError('Please enter at least 4 characters.');
-      return;
-    }
-
-    const savedMasterPass = localStorage.getItem(MASTER_PASS_STORAGE_KEY);
-
-    if (!savedMasterPass) {
-      localStorage.setItem(MASTER_PASS_STORAGE_KEY, cleanInput);
-      setMasterUnlocked(true);
-      setShowMasterPassModal(false);
-      setMasterPassInput('');
-      setMasterPassError('');
-      setSalesScope('all_outlets');
-      return;
-    }
-
-    if (cleanInput === savedMasterPass) {
-      setMasterUnlocked(true);
-      setShowMasterPassModal(false);
-      setMasterPassInput('');
-      setMasterPassError('');
-      setSalesScope('all_outlets');
-    } else {
-      setMasterPassError('Incorrect Master Password! Only the owner can access this.');
-    }
-  };
-
-  const handleResetMasterPass = (e: React.FormEvent) => {
-    e.preventDefault();
-    setMasterPassError('');
-
-    const cleanPhone = masterRecoveryPhone.replace(/\D/g, '');
-    const cleanNewPass = newMasterPassInput.trim();
-    const registeredOwnerPhone = (session?.ownerPhone || '').replace(/\D/g, '');
-
-    if (cleanPhone.length !== 10) {
-      setMasterPassError('Please enter a valid 10-digit registered owner mobile number.');
-      return;
-    }
-
-    if (registeredOwnerPhone && cleanPhone !== registeredOwnerPhone) {
-      setMasterPassError('Mobile number does not match the registered owner number.');
-      return;
-    }
-
-    if (cleanNewPass.length < 4) {
-      setMasterPassError('New Master Password must be at least 4 characters.');
-      return;
-    }
-
-    localStorage.setItem(MASTER_PASS_STORAGE_KEY, cleanNewPass);
-    setMasterUnlocked(true);
-    setShowMasterPassModal(false);
-    setIsForgotMasterPass(false);
-    setMasterRecoveryPhone('');
-    setNewMasterPassInput('');
-    setMasterPassInput('');
-    setMasterPassError('');
-    setSalesScope('all_outlets');
   };
 
   const handleOpenPaymentSettings = () => {
@@ -939,10 +874,10 @@ export default function DashboardPage() {
     setLoadingStock(true);
 
     const { data } = await supabase
-      .from('menu_items')
-      .select('id, name, category, is_veg, is_available')
-      .eq('restaurant_id', session.restaurantId)
-      .order('category', { ascending: true });
+      .from("menu_items")
+      .select("id, name, category, is_veg, is_available")
+      .eq("restaurant_id", session.restaurantId)
+      .order("category", { ascending: true });
 
     if (data) {
       setStockItems(data);
@@ -953,37 +888,44 @@ export default function DashboardPage() {
   const handleToggleStock = async (item: MenuStockItem) => {
     const nextVal = !item.is_available;
     setStockItems((prev) =>
-      prev.map((m) => (m.id === item.id ? { ...m, is_available: nextVal } : m))
+      prev.map((m) => (m.id === item.id ? { ...m, is_available: nextVal } : m)),
     );
 
     await supabase
-      .from('menu_items')
+      .from("menu_items")
       .update({ is_available: nextVal })
-      .eq('id', item.id);
+      .eq("id", item.id);
   };
 
   const handleLogout = async () => {
-    setMasterUnlocked(false);
+    localStorage.removeItem(MALIK_VAULT_UNLOCKED_KEY);
     if (session?.restaurantId) {
-      await releaseRoleSessionIfOwner(session.restaurantId, 'owner');
+      await releaseRoleSessionIfOwner(session.restaurantId, "owner");
     }
-    localStorage.removeItem('restro_session');
-    router.push('/');
+    localStorage.removeItem("restro_session");
+    router.push("/");
   };
 
-  const handleSettleTable = async (tableNum: number, method: 'cash' | 'upi') => {
-    if (!session?.restaurantId || session.role !== 'owner') return;
+  const handleSettleTable = async (
+    tableNum: number,
+    method: "cash" | "upi",
+  ) => {
+    if (!session?.restaurantId || session.role !== "owner") return;
     setSettling(true);
 
     const activeIds = orders
-      .filter((o) => o.table_number === tableNum && o.status !== 'completed')
+      .filter((o) => o.table_number === tableNum && o.status !== "completed")
       .map((o) => o.id);
 
     if (activeIds.length > 0) {
       await supabase
-        .from('orders')
-        .update({ status: 'completed', payment_method: method, payment_status: 'paid' })
-        .in('id', activeIds);
+        .from("orders")
+        .update({
+          status: "completed",
+          payment_method: method,
+          payment_status: "paid",
+        })
+        .in("id", activeIds);
     }
 
     setSettling(false);
@@ -992,7 +934,10 @@ export default function DashboardPage() {
   };
 
   const handleMarkServed = async (orderId: string) => {
-    await supabase.from('orders').update({ status: 'served' }).eq('id', orderId);
+    await supabase
+      .from("orders")
+      .update({ status: "served" })
+      .eq("id", orderId);
     fetchDashboardData();
   };
 
@@ -1002,8 +947,8 @@ export default function DashboardPage() {
         resolve(true);
         return;
       }
-      const script = document.createElement('script');
-      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      const script = document.createElement("script");
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
       script.onload = () => resolve(true);
       script.onerror = () => resolve(false);
       document.body.appendChild(script);
@@ -1012,7 +957,7 @@ export default function DashboardPage() {
 
   const handleRazorpayPlanUpgrade = async (
     plan: UpgradePlanOption,
-    mode: 'single' | 'multiple'
+    mode: "single" | "multiple",
   ) => {
     if (!session) return;
     setUpgradeErrorMsg(null);
@@ -1021,14 +966,16 @@ export default function DashboardPage() {
     try {
       const loaded = await loadRazorpayScript();
       if (!loaded) {
-        setUpgradeErrorMsg('Unable to load payment gateway. Please check your connection.');
+        setUpgradeErrorMsg(
+          "Unable to load payment gateway. Please check your connection.",
+        );
         setUpgradingPlanId(null);
         return;
       }
 
-      const res = await fetch('/api/razorpay/create-subscription-order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch("/api/razorpay/create-subscription-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           amount: plan.amount,
           planId: plan.id,
@@ -1041,7 +988,7 @@ export default function DashboardPage() {
 
       const orderData = await res.json();
       if (!res.ok || !orderData.orderId) {
-        setUpgradeErrorMsg(orderData.error || 'Unable to initiate payment.');
+        setUpgradeErrorMsg(orderData.error || "Unable to initiate payment.");
         setUpgradingPlanId(null);
         return;
       }
@@ -1052,21 +999,21 @@ export default function DashboardPage() {
         key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
         amount: orderData.amount,
         currency: orderData.currency,
-        name: 'RestroSync POS',
+        name: "RestroSync POS",
         description: `${plan.name} (${plan.price}) • ${
-          mode === 'multiple' ? 'Multiple Outlets' : 'Single Outlet'
+          mode === "multiple" ? "Multiple Outlets" : "Single Outlet"
         }`,
         order_id: orderData.orderId,
         theme: {
-          color: '#ea580c',
+          color: "#ea580c",
         },
         handler: async function () {
           const newExpiry = new Date(
-            Date.now() + plan.durationDays * 24 * 60 * 60 * 1000
+            Date.now() + plan.durationDays * 24 * 60 * 60 * 1000,
           ).toISOString();
 
           const subPayload = {
-            subscription_status: 'active',
+            subscription_status: "active",
             plan_type: plan.id,
             selected_plan: `${plan.name} (${plan.price})`,
             trial_ends_at: newExpiry,
@@ -1074,19 +1021,27 @@ export default function DashboardPage() {
           };
 
           const targetIds =
-            mode === 'multiple' && ownerOutlets.length > 0
-              ? Array.from(new Set([session.restaurantId, ...ownerOutlets.map((o) => o.id)]))
+            mode === "multiple" && ownerOutlets.length > 0
+              ? Array.from(
+                  new Set([
+                    session.restaurantId,
+                    ...ownerOutlets.map((o) => o.id),
+                  ]),
+                )
               : [session.restaurantId];
 
-          await supabase.from('restaurants').update(subPayload).in('id', targetIds);
+          await supabase
+            .from("restaurants")
+            .update(subPayload)
+            .in("id", targetIds);
 
           setUpgradingPlanId(null);
           setUpgradeSuccessBanner(
             `${plan.name} (${plan.price}) activated! Limit: ${
               plan.maxOutlets === null
-                ? 'Unlimited outlets'
-                : `Up to ${plan.maxOutlets} outlet${plan.maxOutlets === 1 ? '' : 's'}`
-            }.`
+                ? "Unlimited outlets"
+                : `Up to ${plan.maxOutlets} outlet${plan.maxOutlets === 1 ? "" : "s"}`
+            }.`,
           );
           fetchDashboardData();
           setTimeout(() => setUpgradeSuccessBanner(null), 7000);
@@ -1099,12 +1054,16 @@ export default function DashboardPage() {
       };
 
       const RazorpayConstructor = (
-        window as unknown as { Razorpay: new (opts: unknown) => { open: () => void } }
+        window as unknown as {
+          Razorpay: new (opts: unknown) => { open: () => void };
+        }
       ).Razorpay;
       const rzp = new RazorpayConstructor(options);
       rzp.open();
     } catch {
-      setUpgradeErrorMsg('Something went wrong during payment. Please try again.');
+      setUpgradeErrorMsg(
+        "Something went wrong during payment. Please try again.",
+      );
       setUpgradingPlanId(null);
     }
   };
@@ -1122,19 +1081,21 @@ export default function DashboardPage() {
     const cleanSecret = ownerRzpKeySecret.trim();
 
     const { error } = await supabase
-      .from('restaurants')
+      .from("restaurants")
       .update({
         upi_id: cleanUpi || null,
         bank_account_name: cleanBank || null,
         razorpay_key_id: cleanKeyId || null,
         razorpay_key_secret: cleanSecret || null,
       })
-      .eq('id', session.restaurantId);
+      .eq("id", session.restaurantId);
 
     setSavingPaymentSettings(false);
 
     if (error) {
-      setPaymentSettingsMsg('Failed to save payment details. Please try again.');
+      setPaymentSettingsMsg(
+        "Failed to save payment details. Please try again.",
+      );
       return;
     }
 
@@ -1146,7 +1107,7 @@ export default function DashboardPage() {
     });
     setIsPaymentConfigured(Boolean(cleanUpi || (cleanKeyId && cleanSecret)));
     setPaymentSettingsMsg(
-      'Payment settings saved! Customers can now pay directly to your UPI or account.'
+      "Payment settings saved! Customers can now pay directly to your UPI or account.",
     );
     setTimeout(() => {
       setPaymentSettingsMsg(null);
@@ -1157,26 +1118,23 @@ export default function DashboardPage() {
   const handleWhatsAppSupport = () => {
     if (!session) return;
     const msg = encodeURIComponent(
-      `Hi RestroSync! I need help activating my plan:\n• Restaurant: ${session.restaurantName} (${session.city})\n• ID: ${session.restaurantId}`
+      `Hi RestroSync! I need help activating my plan:\n• Restaurant: ${session.restaurantName} (${session.city})\n• ID: ${session.restaurantId}`,
     );
-    window.open(`https://wa.me/${ADMIN_WHATSAPP}?text=${msg}`, '_blank');
+    window.open(`https://wa.me/${ADMIN_WHATSAPP}?text=${msg}`, "_blank");
   };
 
   if (!session || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <p className="text-slate-500 font-semibold text-sm">Loading RestroSync Console...</p>
+        <p className="text-slate-500 font-semibold text-sm">
+          Loading RestroSync Console...
+        </p>
       </div>
     );
   }
 
-  const activeSalesScope: 'current' | 'all_outlets' =
-    isMultiOutletMode && salesScope === 'all_outlets' && masterUnlocked
-      ? 'all_outlets'
-      : 'current';
-
   const activeUpgradePlans =
-    upgradeModeTab === 'multiple' ? MULTI_UPGRADE_PLANS : SINGLE_UPGRADE_PLANS;
+    upgradeModeTab === "multiple" ? MULTI_UPGRADE_PLANS : SINGLE_UPGRADE_PLANS;
 
   const outletsForDisplay: OutletMeta[] =
     ownerOutlets.length > 0
@@ -1192,36 +1150,96 @@ export default function DashboardPage() {
           },
         ];
 
-  const outletNameById: Record<string, string> = {};
-  outletsForDisplay.forEach((o) => {
-    outletNameById[o.id] = formatOutletTitle(o);
-  });
-  outletNameById[session.restaurantId] = session.restaurantName;
-
-  const activeOrders = orders.filter((o) => o.status !== 'completed');
-  const completedOrders = orders.filter((o) => o.status === 'completed');
-
   const todayStr = new Date().toDateString();
-  const todayCompleted = completedOrders.filter(
-    (o) => new Date(o.created_at).toDateString() === todayStr
-  );
-  const todayRevenue = todayCompleted.reduce((sum, o) => sum + Number(o.total_amount), 0);
 
-  const sourceSalesPool =
-    activeSalesScope === 'all_outlets'
-      ? allOutletOrders.filter((o) => o.status === 'completed')
-      : completedOrders;
+  // Malik Multi-Outlet Report Data
+  const filterMalikOrdersByDate = (list: OrderRecord[]) =>
+    list.filter((ord) => {
+      if (ord.status !== "completed") return false;
+      const ordDate = new Date(ord.created_at);
+
+      if (malikReportFilter === "today") {
+        return ordDate.toDateString() === todayStr;
+      }
+      if (malikReportFilter === "7days") {
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        sevenDaysAgo.setHours(0, 0, 0, 0);
+        return ordDate >= sevenDaysAgo;
+      }
+      if (malikReportFilter === "custom") {
+        if (malikFromDate) {
+          const start = new Date(`${malikFromDate}T00:00:00`);
+          if (ordDate < start) return false;
+        }
+        if (malikToDate) {
+          const end = new Date(`${malikToDate}T23:59:59.999`);
+          if (ordDate > end) return false;
+        }
+        return true;
+      }
+      return true;
+    });
+
+  const malikFilteredOrders = filterMalikOrdersByDate(allOutletOrders);
+  const malikCombinedTotal = malikFilteredOrders.reduce(
+    (sum, o) => sum + Number(o.total_amount),
+    0,
+  );
+  const malikCombinedCash = malikFilteredOrders
+    .filter((o) => (o.payment_method || "").toLowerCase() === "cash")
+    .reduce((sum, o) => sum + Number(o.total_amount), 0);
+  const malikCombinedUpi = malikFilteredOrders
+    .filter((o) => (o.payment_method || "").toLowerCase() === "upi")
+    .reduce((sum, o) => sum + Number(o.total_amount), 0);
+
+  const malikOutletReportCards = outletsForDisplay.map((out) => {
+    const outOrders = malikFilteredOrders.filter(
+      (o) => (o.restaurant_id || session.restaurantId) === out.id,
+    );
+    const totalSale = outOrders.reduce(
+      (sum, o) => sum + Number(o.total_amount),
+      0,
+    );
+    const cashSale = outOrders
+      .filter((o) => (o.payment_method || "").toLowerCase() === "cash")
+      .reduce((sum, o) => sum + Number(o.total_amount), 0);
+    const upiSale = outOrders
+      .filter((o) => (o.payment_method || "").toLowerCase() === "upi")
+      .reduce((sum, o) => sum + Number(o.total_amount), 0);
+
+    return {
+      ...out,
+      title: formatOutletTitle(out),
+      totalSale,
+      cashSale,
+      upiSale,
+      billsCount: outOrders.length,
+    };
+  });
+
+  // Branch Manager / Single Outlet Metrics
+  const activeOrders = orders.filter((o) => o.status !== "completed");
+  const completedOrders = orders.filter((o) => o.status === "completed");
+
+  const todayCompleted = completedOrders.filter(
+    (o) => new Date(o.created_at).toDateString() === todayStr,
+  );
+  const todayRevenue = todayCompleted.reduce(
+    (sum, o) => sum + Number(o.total_amount),
+    0,
+  );
 
   const cleanSearch = billSearchQuery.trim().toLowerCase();
 
   const applyDateAndSearchFilter = (list: OrderRecord[]) =>
     list.filter((ord) => {
       if (cleanSearch) {
-        const inv = (ord.invoice_number || '').toLowerCase();
+        const inv = (ord.invoice_number || "").toLowerCase();
         const billNo = `bill-${ord.id.slice(0, 6).toLowerCase()}`;
-        const payId = (ord.razorpay_payment_id || '').toLowerCase();
-        const custName = (ord.customer_name || '').toLowerCase();
-        const custPhone = (ord.customer_phone || '').toLowerCase();
+        const payId = (ord.razorpay_payment_id || "").toLowerCase();
+        const custName = (ord.customer_name || "").toLowerCase();
+        const custPhone = (ord.customer_phone || "").toLowerCase();
 
         return (
           inv.includes(cleanSearch) ||
@@ -1234,18 +1252,18 @@ export default function DashboardPage() {
 
       const ordDate = new Date(ord.created_at);
 
-      if (salesFilter === 'today') {
+      if (salesFilter === "today") {
         return ordDate.toDateString() === todayStr;
       }
 
-      if (salesFilter === '7days') {
+      if (salesFilter === "7days") {
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
         sevenDaysAgo.setHours(0, 0, 0, 0);
         return ordDate >= sevenDaysAgo;
       }
 
-      if (salesFilter === 'custom') {
+      if (salesFilter === "custom") {
         if (customFromDate) {
           const start = new Date(`${customFromDate}T00:00:00`);
           if (ordDate < start) return false;
@@ -1261,68 +1279,49 @@ export default function DashboardPage() {
     });
 
   const filteredSalesOrders = applyDateAndSearchFilter(
-    cleanSearch
-      ? activeSalesScope === 'all_outlets'
-        ? allOutletOrders
-        : orders
-      : sourceSalesPool
+    cleanSearch ? orders : completedOrders,
   );
 
   const filteredTotalSales = filteredSalesOrders.reduce(
     (sum, o) => sum + Number(o.total_amount),
-    0
+    0,
   );
   const filteredCashSales = filteredSalesOrders
-    .filter((o) => (o.payment_method || '').toLowerCase() === 'cash')
+    .filter((o) => (o.payment_method || "").toLowerCase() === "cash")
     .reduce((sum, o) => sum + Number(o.total_amount), 0);
   const filteredUpiSales = filteredSalesOrders
-    .filter((o) => (o.payment_method || '').toLowerCase() === 'upi')
+    .filter((o) => (o.payment_method || "").toLowerCase() === "upi")
     .reduce((sum, o) => sum + Number(o.total_amount), 0);
 
-  const outletBreakdownRows =
-    activeSalesScope === 'all_outlets' && isMultiOutletMode
-      ? outletsForDisplay.map((out) => {
-          const outOrders = applyDateAndSearchFilter(
-            allOutletOrders.filter(
-              (o) =>
-                (o.restaurant_id || session.restaurantId) === out.id &&
-                (cleanSearch ? true : o.status === 'completed')
-            )
-          );
-          const total = outOrders.reduce((s, o) => s + Number(o.total_amount), 0);
-          return {
-            id: out.id,
-            title: formatOutletTitle(out),
-            total,
-            count: outOrders.length,
-            isCurrent: out.id === session.restaurantId,
-          };
-        })
-      : [];
-
-  const occupiedTablesCount = new Set(activeOrders.map((o) => o.table_number)).size;
+  const occupiedTablesCount = new Set(activeOrders.map((o) => o.table_number))
+    .size;
   const cookingOrdersCount = activeOrders.filter(
-    (o) => o.status === 'pending' || o.status === 'preparing'
+    (o) => o.status === "pending" || o.status === "preparing",
   ).length;
-  const readyToServeCount = activeOrders.filter((o) => o.status === 'ready').length;
+  const readyToServeCount = activeOrders.filter(
+    (o) => o.status === "ready",
+  ).length;
 
-  const tablesArray = Array.from({ length: actualTablesCount }, (_, i) => i + 1);
+  const tablesArray = Array.from(
+    { length: actualTablesCount },
+    (_, i) => i + 1,
+  );
 
   const modalTableOrders = selectedTableModal
     ? activeOrders.filter((o) => o.table_number === selectedTableModal)
     : [];
   const modalTableTotal = modalTableOrders.reduce(
     (sum, o) => sum + Number(o.total_amount),
-    0
+    0,
   );
   const isModalTableFullyPaid =
     modalTableOrders.length > 0 &&
-    modalTableOrders.every((o) => o.payment_status === 'paid');
+    modalTableOrders.every((o) => o.payment_status === "paid");
 
   const consolidatedTableItems: MergedBillItem[] = Object.values(
     modalTableOrders.reduce<Record<string, MergedBillItem>>((acc, ord) => {
       (ord.order_items || []).forEach((item) => {
-        const key = `${(item.item_name || '').trim().toLowerCase()}_${Number(item.price)}`;
+        const key = `${(item.item_name || "").trim().toLowerCase()}_${Number(item.price)}`;
         if (!acc[key]) {
           acc[key] = {
             item_name: item.item_name,
@@ -1337,12 +1336,12 @@ export default function DashboardPage() {
         }
       });
       return acc;
-    }, {})
+    }, {}),
   );
 
   const primaryTableGuest =
     modalTableOrders.find(
-      (o) => o.customer_name && o.customer_name !== 'Walk-in Guest'
+      (o) => o.customer_name && o.customer_name !== "Walk-in Guest",
     )?.customer_name || modalTableOrders[0]?.customer_name;
 
   return (
@@ -1356,76 +1355,119 @@ export default function DashboardPage() {
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-base sm:text-lg font-extrabold text-slate-900">
-                  {session.restaurantName}
+                  {isMalikMode
+                    ? session.brandName ||
+                      session.restaurantName.split(" — ")[0]
+                    : session.restaurantName}
                 </h1>
-                <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full flex items-center gap-1 bg-amber-100 text-amber-800 border border-amber-200">
-                  <ShieldCheck className="w-3 h-3" />{' '}
-                  {isMultiOutletMode ? 'Branch Counter' : 'Owner'}
+                <span
+                  className={`text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full flex items-center gap-1 border ${
+                    isMalikMode
+                      ? "bg-slate-900 text-amber-300 border-slate-800"
+                      : "bg-amber-100 text-amber-800 border-amber-200"
+                  }`}
+                >
+                  <ShieldCheck className="w-3 h-3" />{" "}
+                  {isMalikMode
+                    ? "Malik Command"
+                    : isMultiOutletMode
+                      ? "Branch Manager"
+                      : "Owner"}
                 </span>
               </div>
               <p className="text-xs text-slate-500">
-                {session.city} • {actualTablesCount} Tables • {subInfo.selectedPlan}
+                {isMalikMode
+                  ? `${outletsForDisplay.length} Linked Outlet(s) • ${subInfo.selectedPlan}`
+                  : `${session.city} • ${actualTablesCount} Tables • ${subInfo.selectedPlan}`}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            <Link
-              href={`/kitchen/${session.restaurantId}`}
-              className="bg-slate-900 hover:bg-slate-800 text-white px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition"
-            >
-              <ChefHat className="w-4 h-4 text-orange-400" />
-              <span>Kitchen Display (KDS)</span>
-            </Link>
-
-            <button
-              type="button"
-              onClick={handleOpenStockModal}
-              className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition"
-            >
-              <PackageCheck className="w-4 h-4 text-emerald-600" />
-              <span>Stock Status</span>
-            </button>
-
-            {isOwner && (
+            {isMalikMode ? (
               <>
                 <button
                   type="button"
-                  onClick={handleOpenSalesModal}
-                  className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition"
+                  onClick={() => {
+                    setUpgradeErrorMsg(null);
+                    setUpgradeModeTab("multiple");
+                    setShowUpgradeModal(true);
+                  }}
+                  className="bg-slate-900 hover:bg-slate-800 text-white px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition"
                 >
-                  <IndianRupee className="w-4 h-4" />
-                  <span>{isMultiOutletMode ? 'Bills & Owner Vault' : 'Bills & Sales'}</span>
+                  <Crown className="w-4 h-4 text-amber-400" />
+                  <span>Upgrade Plan</span>
                 </button>
 
-                <Link
-                  href="/dashboard/qr"
-                  className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition"
+                <button
+                  type="button"
+                  onClick={handleOpenAddOutletModal}
+                  className="bg-orange-600 hover:bg-orange-700 text-white px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-xs transition"
                 >
-                  <QrCode className="w-4 h-4 text-orange-600" />
-                  <span>Table QRs</span>
-                </Link>
-
+                  <Plus className="w-4 h-4" />
+                  <span>Add Outlet</span>
+                </button>
+              </>
+            ) : (
+              <>
                 <Link
-                  href="/dashboard/menu"
-                  className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition"
+                  href={`/kitchen/${session.restaurantId}`}
+                  className="bg-slate-900 hover:bg-slate-800 text-white px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition"
                 >
-                  <BookOpen className="w-4 h-4 text-blue-600" />
-                  <span>Manage Menu</span>
+                  <ChefHat className="w-4 h-4 text-orange-400" />
+                  <span>Kitchen Display (KDS)</span>
                 </Link>
 
                 <button
                   type="button"
-                  onClick={handleOpenPaymentSettings}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition ${
-                    isPaymentConfigured
-                      ? 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
-                      : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300'
-                  }`}
+                  onClick={handleOpenStockModal}
+                  className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition"
                 >
-                  <KeyRound className="w-4 h-4 text-purple-600" />
-                  <span>Payment Setup</span>
+                  <PackageCheck className="w-4 h-4 text-emerald-600" />
+                  <span>Stock Status</span>
                 </button>
+
+                {isOwner && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleOpenSalesModal}
+                      className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition"
+                    >
+                      <IndianRupee className="w-4 h-4" />
+                      <span>Bills &amp; Sales</span>
+                    </button>
+
+                    <Link
+                      href="/dashboard/qr"
+                      className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition"
+                    >
+                      <QrCode className="w-4 h-4 text-orange-600" />
+                      <span>Table QRs</span>
+                    </Link>
+
+                    <Link
+                      href="/dashboard/menu"
+                      className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition"
+                    >
+                      <BookOpen className="w-4 h-4 text-blue-600" />
+                      <span>Manage Menu</span>
+                    </Link>
+
+                    <button
+                      type="button"
+                      onClick={handleOpenPaymentSettings}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition ${
+                        isPaymentConfigured
+                          ? "bg-white hover:bg-slate-50 text-slate-700 border-slate-200"
+                          : "bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300"
+                      }`}
+                    >
+                      <KeyRound className="w-4 h-4 text-purple-600" />
+                      <span>Payment Setup</span>
+                    </button>
+                  </>
+                )}
               </>
             )}
 
@@ -1449,481 +1491,759 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {isOwner && !isMultiOutletMode && subInfo.status !== 'active' && (
-          <section
-            className={`rounded-2xl p-4 border flex flex-wrap items-center justify-between gap-3 shadow-sm ${
-              subInfo.isExpired
-                ? 'bg-red-50 border-red-300 text-red-900'
-                : 'bg-gradient-to-r from-slate-900 to-slate-800 border-slate-700 text-white'
-            }`}
-          >
-            <div className="flex items-center gap-3">
-              <div
-                className={`p-2.5 rounded-xl ${
-                  subInfo.isExpired
-                    ? 'bg-red-100 text-red-600'
-                    : 'bg-amber-400/20 text-amber-300'
-                }`}
-              >
-                {subInfo.isExpired ? (
-                  <AlertTriangle className="w-5 h-5" />
-                ) : (
-                  <Crown className="w-5 h-5" />
-                )}
-              </div>
-              <div>
-                <p className="text-xs sm:text-sm font-extrabold">
-                  {subInfo.isExpired
-                    ? 'Your 14-Day Free Trial Has Ended!'
-                    : `Free Trial Active • ${subInfo.daysLeft} Day${
-                        subInfo.daysLeft === 1 ? '' : 's'
-                      } Left`}
-                </p>
-                <p
-                  className={`text-[11px] mt-0.5 ${
-                    subInfo.isExpired ? 'text-red-700' : 'text-slate-300'
-                  }`}
-                >
-                  Selected Plan: <strong>{subInfo.selectedPlan}</strong> • Complete online payment
-                  to activate your plan immediately.
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                setUpgradeErrorMsg(null);
-                setUpgradeModeTab('single');
-                setShowUpgradeModal(true);
-              }}
-              className="bg-orange-600 hover:bg-orange-700 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center gap-1.5"
-            >
-              <Crown className="w-3.5 h-3.5" />
-              <span>Upgrade / Activate Plan</span>
-            </button>
-          </section>
-        )}
-
-        {isOwner && !isPaymentConfigured && (
-          <section className="bg-amber-50 border border-amber-300 text-amber-950 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-sm">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-amber-200/70 text-amber-800">
-                <KeyRound className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-xs sm:text-sm font-extrabold">
-                  Connect Your Merchant UPI ID (0% Fee Direct Payments)
-                </p>
-                <p className="text-[11px] text-amber-800 mt-0.5">
-                  Save your UPI ID so customer payments go straight to your GPay, PhonePe, or
-                  Paytm merchant account.
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleOpenPaymentSettings}
-              className="bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl transition"
-            >
-              Add Merchant UPI ID &rarr;
-            </button>
-          </section>
-        )}
-
-        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <button
-            type="button"
-            onClick={handleOpenSalesModal}
-            className="bg-white hover:bg-emerald-50/40 p-5 rounded-2xl border-2 border-emerald-200 hover:border-emerald-500 shadow-sm text-left transition cursor-pointer group"
-          >
-            <div className="flex items-center justify-between text-slate-600 text-xs font-bold">
-              <span>Today&apos;s Total Sale</span>
-              <span className="flex items-center gap-1 text-emerald-600 font-extrabold">
-                Track Bills <ArrowUpRight className="w-4 h-4 group-hover:translate-x-0.5 transition" />
-              </span>
-            </div>
-            <p className="text-2xl font-extrabold text-slate-900 mt-2">
-              ₹{todayRevenue.toLocaleString('en-IN')}
-            </p>
-            <p className="text-[11px] text-emerald-700 font-semibold mt-1">
-              {todayCompleted.length} Bills Settled Today • Search Invoice / ID
-            </p>
-          </button>
-
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-            <div className="flex items-center justify-between text-slate-500 text-xs font-bold">
-              <span>Active Tables</span>
-              <Users className="w-4 h-4 text-orange-600" />
-            </div>
-            <p className="text-2xl font-extrabold text-slate-900 mt-2">
-              {occupiedTablesCount} / {actualTablesCount}
-            </p>
-            <p className="text-[11px] text-slate-500 mt-1">Currently Occupied</p>
-          </div>
-
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-            <div className="flex items-center justify-between text-slate-500 text-xs font-bold">
-              <span>In Kitchen (Cooking)</span>
-              <ChefHat className="w-4 h-4 text-blue-600" />
-            </div>
-            <p className="text-2xl font-extrabold text-slate-900 mt-2">{cookingOrdersCount}</p>
-            <p className="text-[11px] text-blue-600 font-semibold mt-1">Live KOTs Active</p>
-          </div>
-
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-            <div className="flex items-center justify-between text-slate-500 text-xs font-bold">
-              <span>Ready to Serve</span>
-              <BellRing className="w-4 h-4 text-amber-600" />
-            </div>
-            <p className="text-2xl font-extrabold text-slate-900 mt-2">{readyToServeCount}</p>
-            <p className="text-[11px] text-amber-600 font-semibold mt-1">Pickup from Kitchen</p>
-          </div>
-        </section>
-
-        {readyToServeCount > 0 && (
-          <section className="bg-emerald-600 text-white rounded-2xl p-4 shadow-md flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="bg-white/20 p-2 rounded-xl">
-                <Sparkles className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="font-extrabold text-sm">
-                  {readyToServeCount} Order{readyToServeCount > 1 ? 's' : ''} Ready in Kitchen!
-                </p>
-                <p className="text-xs text-emerald-100">
-                  Tables:{' '}
-                  {Array.from(
-                    new Set(
-                      activeOrders
-                        .filter((o) => o.status === 'ready')
-                        .map((o) => `Table ${o.table_number}`)
-                    )
-                  ).join(', ')}
-                </p>
-              </div>
-            </div>
-            <Link
-              href={`/kitchen/${session.restaurantId}`}
-              className="bg-white text-emerald-700 font-extrabold text-xs px-4 py-2 rounded-xl shadow-sm hover:bg-emerald-50 transition"
-            >
-              Open KDS &rarr;
-            </Link>
-          </section>
-        )}
-
-        <section className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-5">
-            <div>
-              <h2 className="text-base sm:text-lg font-extrabold text-slate-900">
-                Live Floor & Table Status
-              </h2>
-              <p className="text-xs text-slate-500">
-                Click a Free table to take an order; once guests leave, click an Occupied table to
-                mark it Free.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3 text-[11px] font-bold">
-              <span className="flex items-center gap-1.5 text-slate-500">
-                <span className="w-2.5 h-2.5 rounded-full bg-slate-200"></span> Free
-              </span>
-              <span className="flex items-center gap-1.5 text-amber-700">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span> Cooking
-              </span>
-              <span className="flex items-center gap-1.5 text-emerald-700">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Ready
-              </span>
-              <span className="flex items-center gap-1.5 text-blue-700">
-                <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span> Dining
-              </span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3.5">
-            {tablesArray.map((tableNum) => {
-              const tOrders = activeOrders.filter((o) => o.table_number === tableNum);
-              const isOccupied = tOrders.length > 0;
-              const hasReady = tOrders.some((o) => o.status === 'ready');
-              const isAllServed =
-                isOccupied && tOrders.every((o) => o.status === 'served');
-              const tableTotal = tOrders.reduce((s, o) => s + Number(o.total_amount), 0);
-              const totalDishes = tOrders.reduce(
-                (s, o) =>
-                  s + (o.order_items?.reduce((sum, i) => sum + i.quantity, 0) || 0),
-                0
-              );
-              const isTableFullyPaid =
-                isOccupied && tOrders.every((o) => o.payment_status === 'paid');
-              const guestName = tOrders[0]?.customer_name;
-
-              if (!isOccupied) {
-                return (
-                  <Link
-                    key={tableNum}
-                    href={`/order/${session.restaurantId}/${tableNum}`}
-                    className="p-4 rounded-2xl border-2 text-left transition flex flex-col justify-between min-h-[125px] cursor-pointer hover:shadow-md bg-slate-50 border-slate-200/80 hover:border-orange-300"
+        {/* ==================== MALIK COMMAND VIEW ==================== */}
+        {isMalikMode ? (
+          <>
+            <section className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+              <div className="flex items-center gap-2 flex-wrap">
+                {(
+                  [
+                    { id: "today", label: "Today" },
+                    { id: "7days", label: "Last 7 Days" },
+                    { id: "all", label: "All Time" },
+                    { id: "custom", label: "Custom Date" },
+                  ] as const
+                ).map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setMalikReportFilter(tab.id)}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 ${
+                      malikReportFilter === tab.id
+                        ? "bg-slate-900 text-white shadow-xs"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}
                   >
-                    <div className="flex items-center justify-between w-full">
-                      <span className="font-extrabold text-sm text-slate-900">
-                        Table {tableNum}
-                      </span>
-                      <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">
-                        Free
-                      </span>
-                    </div>
-
-                    <div className="mt-4 flex items-center justify-between text-slate-400">
-                      <span className="text-xs">Available</span>
-                      <span className="text-[11px] font-bold text-orange-600">+ Order</span>
-                    </div>
-                  </Link>
-                );
-              }
-
-              return (
-                <button
-                  key={tableNum}
-                  type="button"
-                  onClick={() => setSelectedTableModal(tableNum)}
-                  className={`p-4 rounded-2xl border-2 text-left transition flex flex-col justify-between min-h-[125px] cursor-pointer hover:shadow-md ${
-                    hasReady
-                      ? 'bg-emerald-50/80 border-emerald-500 shadow-sm'
-                      : isAllServed
-                      ? 'bg-blue-50/70 border-blue-400 shadow-sm'
-                      : 'bg-amber-50/70 border-amber-400 shadow-sm'
-                  }`}
-                >
-                  <div className="flex items-center justify-between w-full">
-                    <span className="font-extrabold text-sm text-slate-900">
-                      Table {tableNum}
-                    </span>
-                    <span
-                      className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
-                        hasReady
-                          ? 'bg-emerald-600 text-white'
-                          : isAllServed
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-amber-500 text-white'
-                      }`}
-                    >
-                      {hasReady ? 'Ready' : isAllServed ? 'Dining' : 'Cooking'}
-                    </span>
-                  </div>
-
-                  <div className="mt-2.5">
-                    {guestName && (
-                      <p className="text-[11px] font-extrabold text-slate-900 truncate">
-                        {guestName}
-                      </p>
+                    {tab.id === "custom" && (
+                      <Calendar className="w-3.5 h-3.5" />
                     )}
-                    <p className="text-[11px] font-semibold text-slate-600">
-                      {isAllServed
-                        ? 'Dining • Clear on Exit'
-                        : `${totalDishes} Dish${totalDishes > 1 ? 'es' : ''} Running`}
-                    </p>
-                    <div className="flex items-center justify-between gap-1 mt-1">
-                      <p className="text-base font-extrabold text-slate-900">
-                        ₹{tableTotal}
-                      </p>
-                      {isTableFullyPaid ? (
-                        <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-300">
-                          PAID ✓
-                        </span>
-                      ) : (
-                        <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-200/80 text-slate-600">
-                          UNPAID
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </section>
+                    <span>{tab.label}</span>
+                  </button>
+                ))}
+              </div>
 
-        <section className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-sm">
-          <div className="flex items-center justify-between gap-2 mb-4">
-            <h2 className="text-sm sm:text-base font-extrabold text-slate-900 flex items-center gap-2">
-              <Utensils className="w-4 h-4 text-orange-600 shrink-0" />
-              <span>Live Kitchen & Service Queue</span>
-            </h2>
-            <span className="text-[11px] sm:text-xs font-bold bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full whitespace-nowrap shrink-0">
-              {activeOrders.length} Active
-            </span>
-          </div>
+              {malikReportFilter === "custom" && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <input
+                    type="date"
+                    max={malikToDate || todayIso}
+                    value={malikFromDate}
+                    onChange={(e) => setMalikFromDate(e.target.value)}
+                    className="px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 outline-none"
+                  />
+                  <span className="text-xs font-bold text-slate-400">to</span>
+                  <input
+                    type="date"
+                    min={malikFromDate}
+                    max={todayIso}
+                    value={malikToDate}
+                    onChange={(e) => setMalikToDate(e.target.value)}
+                    className="px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 outline-none"
+                  />
+                </div>
+              )}
+            </section>
 
-          {activeOrders.length === 0 ? (
-            <p className="text-xs text-slate-400 py-6 text-center">
-              No active orders right now. New orders will appear here live.
-            </p>
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {activeOrders.map((ord) => {
-                const isPaid = ord.payment_status === 'paid';
+            <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+                <div className="flex items-center justify-between text-slate-500 text-xs font-bold">
+                  <span>Total Outlets</span>
+                  <Store className="w-4 h-4 text-orange-600" />
+                </div>
+                <p className="text-2xl font-extrabold text-slate-900 mt-2">
+                  {currentOutletCount} /{" "}
+                  {maxAllowedOutlets === null ? "∞" : maxAllowedOutlets}
+                </p>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Active Branches Linked
+                </p>
+              </div>
 
-                return (
-                  <div
-                    key={ord.id}
-                    className="py-3 flex items-start justify-between gap-3 text-xs"
+              <div className="bg-emerald-50/70 p-5 rounded-2xl border-2 border-emerald-200 shadow-xs">
+                <div className="flex items-center justify-between text-emerald-800 text-xs font-bold">
+                  <span>Combined Total Sales</span>
+                  <IndianRupee className="w-4 h-4 text-emerald-600" />
+                </div>
+                <p className="text-2xl font-extrabold text-emerald-950 mt-2">
+                  ₹{malikCombinedTotal.toLocaleString("en-IN")}
+                </p>
+                <p className="text-[11px] text-emerald-700 font-semibold mt-1">
+                  {malikFilteredOrders.length} Total Settled Bills
+                </p>
+              </div>
+
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+                <div className="flex items-center justify-between text-slate-500 text-xs font-bold">
+                  <span>Combined Cash</span>
+                  <Banknote className="w-4 h-4 text-emerald-600" />
+                </div>
+                <p className="text-2xl font-extrabold text-slate-900 mt-2">
+                  ₹{malikCombinedCash.toLocaleString("en-IN")}
+                </p>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Cash Payments Collected
+                </p>
+              </div>
+
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+                <div className="flex items-center justify-between text-slate-500 text-xs font-bold">
+                  <span>Combined UPI / Online</span>
+                  <Smartphone className="w-4 h-4 text-blue-600" />
+                </div>
+                <p className="text-2xl font-extrabold text-slate-900 mt-2">
+                  ₹{malikCombinedUpi.toLocaleString("en-IN")}
+                </p>
+                <p className="text-[11px] text-blue-600 font-semibold mt-1">
+                  Direct UPI &amp; Online Payments
+                </p>
+              </div>
+            </section>
+
+            <section className="bg-white border border-slate-200 rounded-3xl p-5 sm:p-6 shadow-xs space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base sm:text-lg font-extrabold text-slate-900">
+                    Outlet-Wise Sales Report &amp; Branches
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Each outlet&apos;s location, total sales, Cash vs UPI split,
+                    and access PINs
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setShowOutletPins((prev) => !prev)}
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-800 px-3 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition"
                   >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-1.5 mb-1">
-                        <span className="inline-block font-extrabold text-slate-900 bg-slate-100 px-2 py-0.5 rounded-md">
-                          Table {ord.table_number}
-                        </span>
-                        {ord.customer_name && (
-                          <span className="font-bold text-slate-800">
-                            {ord.customer_name}
-                            {ord.customer_phone ? ` (${ord.customer_phone})` : ''}
-                          </span>
-                        )}
-                        {ord.invoice_number && (
-                          <span className="text-[10px] font-mono font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
-                            {ord.invoice_number}
-                          </span>
-                        )}
-                        {isPaid ? (
-                          <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-700 border border-emerald-200">
-                            PAID UPI ✓ (₹{ord.total_amount})
-                          </span>
-                        ) : (
-                          <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200">
-                            UNPAID • ₹{ord.total_amount}
-                          </span>
-                        )}
-                        {ord.razorpay_payment_id && (
-                          <span className="text-[10px] font-mono text-emerald-700 font-bold">
-                            Ref: {ord.razorpay_payment_id}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-slate-700 font-medium leading-relaxed break-words">
-                        {ord.order_items
-                          ?.map((i) => `${i.quantity}× ${i.item_name}`)
-                          .join(', ')}
-                      </p>
-                    </div>
+                    {showOutletPins ? (
+                      <>
+                        <EyeOff className="w-3.5 h-3.5" />
+                        <span>Hide PINs</span>
+                      </>
+                    ) : (
+                      <>
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>Show PINs</span>
+                      </>
+                    )}
+                  </button>
 
-                    <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1.5 shrink-0">
-                      <span
-                        className={`text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full whitespace-nowrap ${
-                          ord.status === 'ready'
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : ord.status === 'served'
-                            ? 'bg-blue-100 text-blue-700'
-                            : ord.status === 'preparing'
-                            ? 'bg-purple-100 text-purple-700'
-                            : 'bg-amber-100 text-amber-800'
-                        }`}
-                      >
-                        {ord.status}
-                      </span>
+                  <button
+                    type="button"
+                    onClick={handleOpenAddOutletModal}
+                    className="bg-orange-600 hover:bg-orange-700 text-white px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Outlet</span>
+                  </button>
+                </div>
+              </div>
 
-                      {ord.status === 'ready' && (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {malikOutletReportCards.map((out) => (
+                  <div
+                    key={out.id}
+                    className="border-2 border-slate-200 hover:border-orange-300 rounded-2xl p-4 bg-slate-50/60 flex flex-col justify-between gap-3 transition"
+                  >
+                    <div className="space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <h3 className="font-extrabold text-sm text-slate-900 truncate">
+                            {out.title}
+                          </h3>
+                          <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
+                            <MapPin className="w-3.5 h-3.5 text-orange-600 shrink-0" />
+                            <span>
+                              {out.city} • {out.total_tables || 10} Tables
+                            </span>
+                          </p>
+                        </div>
+
                         <button
                           type="button"
-                          onClick={() => handleMarkServed(ord.id)}
-                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[11px] px-3 py-1 rounded-lg transition whitespace-nowrap"
+                          onClick={() => {
+                            const target =
+                              outletsForDisplay.find((o) => o.id === out.id) ||
+                              null;
+                            setRemoveOutletError("");
+                            setOutletToRemove(target);
+                          }}
+                          title="Remove Outlet"
+                          className="p-2 rounded-xl text-red-600 hover:bg-red-50 border border-red-200 bg-white shrink-0 transition"
                         >
-                          Mark Served ✓
+                          <Trash2 className="w-4 h-4" />
                         </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
-
-        {isOwner && (
-          <section className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-sm">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
-              <h2 className="text-sm sm:text-base font-extrabold text-slate-900 flex items-center gap-2">
-                <Receipt className="w-4 h-4 text-orange-600 shrink-0" />
-                <span>Recent Settled Bills</span>
-              </h2>
-              <button
-                type="button"
-                onClick={handleOpenSalesModal}
-                className="text-xs font-extrabold text-orange-600 hover:underline flex items-center gap-1.5 self-start sm:self-auto"
-              >
-                <Search className="w-3.5 h-3.5 shrink-0" />
-                <span>Track by Invoice / UTR ID ({completedOrders.length}) &rarr;</span>
-              </button>
-            </div>
-
-            {completedOrders.length === 0 ? (
-              <p className="text-xs text-slate-400 py-6 text-center">
-                No settled bills yet.
-              </p>
-            ) : (
-              <div className="divide-y divide-slate-100">
-                {completedOrders.slice(0, 5).map((ord) => (
-                  <div
-                    key={ord.id}
-                    className="py-3 flex items-start justify-between gap-3 text-xs"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-extrabold text-slate-900">
-                          Table {ord.table_number}
-                        </span>
-                        {ord.customer_name && (
-                          <span className="font-bold text-slate-700">
-                            • {ord.customer_name}
-                          </span>
-                        )}
-                        {ord.invoice_number && (
-                          <span className="text-[10px] font-mono font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
-                            {ord.invoice_number}
-                          </span>
-                        )}
                       </div>
-                      <p className="text-slate-500 mt-0.5 leading-relaxed break-words">
-                        {ord.order_items
-                          ?.map((i) => `${i.quantity}× ${i.item_name}`)
-                          .join(', ')}
-                      </p>
+
+                      <div className="bg-white border border-slate-200 rounded-xl p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-500">
+                            Total Sales ({out.billsCount} bills)
+                          </span>
+                          <span className="text-base font-extrabold text-emerald-700">
+                            ₹{out.totalSale.toLocaleString("en-IN")}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100 text-xs">
+                          <div className="bg-emerald-50/70 rounded-lg px-2.5 py-1.5">
+                            <span className="text-[10px] font-bold text-emerald-700 block">
+                              Cash
+                            </span>
+                            <span className="font-extrabold text-slate-900">
+                              ₹{out.cashSale.toLocaleString("en-IN")}
+                            </span>
+                          </div>
+
+                          <div className="bg-blue-50/70 rounded-lg px-2.5 py-1.5">
+                            <span className="text-[10px] font-bold text-blue-700 block">
+                              UPI / Online
+                            </span>
+                            <span className="font-extrabold text-slate-900">
+                              ₹{out.upiSale.toLocaleString("en-IN")}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1 sm:gap-2.5 shrink-0">
-                      <span className="font-extrabold text-slate-900 text-sm">
-                        ₹{ord.total_amount}
+                    <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono pt-1">
+                      <span className="bg-white border border-slate-200 text-slate-700 px-2.5 py-1 rounded-lg font-bold">
+                        Branch PIN:{" "}
+                        {showOutletPins ? out.owner_pin || "—" : "••••••"}
                       </span>
-                      <span
-                        className={`uppercase text-[9px] sm:text-[10px] font-extrabold px-2 py-0.5 rounded ${
-                          (ord.payment_method || '').toLowerCase() === 'upi'
-                            ? 'bg-blue-50 text-blue-700'
-                            : 'bg-emerald-50 text-emerald-700'
-                        }`}
-                      >
-                        {ord.payment_method || 'PAID'}
+                      <span className="bg-white border border-slate-200 text-slate-700 px-2.5 py-1 rounded-lg font-bold">
+                        Staff PIN:{" "}
+                        {showOutletPins ? out.staff_pin || "None" : "••••••"}
                       </span>
                     </div>
                   </div>
                 ))}
               </div>
+            </section>
+          </>
+        ) : (
+          /* ==================== BRANCH MANAGER / SINGLE OUTLET VIEW ==================== */
+          <>
+            {isOwner && !isMultiOutletMode && subInfo.status !== "active" && (
+              <section
+                className={`rounded-2xl p-4 border flex flex-wrap items-center justify-between gap-3 shadow-sm ${
+                  subInfo.isExpired
+                    ? "bg-red-50 border-red-300 text-red-900"
+                    : "bg-gradient-to-r from-slate-900 to-slate-800 border-slate-700 text-white"
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`p-2.5 rounded-xl ${
+                      subInfo.isExpired
+                        ? "bg-red-100 text-red-600"
+                        : "bg-amber-400/20 text-amber-300"
+                    }`}
+                  >
+                    {subInfo.isExpired ? (
+                      <AlertTriangle className="w-5 h-5" />
+                    ) : (
+                      <Crown className="w-5 h-5" />
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-xs sm:text-sm font-extrabold">
+                      {subInfo.isExpired
+                        ? "Your 14-Day Free Trial Has Ended!"
+                        : `Free Trial Active • ${subInfo.daysLeft} Day${
+                            subInfo.daysLeft === 1 ? "" : "s"
+                          } Left`}
+                    </p>
+                    <p
+                      className={`text-[11px] mt-0.5 ${
+                        subInfo.isExpired ? "text-red-700" : "text-slate-300"
+                      }`}
+                    >
+                      Selected Plan: <strong>{subInfo.selectedPlan}</strong> •
+                      Complete online payment to activate your plan immediately.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUpgradeErrorMsg(null);
+                    setUpgradeModeTab("single");
+                    setShowUpgradeModal(true);
+                  }}
+                  className="bg-orange-600 hover:bg-orange-700 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center gap-1.5"
+                >
+                  <Crown className="w-3.5 h-3.5" />
+                  <span>Upgrade / Activate Plan</span>
+                </button>
+              </section>
             )}
-          </section>
+
+            {isOwner && !isPaymentConfigured && (
+              <section className="bg-amber-50 border border-amber-300 text-amber-950 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-sm">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-amber-200/70 text-amber-800">
+                    <KeyRound className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <p className="text-xs sm:text-sm font-extrabold">
+                      Connect Your Merchant UPI ID (0% Fee Direct Payments)
+                    </p>
+                    <p className="text-[11px] text-amber-800 mt-0.5">
+                      Save your UPI ID so customer payments go straight to your
+                      GPay, PhonePe, or Paytm merchant account.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleOpenPaymentSettings}
+                  className="bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl transition"
+                >
+                  Add Merchant UPI ID &rarr;
+                </button>
+              </section>
+            )}
+
+            <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <button
+                type="button"
+                onClick={handleOpenSalesModal}
+                className="bg-white hover:bg-emerald-50/40 p-5 rounded-2xl border-2 border-emerald-200 hover:border-emerald-500 shadow-sm text-left transition cursor-pointer group"
+              >
+                <div className="flex items-center justify-between text-slate-600 text-xs font-bold">
+                  <span>Today&apos;s Total Sale</span>
+                  <span className="flex items-center gap-1 text-emerald-600 font-extrabold">
+                    Track Bills{" "}
+                    <ArrowUpRight className="w-4 h-4 group-hover:translate-x-0.5 transition" />
+                  </span>
+                </div>
+                <p className="text-2xl font-extrabold text-slate-900 mt-2">
+                  ₹{todayRevenue.toLocaleString("en-IN")}
+                </p>
+                <p className="text-[11px] text-emerald-700 font-semibold mt-1">
+                  {todayCompleted.length} Bills Settled Today • Search Invoice /
+                  ID
+                </p>
+              </button>
+
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="flex items-center justify-between text-slate-500 text-xs font-bold">
+                  <span>Active Tables</span>
+                  <Users className="w-4 h-4 text-orange-600" />
+                </div>
+                <p className="text-2xl font-extrabold text-slate-900 mt-2">
+                  {occupiedTablesCount} / {actualTablesCount}
+                </p>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Currently Occupied
+                </p>
+              </div>
+
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="flex items-center justify-between text-slate-500 text-xs font-bold">
+                  <span>In Kitchen (Cooking)</span>
+                  <ChefHat className="w-4 h-4 text-blue-600" />
+                </div>
+                <p className="text-2xl font-extrabold text-slate-900 mt-2">
+                  {cookingOrdersCount}
+                </p>
+                <p className="text-[11px] text-blue-600 font-semibold mt-1">
+                  Live KOTs Active
+                </p>
+              </div>
+
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="flex items-center justify-between text-slate-500 text-xs font-bold">
+                  <span>Ready to Serve</span>
+                  <BellRing className="w-4 h-4 text-amber-600" />
+                </div>
+                <p className="text-2xl font-extrabold text-slate-900 mt-2">
+                  {readyToServeCount}
+                </p>
+                <p className="text-[11px] text-amber-600 font-semibold mt-1">
+                  Pickup from Kitchen
+                </p>
+              </div>
+            </section>
+
+            {readyToServeCount > 0 && (
+              <section className="bg-emerald-600 text-white rounded-2xl p-4 shadow-md flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="bg-white/20 p-2 rounded-xl">
+                    <Sparkles className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <p className="font-extrabold text-sm">
+                      {readyToServeCount} Order{readyToServeCount > 1 ? "s" : ""}{" "}
+                      Ready in Kitchen!
+                    </p>
+                    <p className="text-xs text-emerald-100">
+                      Tables:{" "}
+                      {Array.from(
+                        new Set(
+                          activeOrders
+                            .filter((o) => o.status === "ready")
+                            .map((o) => `Table ${o.table_number}`),
+                        ),
+                      ).join(", ")}
+                    </p>
+                  </div>
+                </div>
+                <Link
+                  href={`/kitchen/${session.restaurantId}`}
+                  className="bg-white text-emerald-700 font-extrabold text-xs px-4 py-2 rounded-xl shadow-sm hover:bg-emerald-50 transition"
+                >
+                  Open KDS &rarr;
+                </Link>
+              </section>
+            )}
+
+            <section className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-5">
+                <div>
+                  <h2 className="text-base sm:text-lg font-extrabold text-slate-900">
+                    Live Floor &amp; Table Status
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Click a Free table to take an order; once guests leave, click
+                    an Occupied table to mark it Free.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3 text-[11px] font-bold">
+                  <span className="flex items-center gap-1.5 text-slate-500">
+                    <span className="w-2.5 h-2.5 rounded-full bg-slate-200"></span>{" "}
+                    Free
+                  </span>
+                  <span className="flex items-center gap-1.5 text-amber-700">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>{" "}
+                    Cooking
+                  </span>
+                  <span className="flex items-center gap-1.5 text-emerald-700">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>{" "}
+                    Ready
+                  </span>
+                  <span className="flex items-center gap-1.5 text-blue-700">
+                    <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span>{" "}
+                    Dining
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3.5">
+                {tablesArray.map((tableNum) => {
+                  const tOrders = activeOrders.filter(
+                    (o) => o.table_number === tableNum,
+                  );
+                  const isOccupied = tOrders.length > 0;
+                  const hasReady = tOrders.some((o) => o.status === "ready");
+                  const isAllServed =
+                    isOccupied && tOrders.every((o) => o.status === "served");
+                  const tableTotal = tOrders.reduce(
+                    (s, o) => s + Number(o.total_amount),
+                    0,
+                  );
+                  const totalDishes = tOrders.reduce(
+                    (s, o) =>
+                      s +
+                      (o.order_items?.reduce(
+                        (sum, i) => sum + i.quantity,
+                        0,
+                      ) || 0),
+                    0,
+                  );
+                  const isTableFullyPaid =
+                    isOccupied &&
+                    tOrders.every((o) => o.payment_status === "paid");
+                  const guestName = tOrders[0]?.customer_name;
+
+                  if (!isOccupied) {
+                    return (
+                      <Link
+                        key={tableNum}
+                        href={`/order/${session.restaurantId}/${tableNum}`}
+                        className="p-4 rounded-2xl border-2 text-left transition flex flex-col justify-between min-h-[125px] cursor-pointer hover:shadow-md bg-slate-50 border-slate-200/80 hover:border-orange-300"
+                      >
+                        <div className="flex items-center justify-between w-full">
+                          <span className="font-extrabold text-sm text-slate-900">
+                            Table {tableNum}
+                          </span>
+                          <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">
+                            Free
+                          </span>
+                        </div>
+
+                        <div className="mt-4 flex items-center justify-between text-slate-400">
+                          <span className="text-xs">Available</span>
+                          <span className="text-[11px] font-bold text-orange-600">
+                            + Order
+                          </span>
+                        </div>
+                      </Link>
+                    );
+                  }
+
+                  return (
+                    <button
+                      key={tableNum}
+                      type="button"
+                      onClick={() => setSelectedTableModal(tableNum)}
+                      className={`p-4 rounded-2xl border-2 text-left transition flex flex-col justify-between min-h-[125px] cursor-pointer hover:shadow-md ${
+                        hasReady
+                          ? "bg-emerald-50/80 border-emerald-500 shadow-sm"
+                          : isAllServed
+                            ? "bg-blue-50/70 border-blue-400 shadow-sm"
+                            : "bg-amber-50/70 border-amber-400 shadow-sm"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className="font-extrabold text-sm text-slate-900">
+                          Table {tableNum}
+                        </span>
+                        <span
+                          className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
+                            hasReady
+                              ? "bg-emerald-600 text-white"
+                              : isAllServed
+                                ? "bg-blue-600 text-white"
+                                : "bg-amber-500 text-white"
+                          }`}
+                        >
+                          {hasReady
+                            ? "Ready"
+                            : isAllServed
+                              ? "Dining"
+                              : "Cooking"}
+                        </span>
+                      </div>
+
+                      <div className="mt-2.5">
+                        {guestName && (
+                          <p className="text-[11px] font-extrabold text-slate-900 truncate">
+                            {guestName}
+                          </p>
+                        )}
+                        <p className="text-[11px] font-semibold text-slate-600">
+                          {isAllServed
+                            ? "Dining • Clear on Exit"
+                            : `${totalDishes} Dish${totalDishes > 1 ? "es" : ""} Running`}
+                        </p>
+                        <div className="flex items-center justify-between gap-1 mt-1">
+                          <p className="text-base font-extrabold text-slate-900">
+                            ₹{tableTotal}
+                          </p>
+                          {isTableFullyPaid ? (
+                            <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-300">
+                              PAID ✓
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-200/80 text-slate-600">
+                              UNPAID
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-sm">
+              <div className="flex items-center justify-between gap-2 mb-4">
+                <h2 className="text-sm sm:text-base font-extrabold text-slate-900 flex items-center gap-2">
+                  <Utensils className="w-4 h-4 text-orange-600 shrink-0" />
+                  <span>Live Kitchen &amp; Service Queue</span>
+                </h2>
+                <span className="text-[11px] sm:text-xs font-bold bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full whitespace-nowrap shrink-0">
+                  {activeOrders.length} Active
+                </span>
+              </div>
+
+              {activeOrders.length === 0 ? (
+                <p className="text-xs text-slate-400 py-6 text-center">
+                  No active orders right now. New orders will appear here live.
+                </p>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {activeOrders.map((ord) => {
+                    const isPaid = ord.payment_status === "paid";
+
+                    return (
+                      <div
+                        key={ord.id}
+                        className="py-3 flex items-start justify-between gap-3 text-xs"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                            <span className="inline-block font-extrabold text-slate-900 bg-slate-100 px-2 py-0.5 rounded-md">
+                              Table {ord.table_number}
+                            </span>
+                            {ord.customer_name && (
+                              <span className="font-bold text-slate-800">
+                                {ord.customer_name}
+                                {ord.customer_phone
+                                  ? ` (${ord.customer_phone})`
+                                  : ""}
+                              </span>
+                            )}
+                            {ord.invoice_number && (
+                              <span className="text-[10px] font-mono font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                                {ord.invoice_number}
+                              </span>
+                            )}
+                            {isPaid ? (
+                              <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-700 border border-emerald-200">
+                                PAID UPI ✓ (₹{ord.total_amount})
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200">
+                                UNPAID • ₹{ord.total_amount}
+                              </span>
+                            )}
+                            {ord.razorpay_payment_id && (
+                              <span className="text-[10px] font-mono text-emerald-700 font-bold">
+                                Ref: {ord.razorpay_payment_id}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-slate-700 font-medium leading-relaxed break-words">
+                            {ord.order_items
+                              ?.map((i) => `${i.quantity}× ${i.item_name}`)
+                              .join(", ")}
+                          </p>
+                        </div>
+
+                        <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1.5 shrink-0">
+                          <span
+                            className={`text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full whitespace-nowrap ${
+                              ord.status === "ready"
+                                ? "bg-emerald-100 text-emerald-700"
+                                : ord.status === "served"
+                                  ? "bg-blue-100 text-blue-700"
+                                  : ord.status === "preparing"
+                                    ? "bg-purple-100 text-purple-700"
+                                    : "bg-amber-100 text-amber-800"
+                            }`}
+                          >
+                            {ord.status}
+                          </span>
+
+                          {ord.status === "ready" && (
+                            <button
+                              type="button"
+                              onClick={() => handleMarkServed(ord.id)}
+                              className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[11px] px-3 py-1 rounded-lg transition whitespace-nowrap"
+                            >
+                              Mark Served ✓
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            {isOwner && (
+              <section className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                  <h2 className="text-sm sm:text-base font-extrabold text-slate-900 flex items-center gap-2">
+                    <Receipt className="w-4 h-4 text-orange-600 shrink-0" />
+                    <span>Recent Settled Bills</span>
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={handleOpenSalesModal}
+                    className="text-xs font-extrabold text-orange-600 hover:underline flex items-center gap-1.5 self-start sm:self-auto"
+                  >
+                    <Search className="w-3.5 h-3.5 shrink-0" />
+                    <span>
+                      Track by Invoice / UTR ID ({completedOrders.length})
+                      &rarr;
+                    </span>
+                  </button>
+                </div>
+
+                {completedOrders.length === 0 ? (
+                  <p className="text-xs text-slate-400 py-6 text-center">
+                    No settled bills yet.
+                  </p>
+                ) : (
+                  <div className="divide-y divide-slate-100">
+                    {completedOrders.slice(0, 5).map((ord) => (
+                      <div
+                        key={ord.id}
+                        className="py-3 flex items-start justify-between gap-3 text-xs"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-extrabold text-slate-900">
+                              Table {ord.table_number}
+                            </span>
+                            {ord.customer_name && (
+                              <span className="font-bold text-slate-700">
+                                • {ord.customer_name}
+                              </span>
+                            )}
+                            {ord.invoice_number && (
+                              <span className="text-[10px] font-mono font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                                {ord.invoice_number}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-slate-500 mt-0.5 leading-relaxed break-words">
+                            {ord.order_items
+                              ?.map((i) => `${i.quantity}× ${i.item_name}`)
+                              .join(", ")}
+                          </p>
+                        </div>
+
+                        <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1 sm:gap-2.5 shrink-0">
+                          <span className="font-extrabold text-slate-900 text-sm">
+                            ₹{ord.total_amount}
+                          </span>
+                          <span
+                            className={`uppercase text-[9px] sm:text-[10px] font-extrabold px-2 py-0.5 rounded ${
+                              (ord.payment_method || "").toLowerCase() === "upi"
+                                ? "bg-blue-50 text-blue-700"
+                                : "bg-emerald-50 text-emerald-700"
+                            }`}
+                          >
+                            {ord.payment_method || "PAID"}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+          </>
         )}
       </main>
 
-      {/* Master-Only Add Outlet Modal (Unlocked via Master Password) */}
-      {isOwner && isMultiOutletMode && masterUnlocked && showAddOutletModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[999]">
+      {/* Malik-Only Add Outlet Modal */}
+      {isMalikMode && showAddOutletModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-[1020]">
           <div className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3.5 border-b border-slate-200">
               <div>
                 <h3 className="text-base sm:text-lg font-extrabold text-slate-900 flex items-center gap-2">
-                  <Building2 className="w-5 h-5 text-orange-600" /> Add Linked Outlet
+                  <Building2 className="w-5 h-5 text-orange-600" /> Add Linked
+                  Outlet
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
                   Plan Limit: {currentOutletCount}/
-                  {maxAllowedOutlets === null ? 'Unlimited' : maxAllowedOutlets} outlets used
+                  {maxAllowedOutlets === null ? "Unlimited" : maxAllowedOutlets}{" "}
+                  outlets used
                 </p>
               </div>
               <button
@@ -1935,7 +2255,10 @@ export default function DashboardPage() {
               </button>
             </div>
 
-            <form onSubmit={handleCreateLinkedOutlet} className="pt-4 space-y-3.5">
+            <form
+              onSubmit={handleCreateLinkedOutlet}
+              className="pt-4 space-y-3.5"
+            >
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
                   Outlet / Branch Name *
@@ -1951,7 +2274,9 @@ export default function DashboardPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">City *</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  City *
+                </label>
                 <input
                   type="text"
                   required
@@ -1971,8 +2296,10 @@ export default function DashboardPage() {
                   min={1}
                   max={100}
                   required
-                  value={newOutletTables || ''}
-                  onChange={(e) => setNewOutletTables(parseInt(e.target.value, 10) || 0)}
+                  value={newOutletTables || ""}
+                  onChange={(e) =>
+                    setNewOutletTables(parseInt(e.target.value, 10) || 0)
+                  }
                   className="w-full px-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none"
                 />
               </div>
@@ -1991,7 +2318,9 @@ export default function DashboardPage() {
                       required
                       value={newOutletOwnerPin}
                       onChange={(e) =>
-                        setNewOutletOwnerPin(e.target.value.replace(/\D/g, '').slice(0, 6))
+                        setNewOutletOwnerPin(
+                          e.target.value.replace(/\D/g, "").slice(0, 6),
+                        )
                       }
                       placeholder="••••••"
                       className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm font-bold tracking-widest outline-none"
@@ -2011,7 +2340,9 @@ export default function DashboardPage() {
                       maxLength={6}
                       value={newOutletStaffPin}
                       onChange={(e) =>
-                        setNewOutletStaffPin(e.target.value.replace(/\D/g, '').slice(0, 6))
+                        setNewOutletStaffPin(
+                          e.target.value.replace(/\D/g, "").slice(0, 6),
+                        )
                       }
                       placeholder="••••••"
                       className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm font-bold tracking-widest outline-none"
@@ -2031,16 +2362,16 @@ export default function DashboardPage() {
                 disabled={addingOutlet}
                 className="w-full bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white font-extrabold py-3 rounded-xl text-xs shadow-sm transition"
               >
-                {addingOutlet ? 'Adding Outlet...' : 'Create Linked Outlet ✓'}
+                {addingOutlet ? "Adding Outlet..." : "Create Linked Outlet ✓"}
               </button>
             </form>
           </div>
         </div>
       )}
 
-      {/* Master-Only Remove Outlet Confirmation Modal */}
-      {isOwner && isMultiOutletMode && masterUnlocked && outletToRemove && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-[1001]">
+      {/* Malik-Only Remove Outlet Confirmation Modal */}
+      {isMalikMode && outletToRemove && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-[1025]">
           <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-red-200 space-y-4 text-center">
             <div className="w-12 h-12 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center mx-auto">
               <Trash2 className="w-6 h-6" />
@@ -2051,10 +2382,11 @@ export default function DashboardPage() {
                 Remove Outlet?
               </h3>
               <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
-                Are you sure you want to remove <strong>{formatOutletTitle(outletToRemove)}</strong>?
+                Are you sure you want to remove{" "}
+                <strong>{formatOutletTitle(outletToRemove)}</strong>?
                 {outletToRemove.id === session.restaurantId
-                  ? ' Since this is your active outlet, you will be logged out after removal.'
-                  : ' This will free up an outlet slot under your plan.'}
+                  ? " Since this is your active session outlet, you will be logged out after removal."
+                  : " This will free up an outlet slot under your plan."}
               </p>
             </div>
 
@@ -2070,7 +2402,7 @@ export default function DashboardPage() {
                 disabled={removingOutletId === outletToRemove.id}
                 onClick={() => {
                   setOutletToRemove(null);
-                  setRemoveOutletError('');
+                  setRemoveOutletError("");
                 }}
                 className="py-2.5 px-3 rounded-xl border border-slate-200 text-xs font-extrabold text-slate-700 hover:bg-slate-50 transition"
               >
@@ -2082,7 +2414,9 @@ export default function DashboardPage() {
                 onClick={handleConfirmRemoveOutlet}
                 className="py-2.5 px-3 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-extrabold transition"
               >
-                {removingOutletId === outletToRemove.id ? 'Removing...' : 'Yes, Remove'}
+                {removingOutletId === outletToRemove.id
+                  ? "Removing..."
+                  : "Yes, Remove"}
               </button>
             </div>
           </div>
@@ -2090,12 +2424,13 @@ export default function DashboardPage() {
       )}
 
       {isOwner && showUpgradeModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[999]">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-[1030]">
           <div className="bg-white rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl max-h-[85vh] overflow-y-auto overscroll-contain border border-slate-200">
             <div className="flex items-center justify-between pb-4 border-b border-slate-200">
               <div>
                 <h3 className="text-base sm:text-lg font-extrabold text-slate-900 flex items-center gap-2">
-                  <Crown className="w-5 h-5 text-orange-600" /> Activate RestroSync Plan
+                  <Crown className="w-5 h-5 text-orange-600" /> Activate
+                  RestroSync Plan
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
                   Your plan activates immediately upon completing payment
@@ -2120,7 +2455,7 @@ export default function DashboardPage() {
               {activeUpgradePlans.map((plan) => {
                 const isSelected = subInfo.selectedPlan.includes(plan.price);
                 const isBelowCurrentOutlets =
-                  upgradeModeTab === 'multiple' &&
+                  upgradeModeTab === "multiple" &&
                   plan.maxOutlets !== null &&
                   currentOutletCount > plan.maxOutlets;
 
@@ -2129,13 +2464,15 @@ export default function DashboardPage() {
                     key={plan.id}
                     className={`p-3.5 rounded-2xl border-2 flex items-center justify-between gap-3 ${
                       isSelected
-                        ? 'border-orange-500 bg-orange-50/50'
-                        : 'border-slate-200 bg-white'
+                        ? "border-orange-500 bg-orange-50/50"
+                        : "border-slate-200 bg-white"
                     }`}
                   >
                     <div>
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <p className="font-extrabold text-sm text-slate-900">{plan.name}</p>
+                        <p className="font-extrabold text-sm text-slate-900">
+                          {plan.name}
+                        </p>
                         <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
                           {plan.tag}
                         </span>
@@ -2145,20 +2482,27 @@ export default function DashboardPage() {
                       </p>
                       {isBelowCurrentOutlets && (
                         <p className="text-[10px] font-bold text-red-600 mt-0.5">
-                          {currentOutletCount} outlets active (needs ≥ {currentOutletCount} limit)
+                          {currentOutletCount} outlets active (needs ≥{" "}
+                          {currentOutletCount} limit)
                         </p>
                       )}
                     </div>
 
                     <button
                       type="button"
-                      disabled={upgradingPlanId === plan.id || isBelowCurrentOutlets}
-                      onClick={() => handleRazorpayPlanUpgrade(plan, upgradeModeTab)}
+                      disabled={
+                        upgradingPlanId === plan.id || isBelowCurrentOutlets
+                      }
+                      onClick={() =>
+                        handleRazorpayPlanUpgrade(plan, upgradeModeTab)
+                      }
                       className="bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 shadow-sm transition shrink-0"
                     >
                       <Crown className="w-4 h-4" />
                       <span>
-                        {upgradingPlanId === plan.id ? 'Opening...' : 'Pay & Activate'}
+                        {upgradingPlanId === plan.id
+                          ? "Opening..."
+                          : "Pay & Activate"}
                       </span>
                     </button>
                   </div>
@@ -2180,16 +2524,18 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {isOwner && showPaymentSettingsModal && (
+      {isOwner && !isMalikMode && showPaymentSettingsModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[999]">
           <div className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3.5 border-b border-slate-200">
               <div>
                 <h3 className="text-base sm:text-lg font-extrabold text-slate-900 flex items-center gap-2">
-                  <KeyRound className="w-5 h-5 text-purple-600" /> Restaurant Payment Setup
+                  <KeyRound className="w-5 h-5 text-purple-600" /> Restaurant
+                  Payment Setup
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  0% Fee • Customer payments go straight to your UPI or bank account
+                  0% Fee • Customer payments go straight to your UPI or bank
+                  account
                 </p>
               </div>
               <button
@@ -2201,7 +2547,10 @@ export default function DashboardPage() {
               </button>
             </div>
 
-            <form onSubmit={handleSavePaymentSettings} className="pt-4 space-y-3.5">
+            <form
+              onSubmit={handleSavePaymentSettings}
+              className="pt-4 space-y-3.5"
+            >
               <div>
                 <label className="block text-xs font-extrabold text-slate-700 mb-1">
                   Shop / Merchant Display Name *
@@ -2229,8 +2578,8 @@ export default function DashboardPage() {
                   className="w-full px-3.5 py-2.5 bg-emerald-50/40 focus:bg-white border border-emerald-400 focus:border-orange-500 rounded-xl text-xs font-mono font-bold outline-none"
                 />
                 <p className="text-[10px] text-slate-500 mt-1">
-                  Enter the UPI ID from your Google Pay Business, PhonePe Business, or Paytm QR
-                  stand.
+                  Enter the UPI ID from your Google Pay Business, PhonePe
+                  Business, or Paytm QR stand.
                 </p>
               </div>
 
@@ -2277,63 +2626,36 @@ export default function DashboardPage() {
                 disabled={savingPaymentSettings}
                 className="w-full bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white font-extrabold py-3 rounded-xl text-xs shadow-sm transition"
               >
-                {savingPaymentSettings ? 'Saving Details...' : 'Save Payment Setup ✓'}
+                {savingPaymentSettings
+                  ? "Saving Details..."
+                  : "Save Payment Setup ✓"}
               </button>
             </form>
           </div>
         </div>
       )}
 
-      {isOwner && showSalesModal && (
+      {isOwner && !isMalikMode && showSalesModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 z-[999]">
           <div className="bg-white rounded-3xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl max-h-[88vh] flex flex-col overflow-hidden border border-slate-200">
             <div className="flex items-start justify-between gap-2 pb-3 border-b border-slate-200 shrink-0">
               <div>
                 <h3 className="text-base sm:text-lg font-extrabold text-slate-900">
-                  Bills, Invoice Tracker & Sales History
+                  Bills, Invoice Tracker &amp; Sales History
                 </h3>
                 <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5">
-                  {activeSalesScope === 'all_outlets'
-                    ? `Owner Vault • Combined view across ${outletsForDisplay.length} outlet(s)`
-                    : `${session.restaurantName} • Track by Invoice No., Bill No., UTR / Payment ID, Name, or Phone`}
+                  {session.restaurantName} • Track by Invoice No., Bill No.,
+                  UTR / Payment ID, Name, or Phone
                 </p>
               </div>
               <button
                 type="button"
-                onClick={handleCloseSalesModal}
+                onClick={() => setShowSalesModal(false)}
                 className="p-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 shrink-0"
               >
                 <X className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
             </div>
-
-            {isMultiOutletMode && (
-              <div className="flex items-center gap-2 pt-3 shrink-0 flex-wrap">
-                <button
-                  type="button"
-                  onClick={() => setSalesScope('current')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition ${
-                    activeSalesScope === 'current'
-                      ? 'bg-orange-600 text-white shadow-xs'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                  }`}
-                >
-                  This Branch Only
-                </button>
-                <button
-                  type="button"
-                  onClick={handleRequestCombinedSales}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 ${
-                    activeSalesScope === 'all_outlets'
-                      ? 'bg-slate-900 text-white shadow-xs'
-                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                  }`}
-                >
-                  <Lock className="w-3.5 h-3.5" />
-                  <span>Owner Combined & Outlets ({outletsForDisplay.length})</span>
-                </button>
-              </div>
-            )}
 
             <div className="pt-3 shrink-0">
               <div className="relative">
@@ -2348,7 +2670,7 @@ export default function DashboardPage() {
                 {billSearchQuery && (
                   <button
                     type="button"
-                    onClick={() => setBillSearchQuery('')}
+                    onClick={() => setBillSearchQuery("")}
                     className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
                   >
                     <X className="w-4 h-4" />
@@ -2361,10 +2683,10 @@ export default function DashboardPage() {
               <div className="flex items-center gap-2 pt-3 overflow-x-auto pb-1 shrink-0 no-scrollbar">
                 {(
                   [
-                    { id: 'today', label: 'Today' },
-                    { id: '7days', label: 'Last 7 Days' },
-                    { id: 'all', label: 'All Time' },
-                    { id: 'custom', label: 'Custom Date' },
+                    { id: "today", label: "Today" },
+                    { id: "7days", label: "Last 7 Days" },
+                    { id: "all", label: "All Time" },
+                    { id: "custom", label: "Custom Date" },
                   ] as const
                 ).map((tab) => (
                   <button
@@ -2373,18 +2695,20 @@ export default function DashboardPage() {
                     onClick={() => setSalesFilter(tab.id)}
                     className={`px-3 sm:px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
                       salesFilter === tab.id
-                        ? 'bg-slate-900 text-white shadow-sm'
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        ? "bg-slate-900 text-white shadow-sm"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                     }`}
                   >
-                    {tab.id === 'custom' && <Calendar className="w-3.5 h-3.5" />}
+                    {tab.id === "custom" && (
+                      <Calendar className="w-3.5 h-3.5" />
+                    )}
                     <span>{tab.label}</span>
                   </button>
                 ))}
               </div>
             )}
 
-            {!cleanSearch && salesFilter === 'custom' && (
+            {!cleanSearch && salesFilter === "custom" && (
               <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-2xl grid grid-cols-2 gap-2.5 shrink-0">
                 <div>
                   <label className="block text-[10px] sm:text-[11px] font-bold text-slate-600 mb-1">
@@ -2419,14 +2743,10 @@ export default function DashboardPage() {
               <div className="col-span-2 sm:col-span-1 bg-emerald-50 border border-emerald-200 p-3 rounded-2xl flex sm:block items-center justify-between">
                 <div>
                   <p className="text-[11px] font-bold text-emerald-700">
-                    {cleanSearch
-                      ? 'Matched Amount'
-                      : activeSalesScope === 'all_outlets'
-                      ? 'Combined Revenue'
-                      : 'Total Revenue'}
+                    {cleanSearch ? "Matched Amount" : "Total Revenue"}
                   </p>
                   <p className="text-xl font-extrabold text-emerald-900 mt-0.5">
-                    ₹{filteredTotalSales.toLocaleString('en-IN')}
+                    ₹{filteredTotalSales.toLocaleString("en-IN")}
                   </p>
                 </div>
                 <span className="text-[11px] font-bold bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full sm:bg-transparent sm:p-0 sm:mt-0.5 inline-block">
@@ -2439,88 +2759,20 @@ export default function DashboardPage() {
                   <Banknote className="w-3.5 h-3.5 text-emerald-600" /> Cash
                 </p>
                 <p className="text-base sm:text-xl font-extrabold text-slate-900 mt-0.5">
-                  ₹{filteredCashSales.toLocaleString('en-IN')}
+                  ₹{filteredCashSales.toLocaleString("en-IN")}
                 </p>
               </div>
 
               <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl">
                 <p className="text-[11px] font-bold text-slate-600 flex items-center gap-1">
-                  <Smartphone className="w-3.5 h-3.5 text-blue-600" /> UPI / Online
+                  <Smartphone className="w-3.5 h-3.5 text-blue-600" /> UPI /
+                  Online
                 </p>
                 <p className="text-base sm:text-xl font-extrabold text-slate-900 mt-0.5">
-                  ₹{filteredUpiSales.toLocaleString('en-IN')}
+                  ₹{filteredUpiSales.toLocaleString("en-IN")}
                 </p>
               </div>
             </div>
-
-            {activeSalesScope === 'all_outlets' && masterUnlocked && isMultiOutletMode && (
-              <div className="mb-3 bg-slate-50 border border-slate-200 rounded-2xl p-3.5 shrink-0 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-800">
-                      Owner Outlets ({currentOutletCount}/
-                      {maxAllowedOutlets === null ? 'Unlimited' : maxAllowedOutlets})
-                    </p>
-                    <p className="text-[10px] text-slate-500">
-                      Track sales per outlet or add/remove branches
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-1.5">
-                    {isAtOutletLimit && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setUpgradeErrorMsg(null);
-                          setUpgradeModeTab('multiple');
-                          setShowUpgradeModal(true);
-                        }}
-                        className="bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-[11px] px-2.5 py-1.5 rounded-xl transition"
-                      >
-                        Upgrade Plan
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={handleOpenAddOutletModal}
-                      className="bg-orange-600 hover:bg-orange-700 text-white font-extrabold text-[11px] px-3 py-1.5 rounded-xl flex items-center gap-1 transition"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Add Outlet</span>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-0.5">
-                  {outletBreakdownRows.map((row) => (
-                    <div
-                      key={row.id}
-                      className="bg-white border border-slate-200 rounded-xl px-3 py-2 flex items-center justify-between gap-2 text-xs"
-                    >
-                      <div className="min-w-0">
-                        <p className="font-bold text-slate-800 truncate">{row.title}</p>
-                        <p className="text-[10px] text-slate-500">
-                          {row.count} Bills • <strong>₹{row.total.toLocaleString('en-IN')}</strong>
-                        </p>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const target = outletsForDisplay.find((o) => o.id === row.id) || null;
-                          setRemoveOutletError('');
-                          setOutletToRemove(target);
-                        }}
-                        title="Remove Outlet"
-                        className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 border border-red-200/80 shrink-0 transition"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
 
             <div className="flex-1 overflow-y-auto overscroll-contain divide-y divide-slate-100 border-t border-slate-100 pr-1 pb-2">
               {filteredSalesOrders.length === 0 ? (
@@ -2528,246 +2780,81 @@ export default function DashboardPage() {
                   No matching bills or invoices found.
                 </p>
               ) : (
-                filteredSalesOrders.map((ord) => {
-                  const ordOutletId = ord.restaurant_id || session.restaurantId;
-                  return (
-                    <div
-                      key={ord.id}
-                      className="py-3 flex items-start justify-between gap-3 text-xs"
-                    >
-                      <div className="min-w-0 flex-1 space-y-1">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          {activeSalesScope === 'all_outlets' && (
-                            <span className="text-[10px] font-extrabold bg-slate-900 text-white px-2 py-0.5 rounded">
-                              {outletNameById[ordOutletId] || session.restaurantName}
+                filteredSalesOrders.map((ord) => (
+                  <div
+                    key={ord.id}
+                    className="py-3 flex items-start justify-between gap-3 text-xs"
+                  >
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="font-extrabold text-slate-900">
+                          Table {ord.table_number}
+                        </span>
+                        <span className="text-[10px] font-mono font-extrabold bg-orange-50 text-orange-700 border border-orange-200 px-1.5 py-0.5 rounded">
+                          {ord.invoice_number ||
+                            `INV-${ord.id.slice(0, 6).toUpperCase()}`}
+                        </span>
+                        <span className="text-[10px] font-mono font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                          BILL-{ord.id.slice(0, 6).toUpperCase()}
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          {new Date(ord.created_at).toLocaleString("en-IN", {
+                            day: "2-digit",
+                            month: "short",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                      </div>
+
+                      {(ord.customer_name || ord.customer_phone) && (
+                        <p className="text-[11px] font-bold text-slate-700 flex flex-wrap items-center gap-2">
+                          {ord.customer_name && (
+                            <span className="flex items-center gap-1">
+                              <User className="w-3 h-3 text-slate-400" />{" "}
+                              {ord.customer_name}
                             </span>
                           )}
-                          <span className="font-extrabold text-slate-900">
-                            Table {ord.table_number}
-                          </span>
-                          <span className="text-[10px] font-mono font-extrabold bg-orange-50 text-orange-700 border border-orange-200 px-1.5 py-0.5 rounded">
-                            {ord.invoice_number || `INV-${ord.id.slice(0, 6).toUpperCase()}`}
-                          </span>
-                          <span className="text-[10px] font-mono font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
-                            BILL-{ord.id.slice(0, 6).toUpperCase()}
-                          </span>
-                          <span className="text-[10px] text-slate-400">
-                            {new Date(ord.created_at).toLocaleString('en-IN', {
-                              day: '2-digit',
-                              month: 'short',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </span>
-                        </div>
-
-                        {(ord.customer_name || ord.customer_phone) && (
-                          <p className="text-[11px] font-bold text-slate-700 flex flex-wrap items-center gap-2">
-                            {ord.customer_name && (
-                              <span className="flex items-center gap-1">
-                                <User className="w-3 h-3 text-slate-400" /> {ord.customer_name}
-                              </span>
-                            )}
-                            {ord.customer_phone && (
-                              <span className="flex items-center gap-1">
-                                <Phone className="w-3 h-3 text-slate-400" /> {ord.customer_phone}
-                              </span>
-                            )}
-                          </p>
-                        )}
-
-                        {ord.razorpay_payment_id && (
-                          <p className="text-[10px] font-mono text-emerald-700 font-bold">
-                            Payment / UTR Ref: {ord.razorpay_payment_id}
-                          </p>
-                        )}
-
-                        <p className="text-slate-600 leading-relaxed break-words">
-                          {ord.order_items
-                            ?.map((i) => `${i.quantity}× ${i.item_name}`)
-                            .join(', ')}
+                          {ord.customer_phone && (
+                            <span className="flex items-center gap-1">
+                              <Phone className="w-3 h-3 text-slate-400" />{" "}
+                              {ord.customer_phone}
+                            </span>
+                          )}
                         </p>
-                      </div>
+                      )}
 
-                      <div className="flex flex-col items-end gap-1 shrink-0">
-                        <span className="font-extrabold text-slate-900 text-sm">
-                          ₹{ord.total_amount}
-                        </span>
-                        <span
-                          className={`uppercase text-[9px] font-extrabold px-2 py-0.5 rounded-md ${
-                            (ord.payment_method || '').toLowerCase() === 'upi'
-                              ? 'bg-blue-50 text-blue-700'
-                              : 'bg-emerald-50 text-emerald-700'
-                          }`}
-                        >
-                          {ord.payment_method || 'CASH'}
-                        </span>
-                      </div>
+                      {ord.razorpay_payment_id && (
+                        <p className="text-[10px] font-mono text-emerald-700 font-bold">
+                          Payment / UTR Ref: {ord.razorpay_payment_id}
+                        </p>
+                      )}
+
+                      <p className="text-slate-600 leading-relaxed break-words">
+                        {ord.order_items
+                          ?.map((i) => `${i.quantity}× ${i.item_name}`)
+                          .join(", ")}
+                      </p>
                     </div>
-                  );
-                })
+
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <span className="font-extrabold text-slate-900 text-sm">
+                        ₹{ord.total_amount}
+                      </span>
+                      <span
+                        className={`uppercase text-[9px] font-extrabold px-2 py-0.5 rounded-md ${
+                          (ord.payment_method || "").toLowerCase() === "upi"
+                            ? "bg-blue-50 text-blue-700"
+                            : "bg-emerald-50 text-emerald-700"
+                        }`}
+                      >
+                        {ord.payment_method || "CASH"}
+                      </span>
+                    </div>
+                  </div>
+                ))
               )}
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Master Password Modal */}
-      {isOwner && showMasterPassModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-[1000]">
-          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-10 h-10 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center">
-                  <KeyRound className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-extrabold text-slate-900">
-                    {isForgotMasterPass
-                      ? 'Reset Master Password'
-                      : isSettingFirstMasterPass
-                      ? 'Set Owner Master Password'
-                      : 'Owner Master Password'}
-                  </h3>
-                  <p className="text-[11px] text-slate-500">
-                    {isForgotMasterPass
-                      ? 'Verify registered owner mobile to set a new password'
-                      : isSettingFirstMasterPass
-                      ? 'Create a master password for owner sales & outlet controls'
-                      : 'Enter master password to unlock owner view & outlet controls'}
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowMasterPassModal(false);
-                  setIsForgotMasterPass(false);
-                  setMasterPassError('');
-                }}
-                className="p-1.5 rounded-full hover:bg-slate-100 text-slate-500"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {!isForgotMasterPass ? (
-              <form onSubmit={handleVerifyOrSetMasterPass} className="space-y-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    {isSettingFirstMasterPass
-                      ? 'Create Master Password (min 4 chars)'
-                      : 'Master Password'}
-                  </label>
-                  <input
-                    type="password"
-                    autoFocus
-                    value={masterPassInput}
-                    onChange={(e) => {
-                      setMasterPassInput(e.target.value);
-                      setMasterPassError('');
-                    }}
-                    placeholder="Enter owner master password"
-                    className="w-full px-3.5 py-2.5 bg-slate-50 focus:bg-white border border-slate-300 focus:border-orange-500 rounded-xl text-sm font-bold outline-none"
-                  />
-                </div>
-
-                {masterPassError && (
-                  <p className="text-xs font-bold text-red-600 bg-red-50 px-3 py-2 rounded-xl">
-                    {masterPassError}
-                  </p>
-                )}
-
-                <button
-                  type="submit"
-                  className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-3 rounded-xl text-xs shadow-sm transition"
-                >
-                  {isSettingFirstMasterPass
-                    ? 'Save & Unlock Owner View'
-                    : 'Unlock Owner View'}
-                </button>
-
-                {!isSettingFirstMasterPass && (
-                  <div className="text-center pt-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsForgotMasterPass(true);
-                        setMasterRecoveryPhone('');
-                        setNewMasterPassInput('');
-                        setMasterPassError('');
-                      }}
-                      className="text-xs font-bold text-slate-500 hover:text-orange-600 transition"
-                    >
-                      Forgot Master Password? Reset Here &rarr;
-                    </button>
-                  </div>
-                )}
-              </form>
-            ) : (
-              <form onSubmit={handleResetMasterPass} className="space-y-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Registered Owner Mobile Number
-                  </label>
-                  <input
-                    type="tel"
-                    inputMode="numeric"
-                    maxLength={10}
-                    autoFocus
-                    value={masterRecoveryPhone}
-                    onChange={(e) => {
-                      setMasterRecoveryPhone(e.target.value.replace(/\D/g, '').slice(0, 10));
-                      setMasterPassError('');
-                    }}
-                    placeholder="10-digit mobile number"
-                    className="w-full px-3.5 py-2.5 bg-slate-50 focus:bg-white border border-slate-300 focus:border-orange-500 rounded-xl text-sm font-bold outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    New Master Password (min 4 chars)
-                  </label>
-                  <input
-                    type="password"
-                    value={newMasterPassInput}
-                    onChange={(e) => {
-                      setNewMasterPassInput(e.target.value);
-                      setMasterPassError('');
-                    }}
-                    placeholder="Set new master password"
-                    className="w-full px-3.5 py-2.5 bg-slate-50 focus:bg-white border border-slate-300 focus:border-orange-500 rounded-xl text-sm font-bold outline-none"
-                  />
-                </div>
-
-                {masterPassError && (
-                  <p className="text-xs font-bold text-red-600 bg-red-50 px-3 py-2 rounded-xl">
-                    {masterPassError}
-                  </p>
-                )}
-
-                <button
-                  type="submit"
-                  className="w-full bg-slate-900 hover:bg-slate-800 text-white font-extrabold py-3 rounded-xl text-xs shadow-sm transition"
-                >
-                  Verify & Set New Master Password
-                </button>
-
-                <div className="text-center pt-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsForgotMasterPass(false);
-                      setMasterPassError('');
-                    }}
-                    className="text-xs font-bold text-slate-500 hover:text-slate-800 transition"
-                  >
-                    &larr; Back to Master Password
-                  </button>
-                </div>
-              </form>
-            )}
           </div>
         </div>
       )}
@@ -2787,7 +2874,7 @@ export default function DashboardPage() {
                   Table {selectedTableModal}
                 </h3>
                 <p className="text-xs text-slate-500">
-                  {primaryTableGuest ? `${primaryTableGuest} • ` : ''}
+                  {primaryTableGuest ? `${primaryTableGuest} • ` : ""}
                   {modalTableOrders.length} KOT(s) running
                 </p>
               </div>
@@ -2822,7 +2909,11 @@ export default function DashboardPage() {
                       Consolidated Table Bill
                     </span>
                     <span className="text-[11px] font-bold text-slate-600">
-                      {consolidatedTableItems.reduce((s, i) => s + i.quantity, 0)} Items
+                      {consolidatedTableItems.reduce(
+                        (s, i) => s + i.quantity,
+                        0,
+                      )}{" "}
+                      Items
                     </span>
                   </div>
 
@@ -2833,11 +2924,13 @@ export default function DashboardPage() {
                         className="flex items-center justify-between text-xs text-slate-800"
                       >
                         <span>
-                          <strong className="text-slate-900">{item.quantity}×</strong>{' '}
+                          <strong className="text-slate-900">
+                            {item.quantity}×
+                          </strong>{" "}
                           {item.item_name}
                           {item.notes.length > 0 && (
                             <span className="text-[11px] text-orange-600 ml-1">
-                              ({item.notes.join(', ')})
+                              ({item.notes.join(", ")})
                             </span>
                           )}
                         </span>
@@ -2855,7 +2948,7 @@ export default function DashboardPage() {
                   </p>
 
                   {modalTableOrders.map((ord, index) => {
-                    const isPaid = ord.payment_status === 'paid';
+                    const isPaid = ord.payment_status === "paid";
 
                     return (
                       <div
@@ -2881,31 +2974,31 @@ export default function DashboardPage() {
                           <p className="text-[11px] text-slate-600 truncate mt-0.5">
                             {ord.order_items
                               ?.map((i) => `${i.quantity}× ${i.item_name}`)
-                              .join(', ')}
+                              .join(", ")}
                           </p>
                         </div>
 
                         <div className="flex items-center gap-1.5 shrink-0">
                           <span
                             className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full flex items-center gap-1 ${
-                              ord.status === 'ready'
-                                ? 'bg-emerald-100 text-emerald-700'
-                                : ord.status === 'served'
-                                ? 'bg-blue-100 text-blue-700'
-                                : ord.status === 'preparing'
-                                ? 'bg-purple-100 text-purple-700'
-                                : 'bg-amber-100 text-amber-800'
+                              ord.status === "ready"
+                                ? "bg-emerald-100 text-emerald-700"
+                                : ord.status === "served"
+                                  ? "bg-blue-100 text-blue-700"
+                                  : ord.status === "preparing"
+                                    ? "bg-purple-100 text-purple-700"
+                                    : "bg-amber-100 text-amber-800"
                             }`}
                           >
-                            {ord.status === 'ready' ? (
+                            {ord.status === "ready" ? (
                               <>
                                 <CheckCircle2 className="w-3 h-3" /> Ready
                               </>
-                            ) : ord.status === 'served' ? (
+                            ) : ord.status === "served" ? (
                               <>
                                 <CheckCircle2 className="w-3 h-3" /> Served
                               </>
-                            ) : ord.status === 'preparing' ? (
+                            ) : ord.status === "preparing" ? (
                               <>
                                 <ChefHat className="w-3 h-3" /> Cooking
                               </>
@@ -2916,7 +3009,7 @@ export default function DashboardPage() {
                             )}
                           </span>
 
-                          {ord.status === 'ready' && (
+                          {ord.status === "ready" && (
                             <button
                               type="button"
                               onClick={() => handleMarkServed(ord.id)}
@@ -2943,17 +3036,20 @@ export default function DashboardPage() {
                 {isModalTableFullyPaid ? (
                   <div className="space-y-2.5">
                     <div className="bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-xl p-2.5 text-center text-xs font-extrabold">
-                      ✓ UPI Payment Marked Paid • Clear table only after guest leaves
+                      ✓ UPI Payment Marked Paid • Clear table only after guest
+                      leaves
                     </div>
                     <button
                       type="button"
                       disabled={settling}
-                      onClick={() => handleSettleTable(selectedTableModal, 'upi')}
+                      onClick={() =>
+                        handleSettleTable(selectedTableModal, "upi")
+                      }
                       className="w-full bg-blue-600 hover:bg-blue-700 text-white font-extrabold py-3 rounded-xl text-xs transition"
                     >
                       {settling
-                        ? 'Clearing Table...'
-                        : 'Guest Left • Free Table ✓'}
+                        ? "Clearing Table..."
+                        : "Guest Left • Free Table ✓"}
                     </button>
                   </div>
                 ) : (
@@ -2961,7 +3057,9 @@ export default function DashboardPage() {
                     <button
                       type="button"
                       disabled={settling}
-                      onClick={() => handleSettleTable(selectedTableModal, 'cash')}
+                      onClick={() =>
+                        handleSettleTable(selectedTableModal, "cash")
+                      }
                       className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-3 rounded-xl text-xs transition"
                     >
                       Settle Cash ₹{modalTableTotal}
@@ -2969,7 +3067,9 @@ export default function DashboardPage() {
                     <button
                       type="button"
                       disabled={settling}
-                      onClick={() => handleSettleTable(selectedTableModal, 'upi')}
+                      onClick={() =>
+                        handleSettleTable(selectedTableModal, "upi")
+                      }
                       className="bg-slate-900 hover:bg-slate-800 text-white font-extrabold py-3 rounded-xl text-xs transition"
                     >
                       Settle UPI ₹{modalTableTotal}
@@ -3005,7 +3105,9 @@ export default function DashboardPage() {
 
             <div className="flex-1 overflow-y-auto overscroll-contain py-3 divide-y divide-slate-100">
               {loadingStock ? (
-                <p className="text-xs text-slate-500 text-center py-8">Loading menu items...</p>
+                <p className="text-xs text-slate-500 text-center py-8">
+                  Loading menu items...
+                </p>
               ) : stockItems.length === 0 ? (
                 <p className="text-xs text-slate-500 text-center py-8">
                   No menu items added yet.
@@ -3017,8 +3119,12 @@ export default function DashboardPage() {
                     className="py-3 flex items-center justify-between gap-3"
                   >
                     <div>
-                      <p className="text-sm font-bold text-slate-900">{item.name}</p>
-                      <p className="text-[11px] text-slate-400">{item.category}</p>
+                      <p className="text-sm font-bold text-slate-900">
+                        {item.name}
+                      </p>
+                      <p className="text-[11px] text-slate-400">
+                        {item.category}
+                      </p>
                     </div>
 
                     <button
@@ -3026,11 +3132,11 @@ export default function DashboardPage() {
                       onClick={() => handleToggleStock(item)}
                       className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition ${
                         item.is_available
-                          ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
-                          : 'bg-red-100 text-red-700 hover:bg-red-200'
+                          ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                          : "bg-red-100 text-red-700 hover:bg-red-200"
                       }`}
                     >
-                      {item.is_available ? 'In Stock ✓' : 'Sold Out ✕'}
+                      {item.is_available ? "In Stock ✓" : "Sold Out ✕"}
                     </button>
                   </div>
                 ))
@@ -3052,14 +3158,14 @@ export default function DashboardPage() {
                 Session Expired (1 Hour Inactive)
               </h3>
               <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                For your security, you were automatically logged out from the Owner Dashboard after
-                1 hour of inactivity.
+                For your security, you were automatically logged out from the
+                Owner Dashboard after 1 hour of inactivity.
               </p>
             </div>
 
             <button
               type="button"
-              onClick={() => router.push('/')}
+              onClick={() => router.push("/")}
               className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-3 rounded-xl text-xs shadow-sm transition"
             >
               Login Again &rarr;
@@ -3072,7 +3178,7 @@ export default function DashboardPage() {
         open={sessionReplaced}
         role="owner"
         onComplete={() => {
-          window.location.replace('/');
+          window.location.replace("/");
         }}
       />
     </div>
