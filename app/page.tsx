@@ -23,6 +23,8 @@ import {
   Check,
   Sparkles,
   Store,
+  AlertTriangle,
+  Crown,
 } from 'lucide-react';
 
 interface Restaurant {
@@ -48,6 +50,7 @@ interface PricingPlan {
   perMonth?: string;
   amount: number;
   durationDays: number;
+  maxOutlets: number | null; // null = Unlimited
   badge: string | null;
   popular: boolean;
   features: string[];
@@ -62,6 +65,7 @@ const SINGLE_OUTLET_PLANS: PricingPlan[] = [
     perMonth: '₹599 / month',
     amount: 599,
     durationDays: 30,
+    maxOutlets: 1,
     badge: null,
     popular: false,
     features: [
@@ -79,6 +83,7 @@ const SINGLE_OUTLET_PLANS: PricingPlan[] = [
     perMonth: '₹566 / month',
     amount: 1699,
     durationDays: 90,
+    maxOutlets: 1,
     badge: 'Save ₹98',
     popular: false,
     features: [
@@ -96,6 +101,7 @@ const SINGLE_OUTLET_PLANS: PricingPlan[] = [
     perMonth: '₹550 / month',
     amount: 3299,
     durationDays: 180,
+    maxOutlets: 1,
     badge: 'Save ₹295',
     popular: false,
     features: [
@@ -113,6 +119,7 @@ const SINGLE_OUTLET_PLANS: PricingPlan[] = [
     perMonth: '₹458 / month',
     amount: 5499,
     durationDays: 365,
+    maxOutlets: 1,
     badge: 'Save ₹1,689',
     popular: true,
     features: [
@@ -130,6 +137,7 @@ const SINGLE_OUTLET_PLANS: PricingPlan[] = [
     perMonth: 'Pay once, use forever',
     amount: 19999,
     durationDays: 36500,
+    maxOutlets: 1,
     badge: 'Zero Renewal',
     popular: false,
     features: [
@@ -141,7 +149,6 @@ const SINGLE_OUTLET_PLANS: PricingPlan[] = [
   },
 ];
 
-// Same 5 durations as Single Outlet, priced ~7% below reference tiers with distinct multi-outlet features
 const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
   {
     id: 'multi_1_month',
@@ -149,8 +156,9 @@ const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
     subtitle: 'Up to 2 Outlets • Monthly',
     price: '₹1,115',
     perMonth: '₹1,115 / month',
-    amount: 1,
+    amount: 1115,
     durationDays: 30,
+    maxOutlets: 2,
     badge: '7% Below Market',
     popular: false,
     features: [
@@ -166,8 +174,9 @@ const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
     subtitle: 'Up to 5 Outlets • Quarterly',
     price: '₹11,159',
     perMonth: '₹3,720 / month',
-    amount: 2,
+    amount: 11159,
     durationDays: 90,
+    maxOutlets: 5,
     badge: '7% Below ₹12k Tier',
     popular: false,
     features: [
@@ -183,8 +192,9 @@ const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
     subtitle: 'Up to 8 Outlets • Half-Yearly',
     price: '₹18,599',
     perMonth: '₹3,100 / month',
-    amount: 3,
+    amount: 18599,
     durationDays: 180,
+    maxOutlets: 8,
     badge: '7% Below ₹20k Tier',
     popular: false,
     features: [
@@ -200,8 +210,9 @@ const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
     subtitle: 'Up to 15 Outlets • 12 Months',
     price: '₹27,899',
     perMonth: '₹2,325 / month',
-    amount: 4,
+    amount: 27899,
     durationDays: 365,
+    maxOutlets: 15,
     badge: '7% Below ₹30k Tier',
     popular: true,
     features: [
@@ -217,8 +228,9 @@ const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
     subtitle: 'Unlimited Outlets • One-Time',
     price: '₹37,199',
     perMonth: 'Pay once, use forever',
-    amount: 5,
+    amount: 37199,
     durationDays: 36500,
+    maxOutlets: null,
     badge: '7% Below ₹40k Tier',
     popular: false,
     features: [
@@ -229,6 +241,21 @@ const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
     ],
   },
 ];
+
+function getPlanMaxOutlets(
+  planId: string,
+  planLabel: string,
+  mode: OutletTabMode
+): number | null {
+  const allPlans = [...SINGLE_OUTLET_PLANS, ...MULTIPLE_OUTLET_PLANS];
+  const matched = allPlans.find(
+    (p) =>
+      p.id === planId ||
+      planLabel.toLowerCase().includes(`${p.duration.toLowerCase()} (${p.price.toLowerCase()})`)
+  );
+  if (matched) return matched.maxOutlets;
+  return mode === 'multiple' ? 2 : 1;
+}
 
 function formatRestaurantDisplayName(rest: Restaurant): string {
   const label = rest.outlet_label?.trim();
@@ -255,8 +282,24 @@ export default function HomePage() {
     planLabel: string;
     outletMode: OutletTabMode;
     durationDays: number;
+    maxOutlets: number | null;
     paymentId?: string;
   } | null>(null);
+
+  // Outlet Limit Exceeded Dialog State (Shown before payment/registration if limit reached)
+  const [limitDialog, setLimitDialog] = useState<{
+    open: boolean;
+    phone: string;
+    existingCount: number;
+    maxOutlets: number;
+    planLabel: string;
+  }>({
+    open: false,
+    phone: '',
+    existingCount: 0,
+    maxOutlets: 2,
+    planLabel: '1 Month (₹1,115)',
+  });
 
   // PIN Login Modal States
   const [selectedRestaurant, setSelectedRestaurant] = useState<Restaurant | null>(null);
@@ -274,7 +317,10 @@ export default function HomePage() {
 
   // Register Restaurant Modal States
   const [showRegisterModal, setShowRegisterModal] = useState(false);
+  const [selectedPlanId, setSelectedPlanId] = useState<string>('yearly');
   const [selectedPlanLabel, setSelectedPlanLabel] = useState<string>('Yearly (₹5,499)');
+  const [selectedPlanDays, setSelectedPlanDays] = useState<number>(365);
+  const [selectedPlanAmount, setSelectedPlanAmount] = useState<number>(5499);
   const [outletMode, setOutletMode] = useState<OutletTabMode>('single');
   const [outletLabel, setOutletLabel] = useState('');
   const [regName, setRegName] = useState('');
@@ -319,6 +365,47 @@ export default function HomePage() {
 
     fetchRestaurants();
   }, []);
+
+  // Checks existing outlet count for a phone number before starting payment or registration
+  const checkOutletLimitBeforeProceed = async (
+    phoneDigits: string,
+    mode: OutletTabMode,
+    planId: string,
+    planLabel: string
+  ): Promise<boolean> => {
+    if (mode !== 'multiple') return true;
+
+    const maxOutlets = getPlanMaxOutlets(planId, planLabel, mode);
+    if (maxOutlets === null) return true; // Unlimited plan
+
+    const cleanPhone = phoneDigits.replace(/\D/g, '');
+    if (cleanPhone.length !== 10) return true;
+
+    const { data, error } = await supabase
+      .from('restaurants')
+      .select('id')
+      .eq('owner_phone', cleanPhone);
+
+    const dbCount = !error && Array.isArray(data) ? data.length : 0;
+    const localCount = restaurants.filter(
+      (r) => (r.owner_phone || '').replace(/\D/g, '') === cleanPhone
+    ).length;
+    const existingCount = Math.max(dbCount, localCount);
+
+    // Adding 1 new outlet would make total = existingCount + 1
+    if (existingCount + 1 > maxOutlets) {
+      setLimitDialog({
+        open: true,
+        phone: cleanPhone,
+        existingCount,
+        maxOutlets,
+        planLabel,
+      });
+      return false;
+    }
+
+    return true;
+  };
 
   const handleOpenPinModal = (rest: Restaurant) => {
     setSelectedRestaurant(rest);
@@ -480,18 +567,21 @@ export default function HomePage() {
     });
   };
 
-  const handlePayAndSelectPlan = async (plan: PricingPlan, mode: OutletTabMode) => {
-    setPlanErrorMsg(null);
-    setPlanBannerMsg(null);
-    setPayingPlanId(plan.id);
-
+  const initiateRazorpayCheckout = async (params: {
+    plan: PricingPlan;
+    mode: OutletTabMode;
+    phone?: string;
+    onSuccess: (paymentId?: string) => void;
+    onFinally: () => void;
+  }) => {
+    const { plan, mode, phone, onSuccess, onFinally } = params;
     const label = `${plan.duration} (${plan.price})`;
 
     try {
       const loaded = await loadRazorpayScript();
       if (!loaded) {
         setPlanErrorMsg('Unable to load Razorpay gateway. Please check your connection.');
-        setPayingPlanId(null);
+        onFinally();
         return;
       }
 
@@ -503,13 +593,14 @@ export default function HomePage() {
           planId: plan.id,
           planName: plan.duration,
           outletMode: mode,
+          ownerPhone: phone || undefined,
         }),
       });
 
       const orderData = await res.json();
       if (!res.ok || !orderData.orderId) {
         setPlanErrorMsg(orderData.error || 'Unable to initiate subscription payment.');
-        setPayingPlanId(null);
+        onFinally();
         return;
       }
 
@@ -531,33 +622,18 @@ export default function HomePage() {
             planLabel: label,
             outletMode: mode,
             durationDays: plan.durationDays,
+            maxOutlets: plan.maxOutlets,
             paymentId: response?.razorpay_payment_id,
           };
 
           setVerifiedPlanCheckout(verified);
           localStorage.setItem('restro_selected_plan', JSON.stringify(verified));
-          setPayingPlanId(null);
-          setPlanBannerMsg(
-            `${label} (${
-              mode === 'multiple' ? 'Multiple Outlets' : 'Single Outlet'
-            }) payment verified! Complete registration to launch your outlet.`
-          );
-
-          setSelectedPlanLabel(label);
-          setOutletMode(mode);
-          setOutletLabel('');
-          setRegName('');
-          setRegCity('');
-          setRegPhone('');
-          setRegTables(10);
-          setRegOwnerPin('');
-          setRegStaffPin('');
-          setRegError('');
-          setShowRegisterModal(true);
+          onFinally();
+          onSuccess(response?.razorpay_payment_id);
         },
         modal: {
           ondismiss: function () {
-            setPayingPlanId(null);
+            onFinally();
           },
         },
       };
@@ -569,15 +645,67 @@ export default function HomePage() {
       rzp.open();
     } catch {
       setPlanErrorMsg('Something went wrong while opening Razorpay.');
-      setPayingPlanId(null);
+      onFinally();
     }
+  };
+
+  const handlePayAndSelectPlan = async (plan: PricingPlan, mode: OutletTabMode) => {
+    setPlanErrorMsg(null);
+    setPlanBannerMsg(null);
+    setPayingPlanId(plan.id);
+
+    const label = `${plan.duration} (${plan.price})`;
+
+    // If a phone number is already entered in the register modal, check limit before opening Razorpay
+    const cleanPhone = regPhone.replace(/\D/g, '');
+    if (cleanPhone.length === 10) {
+      const allowed = await checkOutletLimitBeforeProceed(cleanPhone, mode, plan.id, label);
+      if (!allowed) {
+        setPayingPlanId(null);
+        return;
+      }
+    }
+
+    await initiateRazorpayCheckout({
+      plan,
+      mode,
+      phone: cleanPhone.length === 10 ? cleanPhone : undefined,
+      onFinally: () => setPayingPlanId(null),
+      onSuccess: () => {
+        setPlanBannerMsg(
+          `${label} (${
+            mode === 'multiple' ? 'Multiple Outlets' : 'Single Outlet'
+          }) payment verified! Complete registration to launch your outlet.`
+        );
+
+        setSelectedPlanId(plan.id);
+        setSelectedPlanLabel(label);
+        setSelectedPlanDays(plan.durationDays);
+        setSelectedPlanAmount(plan.amount);
+        setOutletMode(mode);
+        setOutletLabel('');
+        setRegName('');
+        setRegCity('');
+        setRegTables(10);
+        setRegOwnerPin('');
+        setRegStaffPin('');
+        setRegError('');
+        setShowRegisterModal(true);
+      },
+    });
   };
 
   const handleOpenRegisterModal = (
     planName = 'Yearly (₹5,499)',
-    mode: OutletTabMode = 'single'
+    mode: OutletTabMode = 'single',
+    planId = 'yearly',
+    durationDays = 365,
+    amount = 5499
   ) => {
+    setSelectedPlanId(planId);
     setSelectedPlanLabel(planName);
+    setSelectedPlanDays(durationDays);
+    setSelectedPlanAmount(amount);
     setOutletMode(mode);
     setOutletLabel('');
     setRegName('');
@@ -590,45 +718,20 @@ export default function HomePage() {
     setShowRegisterModal(true);
   };
 
-  const handleRegisterRestaurant = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setRegError('');
-
-    const cleanPhone = regPhone.replace(/\D/g, '');
-    const cleanOutletLabel = outletLabel.trim();
-
-    if (!regName.trim() || !regCity.trim()) {
-      setRegError('Restaurant name and city are required.');
-      return;
-    }
-    if (outletMode === 'multiple' && !cleanOutletLabel) {
-      setRegError('Please enter the Outlet / Location Name for multiple outlets.');
-      return;
-    }
-    if (cleanPhone.length !== 10) {
-      setRegError('Please enter a valid 10-digit Owner Mobile Number.');
-      return;
-    }
-    if (regOwnerPin.length !== 6) {
-      setRegError('Setting a 6-digit Owner PIN is required.');
-      return;
-    }
-    if (regStaffPin && regStaffPin.length !== 6) {
-      setRegError('Staff PIN must also be 6 digits (or left blank).');
-      return;
-    }
-
+  const completeRestaurantInsertion = async (
+    cleanPhone: string,
+    cleanOutletLabel: string,
+    isPaidForThisPlan: boolean
+  ) => {
     setRegistering(true);
 
     const finalTables = regTables > 0 ? regTables : 10;
-    const isPaidForThisPlan =
-      verifiedPlanCheckout &&
-      verifiedPlanCheckout.planLabel === selectedPlanLabel &&
-      verifiedPlanCheckout.outletMode === outletMode;
-
     const expiryDate = new Date();
     expiryDate.setDate(
-      expiryDate.getDate() + (isPaidForThisPlan ? verifiedPlanCheckout.durationDays : 14)
+      expiryDate.getDate() +
+        (isPaidForThisPlan && verifiedPlanCheckout
+          ? verifiedPlanCheckout.durationDays
+          : selectedPlanDays || 14)
     );
 
     const basePayload = {
@@ -640,6 +743,7 @@ export default function HomePage() {
       owner_pin: regOwnerPin,
       staff_pin: regStaffPin || null,
       subscription_status: isPaidForThisPlan ? 'active' : 'free_trial',
+      plan_type: selectedPlanId,
       selected_plan: selectedPlanLabel,
       trial_ends_at: expiryDate.toISOString(),
     };
@@ -711,6 +815,95 @@ export default function HomePage() {
     );
 
     router.push('/dashboard');
+  };
+
+  const handleRegisterRestaurant = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRegError('');
+
+    const cleanPhone = regPhone.replace(/\D/g, '');
+    const cleanOutletLabel = outletLabel.trim();
+
+    if (!regName.trim() || !regCity.trim()) {
+      setRegError('Restaurant name and city are required.');
+      return;
+    }
+    if (outletMode === 'multiple' && !cleanOutletLabel) {
+      setRegError('Please enter the Outlet / Location Name for multiple outlets.');
+      return;
+    }
+    if (cleanPhone.length !== 10) {
+      setRegError('Please enter a valid 10-digit Owner Mobile Number.');
+      return;
+    }
+    if (regOwnerPin.length !== 6) {
+      setRegError('Setting a 6-digit Owner PIN is required.');
+      return;
+    }
+    if (regStaffPin && regStaffPin.length !== 6) {
+      setRegError('Staff PIN must also be 6 digits (or left blank).');
+      return;
+    }
+
+    // 1. Check outlet count for this mobile number BEFORE payment or registration
+    setRegistering(true);
+    const allowed = await checkOutletLimitBeforeProceed(
+      cleanPhone,
+      outletMode,
+      selectedPlanId,
+      selectedPlanLabel
+    );
+    setRegistering(false);
+
+    if (!allowed) {
+      const maxOut = getPlanMaxOutlets(selectedPlanId, selectedPlanLabel, outletMode);
+      setRegError(
+        `Outlet limit reached for ${cleanPhone}! This plan allows up to ${maxOut} outlet${
+          maxOut === 1 ? '' : 's'
+        }.`
+      );
+      return;
+    }
+
+    const isPaidForThisPlan = Boolean(
+      verifiedPlanCheckout &&
+        verifiedPlanCheckout.planLabel === selectedPlanLabel &&
+        verifiedPlanCheckout.outletMode === outletMode
+    );
+
+    // 2. If user clicked "Pay & Register" from pricing card, complete Razorpay payment first
+    const shouldPayNow =
+      selectedPlanLabel.includes('Pay ') ||
+      (outletMode === 'multiple' && !isPaidForThisPlan && !selectedPlanLabel.startsWith('Trial'));
+
+    if (shouldPayNow && !isPaidForThisPlan && selectedPlanAmount > 0) {
+      const planObj: PricingPlan = {
+        id: selectedPlanId,
+        duration: selectedPlanLabel.split(' (')[0],
+        subtitle: '',
+        price: `₹${selectedPlanAmount.toLocaleString('en-IN')}`,
+        amount: selectedPlanAmount,
+        durationDays: selectedPlanDays,
+        maxOutlets: getPlanMaxOutlets(selectedPlanId, selectedPlanLabel, outletMode),
+        badge: null,
+        popular: false,
+        features: [],
+      };
+
+      setRegistering(true);
+      await initiateRazorpayCheckout({
+        plan: planObj,
+        mode: outletMode,
+        phone: cleanPhone,
+        onFinally: () => setRegistering(false),
+        onSuccess: async () => {
+          await completeRestaurantInsertion(cleanPhone, cleanOutletLabel, true);
+        },
+      });
+      return;
+    }
+
+    await completeRestaurantInsertion(cleanPhone, cleanOutletLabel, isPaidForThisPlan);
   };
 
   const filteredRestaurants = restaurants.filter((r) => {
@@ -1036,14 +1229,20 @@ export default function HomePage() {
                       }`}
                     >
                       {payingPlanId === plan.id
-                        ? 'Opening Payment...'
+                        ? 'Checking & Opening...'
                         : `Pay ${plan.price} & Register →`}
                     </button>
 
                     <button
                       type="button"
                       onClick={() =>
-                        handleOpenRegisterModal(`${plan.duration} (${plan.price})`, pricingTab)
+                        handleOpenRegisterModal(
+                          `Trial • ${plan.duration} (${plan.price})`,
+                          pricingTab,
+                          plan.id,
+                          plan.durationDays,
+                          plan.amount
+                        )
                       }
                       className={`w-full py-1.5 rounded-xl text-[11px] font-bold transition ${
                         plan.popular
@@ -1078,7 +1277,7 @@ export default function HomePage() {
                 {verifiedPlanCheckout?.planLabel === selectedPlanLabel &&
                 verifiedPlanCheckout?.outletMode === outletMode
                   ? `Paid & Active • ${selectedPlanLabel}`
-                  : `14-Day Trial • ${selectedPlanLabel}`}
+                  : selectedPlanLabel}
               </span>
               <h3 className="text-xl font-extrabold text-slate-900">Register Restaurant</h3>
               <p className="text-xs text-slate-500 mt-0.5">
@@ -1097,6 +1296,7 @@ export default function HomePage() {
                     onClick={() => {
                       setOutletMode('single');
                       setOutletLabel('');
+                      setRegError('');
                     }}
                     className={`py-2.5 px-3 rounded-xl border text-xs font-extrabold transition ${
                       outletMode === 'single'
@@ -1108,7 +1308,10 @@ export default function HomePage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setOutletMode('multiple')}
+                    onClick={() => {
+                      setOutletMode('multiple');
+                      setRegError('');
+                    }}
                     className={`py-2.5 px-3 rounded-xl border text-xs font-extrabold transition ${
                       outletMode === 'multiple'
                         ? 'bg-orange-50 border-orange-500 text-orange-700'
@@ -1183,9 +1386,10 @@ export default function HomePage() {
                     maxLength={10}
                     required
                     value={regPhone}
-                    onChange={(e) =>
-                      setRegPhone(e.target.value.replace(/\D/g, '').slice(0, 10))
-                    }
+                    onChange={(e) => {
+                      setRegPhone(e.target.value.replace(/\D/g, '').slice(0, 10));
+                      setRegError('');
+                    }}
                     placeholder="10-digit mobile number"
                     className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
                   />
@@ -1266,9 +1470,58 @@ export default function HomePage() {
                 disabled={registering}
                 className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-orange-300 text-white font-extrabold py-3.5 rounded-2xl text-sm shadow-md transition"
               >
-                {registering ? 'Creating Restaurant...' : 'Create Restaurant & Launch POS →'}
+                {registering
+                  ? 'Checking Limit & Processing...'
+                  : 'Create Restaurant & Launch POS →'}
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Outlet Limit Exceeded Dialog (Shown Before Payment / Registration) */}
+      {limitDialog.open && (
+        <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-red-200 text-center space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center mx-auto">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+
+            <div>
+              <h3 className="text-lg font-extrabold text-slate-900">
+                Outlet Limit Exceeded for This Number
+              </h3>
+              <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
+                Mobile number <strong>{limitDialog.phone}</strong> already has{' '}
+                <strong>{limitDialog.existingCount}</strong> outlet(s). Selected plan{' '}
+                <strong>{limitDialog.planLabel}</strong> allows up to{' '}
+                <strong>{limitDialog.maxOutlets}</strong> outlet(s), so adding another outlet is
+                not allowed without upgrading.
+              </p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => setLimitDialog((prev) => ({ ...prev, open: false }))}
+                className="flex-1 py-2.5 px-4 rounded-xl border border-slate-200 text-xs font-extrabold text-slate-700 hover:bg-slate-50 transition"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setLimitDialog((prev) => ({ ...prev, open: false }));
+                  setShowRegisterModal(false);
+                  setPricingTab('multiple');
+                  document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' });
+                }}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-extrabold flex items-center justify-center gap-1.5 shadow-sm transition"
+              >
+                <Crown className="w-3.5 h-3.5" />
+                <span>Choose Higher Outlet Plan</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
