@@ -45,6 +45,7 @@ interface PricingPlan {
   duration: string;
   subtitle: string;
   price: string;
+  perMonth?: string;
   amount: number;
   durationDays: number;
   badge: string | null;
@@ -58,6 +59,7 @@ const SINGLE_OUTLET_PLANS: PricingPlan[] = [
     duration: '1 Month',
     subtitle: 'Starter Monthly',
     price: '₹599',
+    perMonth: '₹599 / month',
     amount: 599,
     durationDays: 30,
     badge: null,
@@ -74,6 +76,7 @@ const SINGLE_OUTLET_PLANS: PricingPlan[] = [
     duration: '3 Months',
     subtitle: 'Quarterly Plan',
     price: '₹1,699',
+    perMonth: '₹566 / month',
     amount: 1699,
     durationDays: 90,
     badge: 'Save ₹98',
@@ -90,6 +93,7 @@ const SINGLE_OUTLET_PLANS: PricingPlan[] = [
     duration: '6 Months',
     subtitle: 'Half-Yearly Plan',
     price: '₹3,299',
+    perMonth: '₹550 / month',
     amount: 3299,
     durationDays: 180,
     badge: 'Save ₹295',
@@ -106,6 +110,7 @@ const SINGLE_OUTLET_PLANS: PricingPlan[] = [
     duration: 'Yearly',
     subtitle: '12 Months Pro',
     price: '₹5,499',
+    perMonth: '₹458 / month',
     amount: 5499,
     durationDays: 365,
     badge: 'Save ₹1,689',
@@ -122,6 +127,7 @@ const SINGLE_OUTLET_PLANS: PricingPlan[] = [
     duration: 'Lifetime',
     subtitle: 'One-Time Payment',
     price: '₹19,999',
+    perMonth: 'Pay once, use forever',
     amount: 19999,
     durationDays: 36500,
     badge: 'Zero Renewal',
@@ -135,12 +141,14 @@ const SINGLE_OUTLET_PLANS: PricingPlan[] = [
   },
 ];
 
+// Same 5 durations as Single Outlet, priced ~7% below reference tiers
 const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
   {
     id: 'multi_1_month',
     duration: '1 Month',
     subtitle: 'Multi-Outlet Monthly',
     price: '₹1,115',
+    perMonth: '₹1,115 / month',
     amount: 1115,
     durationDays: 30,
     badge: '7% Below Market',
@@ -157,6 +165,7 @@ const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
     duration: '3 Months',
     subtitle: 'Multi-Outlet Quarterly',
     price: '₹11,159',
+    perMonth: '₹3,720 / month',
     amount: 11159,
     durationDays: 90,
     badge: '7% Below ₹12k Tier',
@@ -173,6 +182,7 @@ const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
     duration: '6 Months',
     subtitle: 'Multi-Outlet Half-Yearly',
     price: '₹18,599',
+    perMonth: '₹3,100 / month',
     amount: 18599,
     durationDays: 180,
     badge: '7% Below ₹20k Tier',
@@ -189,6 +199,7 @@ const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
     duration: 'Yearly',
     subtitle: 'Multi-Outlet 12 Months',
     price: '₹27,899',
+    perMonth: '₹2,325 / month',
     amount: 27899,
     durationDays: 365,
     badge: '7% Below ₹30k Tier',
@@ -205,6 +216,7 @@ const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
     duration: 'Lifetime',
     subtitle: 'Multi-Outlet One-Time',
     price: '₹37,199',
+    perMonth: 'Pay once, use forever',
     amount: 37199,
     durationDays: 36500,
     badge: '7% Below ₹40k Tier',
@@ -938,11 +950,7 @@ export default function HomePage() {
             </div>
           )}
 
-          <div
-            className={`grid grid-cols-1 sm:grid-cols-2 ${
-              pricingTab === 'single' ? 'lg:grid-cols-4' : 'lg:grid-cols-4'
-            } gap-4`}
-          >
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             {displayedPlans.map((plan) => {
               const isLifetime = plan.id.includes('lifetime');
               return (
@@ -994,7 +1002,7 @@ export default function HomePage() {
                           plan.popular ? 'text-slate-400' : 'text-slate-500'
                         }`}
                       >
-                        {plan.perMonth}
+                        {plan.perMonth || `${plan.duration} Plan`}
                       </span>
                     </div>
 
