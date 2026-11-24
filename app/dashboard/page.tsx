@@ -107,6 +107,7 @@ interface MergedBillItem {
 }
 
 const ADMIN_WHATSAPP = '919079083101';
+const MASTER_PASS_STORAGE_KEY = 'restro_master_sales_password';
 
 const UPGRADE_PLANS = [
   {
@@ -181,6 +182,16 @@ export default function DashboardPage() {
   const [allOutletOrders, setAllOutletOrders] = useState<OrderRecord[]>([]);
   const [salesScope, setSalesScope] = useState<'current' | 'all_outlets'>('current');
   const [loading, setLoading] = useState(true);
+
+  // Master Password Lock for Combined Sales (resets when Bills & Sales modal closes)
+  const [combinedSalesUnlocked, setCombinedSalesUnlocked] = useState(false);
+  const [showMasterPassModal, setShowMasterPassModal] = useState(false);
+  const [masterPassInput, setMasterPassInput] = useState('');
+  const [masterPassError, setMasterPassError] = useState('');
+  const [isSettingFirstMasterPass, setIsSettingFirstMasterPass] = useState(false);
+  const [isForgotMasterPass, setIsForgotMasterPass] = useState(false);
+  const [masterRecoveryPhone, setMasterRecoveryPhone] = useState('');
+  const [newMasterPassInput, setNewMasterPassInput] = useState('');
 
   // Table Action Modal
   const [selectedTableModal, setSelectedTableModal] = useState<number | null>(null);
@@ -260,6 +271,7 @@ export default function DashboardPage() {
       showUpgradeModal ||
       showPaymentSettingsModal ||
       showStockModal ||
+      showMasterPassModal ||
       selectedTableModal !== null ||
       showInactivityModal ||
       sessionReplaced;
@@ -278,6 +290,7 @@ export default function DashboardPage() {
     showUpgradeModal,
     showPaymentSettingsModal,
     showStockModal,
+    showMasterPassModal,
     selectedTableModal,
     showInactivityModal,
     sessionReplaced,
@@ -437,7 +450,6 @@ export default function DashboardPage() {
     }));
     setOrders(currentOutletOrders);
 
-    // Owner-only: fetch other outlets owned by the same owner_phone for Combined & Outlet-wise Sales
     if (session.role === 'owner' && resolvedOwnerPhone) {
       const { data: siblingOutlets } = await supabase
         .from('restaurants')
@@ -492,6 +504,7 @@ export default function DashboardPage() {
     setAllOutletOrders([]);
     setOwnerOutlets([]);
     setSalesScope('current');
+    setCombinedSalesUnlocked(false);
 
     fetchDashboardData();
 
@@ -520,10 +533,104 @@ export default function DashboardPage() {
   }, [session?.restaurantId, fetchDashboardData]);
 
   const handleOpenSalesModal = () => {
+    setSalesScope('current');
+    setCombinedSalesUnlocked(false);
     setShowSalesModal(true);
     if (session?.restaurantId) {
       fetchDashboardData();
     }
+  };
+
+  const handleCloseSalesModal = () => {
+    setSalesScope('current');
+    setCombinedSalesUnlocked(false);
+    setShowSalesModal(false);
+  };
+
+  const handleRequestCombinedSales = () => {
+    if (combinedSalesUnlocked) {
+      setSalesScope('all_outlets');
+      return;
+    }
+
+    const savedMasterPass =
+      typeof window !== 'undefined'
+        ? localStorage.getItem(MASTER_PASS_STORAGE_KEY)
+        : null;
+
+    setIsForgotMasterPass(false);
+    setMasterRecoveryPhone('');
+    setNewMasterPassInput('');
+    setIsSettingFirstMasterPass(!savedMasterPass);
+    setMasterPassInput('');
+    setMasterPassError('');
+    setShowMasterPassModal(true);
+  };
+
+  const handleVerifyOrSetMasterPass = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanInput = masterPassInput.trim();
+
+    if (cleanInput.length < 4) {
+      setMasterPassError('Please enter at least 4 characters.');
+      return;
+    }
+
+    const savedMasterPass = localStorage.getItem(MASTER_PASS_STORAGE_KEY);
+
+    if (!savedMasterPass) {
+      localStorage.setItem(MASTER_PASS_STORAGE_KEY, cleanInput);
+      setCombinedSalesUnlocked(true);
+      setShowMasterPassModal(false);
+      setMasterPassInput('');
+      setMasterPassError('');
+      setSalesScope('all_outlets');
+      return;
+    }
+
+    if (cleanInput === savedMasterPass) {
+      setCombinedSalesUnlocked(true);
+      setShowMasterPassModal(false);
+      setMasterPassInput('');
+      setMasterPassError('');
+      setSalesScope('all_outlets');
+    } else {
+      setMasterPassError('Incorrect Master Password! Only the owner can view combined sales.');
+    }
+  };
+
+  const handleResetMasterPass = (e: React.FormEvent) => {
+    e.preventDefault();
+    setMasterPassError('');
+
+    const cleanPhone = masterRecoveryPhone.replace(/\D/g, '');
+    const cleanNewPass = newMasterPassInput.trim();
+    const registeredOwnerPhone = (session?.ownerPhone || '').replace(/\D/g, '');
+
+    if (cleanPhone.length !== 10) {
+      setMasterPassError('Please enter a valid 10-digit registered owner mobile number.');
+      return;
+    }
+
+    if (registeredOwnerPhone && cleanPhone !== registeredOwnerPhone) {
+      setMasterPassError('Mobile number does not match the registered owner number.');
+      return;
+    }
+
+    if (cleanNewPass.length < 4) {
+      setMasterPassError('New Master Password must be at least 4 characters.');
+      return;
+    }
+
+    localStorage.setItem(MASTER_PASS_STORAGE_KEY, cleanNewPass);
+    setCombinedSalesUnlocked(true);
+    setShowMasterPassModal(false);
+    setIsForgotMasterPass(false);
+    setMasterRecoveryPhone('');
+    setNewMasterPassInput('');
+    setMasterPassInput('');
+    setMasterPassError('');
+    setSalesScope('all_outlets');
   };
 
   const handleOpenPaymentSettings = () => {
@@ -759,7 +866,9 @@ export default function DashboardPage() {
   const isOwner = session.role === 'owner';
   const hasMultipleOwnerOutlets = isOwner && ownerOutlets.length > 1;
   const activeSalesScope: 'current' | 'all_outlets' =
-    hasMultipleOwnerOutlets && salesScope === 'all_outlets' ? 'all_outlets' : 'current';
+    hasMultipleOwnerOutlets && salesScope === 'all_outlets' && combinedSalesUnlocked
+      ? 'all_outlets'
+      : 'current';
 
   const outletNameById: Record<string, string> = {};
   ownerOutlets.forEach((o) => {
@@ -767,7 +876,6 @@ export default function DashboardPage() {
   });
   outletNameById[session.restaurantId] = session.restaurantName;
 
-  // Strictly isolated to current outlet for floor, KDS queue, and default sales
   const activeOrders = orders.filter((o) => o.status !== 'completed');
   const completedOrders = orders.filter((o) => o.status === 'completed');
 
@@ -849,26 +957,26 @@ export default function DashboardPage() {
     .filter((o) => (o.payment_method || '').toLowerCase() === 'upi')
     .reduce((sum, o) => sum + Number(o.total_amount), 0);
 
-  // Per-outlet breakdown when viewing All Outlets Combined
-  const outletBreakdownRows = hasMultipleOwnerOutlets
-    ? ownerOutlets.map((out) => {
-        const outOrders = applyDateAndSearchFilter(
-          allOutletOrders.filter(
-            (o) =>
-              (o.restaurant_id || session.restaurantId) === out.id &&
-              (cleanSearch ? true : o.status === 'completed')
-          )
-        );
-        const total = outOrders.reduce((s, o) => s + Number(o.total_amount), 0);
-        return {
-          id: out.id,
-          title: formatOutletTitle(out),
-          total,
-          count: outOrders.length,
-          isCurrent: out.id === session.restaurantId,
-        };
-      })
-    : [];
+  const outletBreakdownRows =
+    activeSalesScope === 'all_outlets' && hasMultipleOwnerOutlets
+      ? ownerOutlets.map((out) => {
+          const outOrders = applyDateAndSearchFilter(
+            allOutletOrders.filter(
+              (o) =>
+                (o.restaurant_id || session.restaurantId) === out.id &&
+                (cleanSearch ? true : o.status === 'completed')
+            )
+          );
+          const total = outOrders.reduce((s, o) => s + Number(o.total_amount), 0);
+          return {
+            id: out.id,
+            title: formatOutletTitle(out),
+            total,
+            count: outOrders.length,
+            isCurrent: out.id === session.restaurantId,
+          };
+        })
+      : [];
 
   const occupiedTablesCount = new Set(activeOrders.map((o) => o.table_number)).size;
   const cookingOrdersCount = activeOrders.filter(
@@ -1681,7 +1789,7 @@ export default function DashboardPage() {
               </div>
               <button
                 type="button"
-                onClick={() => setShowSalesModal(false)}
+                onClick={handleCloseSalesModal}
                 className="p-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 shrink-0"
               >
                 <X className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -1703,7 +1811,7 @@ export default function DashboardPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setSalesScope('all_outlets')}
+                  onClick={handleRequestCombinedSales}
                   className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 ${
                     activeSalesScope === 'all_outlets'
                       ? 'bg-orange-600 text-white shadow-xs'
@@ -1944,6 +2052,165 @@ export default function DashboardPage() {
                 })
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {isOwner && showMasterPassModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-[1000]">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-10 h-10 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center">
+                  <KeyRound className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    {isForgotMasterPass
+                      ? 'Reset Master Password'
+                      : isSettingFirstMasterPass
+                      ? 'Set Owner Master Password'
+                      : 'Owner Master Password'}
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    {isForgotMasterPass
+                      ? 'Verify registered owner mobile to set a new password'
+                      : isSettingFirstMasterPass
+                      ? 'Create a master password for combined outlet sales'
+                      : 'Enter master password to view all outlets sales'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMasterPassModal(false);
+                  setIsForgotMasterPass(false);
+                  setMasterPassError('');
+                }}
+                className="p-1.5 rounded-full hover:bg-slate-100 text-slate-500"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {!isForgotMasterPass ? (
+              <form onSubmit={handleVerifyOrSetMasterPass} className="space-y-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    {isSettingFirstMasterPass
+                      ? 'Create Master Password (min 4 chars)'
+                      : 'Master Password'}
+                  </label>
+                  <input
+                    type="password"
+                    autoFocus
+                    value={masterPassInput}
+                    onChange={(e) => {
+                      setMasterPassInput(e.target.value);
+                      setMasterPassError('');
+                    }}
+                    placeholder="Enter owner master password"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 focus:bg-white border border-slate-300 focus:border-orange-500 rounded-xl text-sm font-bold outline-none"
+                  />
+                </div>
+
+                {masterPassError && (
+                  <p className="text-xs font-bold text-red-600 bg-red-50 px-3 py-2 rounded-xl">
+                    {masterPassError}
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-3 rounded-xl text-xs shadow-sm transition"
+                >
+                  {isSettingFirstMasterPass
+                    ? 'Save & View Combined Sales'
+                    : 'Unlock Combined Sales'}
+                </button>
+
+                {!isSettingFirstMasterPass && (
+                  <div className="text-center pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsForgotMasterPass(true);
+                        setMasterRecoveryPhone('');
+                        setNewMasterPassInput('');
+                        setMasterPassError('');
+                      }}
+                      className="text-xs font-bold text-slate-500 hover:text-orange-600 transition"
+                    >
+                      Forgot Master Password? Reset Here &rarr;
+                    </button>
+                  </div>
+                )}
+              </form>
+            ) : (
+              <form onSubmit={handleResetMasterPass} className="space-y-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Registered Owner Mobile Number
+                  </label>
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    maxLength={10}
+                    autoFocus
+                    value={masterRecoveryPhone}
+                    onChange={(e) => {
+                      setMasterRecoveryPhone(e.target.value.replace(/\D/g, '').slice(0, 10));
+                      setMasterPassError('');
+                    }}
+                    placeholder="10-digit mobile number"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 focus:bg-white border border-slate-300 focus:border-orange-500 rounded-xl text-sm font-bold outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    New Master Password (min 4 chars)
+                  </label>
+                  <input
+                    type="password"
+                    value={newMasterPassInput}
+                    onChange={(e) => {
+                      setNewMasterPassInput(e.target.value);
+                      setMasterPassError('');
+                    }}
+                    placeholder="Set new master password"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 focus:bg-white border border-slate-300 focus:border-orange-500 rounded-xl text-sm font-bold outline-none"
+                  />
+                </div>
+
+                {masterPassError && (
+                  <p className="text-xs font-bold text-red-600 bg-red-50 px-3 py-2 rounded-xl">
+                    {masterPassError}
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  className="w-full bg-slate-900 hover:bg-slate-800 text-white font-extrabold py-3 rounded-xl text-xs shadow-sm transition"
+                >
+                  Verify & Set New Master Password
+                </button>
+
+                <div className="text-center pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsForgotMasterPass(false);
+                      setMasterPassError('');
+                    }}
+                    className="text-xs font-bold text-slate-500 hover:text-slate-800 transition"
+                  >
+                    &larr; Back to Master Password
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}
