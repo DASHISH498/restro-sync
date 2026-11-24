@@ -5,10 +5,11 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import {
-  registerAndVerifyDevice,
-  sendDeviceHeartbeat,
-  removeCurrentDevice,
-} from '@/lib/deviceGuard';
+  isRoleSessionActive,
+  releaseRoleSessionIfOwner,
+  clearLocalSessionToken,
+} from '@/lib/roleSessionGuard';
+import SessionReplacedDialog from '@/components/SessionReplacedDialog';
 import {
   UtensilsCrossed,
   LogOut,
@@ -38,14 +39,27 @@ import {
   User,
   Phone,
   KeyRound,
+  Store,
 } from 'lucide-react';
 
 interface SessionData {
   restaurantId: string;
   restaurantName: string;
+  brandName?: string;
+  outletLabel?: string | null;
+  outletMode?: 'single' | 'multiple';
+  ownerPhone?: string | null;
   city: string;
   totalTables: number;
   role: 'owner' | 'staff';
+}
+
+interface OutletMeta {
+  id: string;
+  name: string;
+  city: string;
+  outlet_mode?: string | null;
+  outlet_label?: string | null;
 }
 
 interface SubscriptionInfo {
@@ -57,6 +71,7 @@ interface SubscriptionInfo {
 
 interface OrderRecord {
   id: string;
+  restaurant_id?: string;
   table_number: number;
   status: 'pending' | 'preparing' | 'ready' | 'served' | 'completed';
   total_amount: number;
@@ -136,6 +151,19 @@ const UPGRADE_PLANS = [
   },
 ];
 
+function formatOutletTitle(outlet: {
+  name: string;
+  city?: string;
+  outlet_mode?: string | null;
+  outlet_label?: string | null;
+}): string {
+  const label = outlet.outlet_label?.trim();
+  if (outlet.outlet_mode === 'multiple' && label) {
+    return `${outlet.name} — ${label}`;
+  }
+  return outlet.city ? `${outlet.name} (${outlet.city})` : outlet.name;
+}
+
 export default function DashboardPage() {
   const router = useRouter();
 
@@ -149,6 +177,9 @@ export default function DashboardPage() {
   });
 
   const [orders, setOrders] = useState<OrderRecord[]>([]);
+  const [ownerOutlets, setOwnerOutlets] = useState<OutletMeta[]>([]);
+  const [allOutletOrders, setAllOutletOrders] = useState<OrderRecord[]>([]);
+  const [salesScope, setSalesScope] = useState<'current' | 'all_outlets'>('current');
   const [loading, setLoading] = useState(true);
 
   // Table Action Modal
@@ -190,9 +221,9 @@ export default function DashboardPage() {
     rzpKeySecret: '',
   });
 
-  // Max 3 Devices Limit Modal & 1-Hour Inactivity Modal
-  const [showDeviceLimitModal, setShowDeviceLimitModal] = useState(false);
+  // 1-Hour Inactivity Modal & Session Replaced Dialog
   const [showInactivityModal, setShowInactivityModal] = useState(false);
+  const [sessionReplaced, setSessionReplaced] = useState(false);
 
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0];
@@ -230,8 +261,8 @@ export default function DashboardPage() {
       showPaymentSettingsModal ||
       showStockModal ||
       selectedTableModal !== null ||
-      showDeviceLimitModal ||
-      showInactivityModal;
+      showInactivityModal ||
+      sessionReplaced;
 
     if (anyModalOpen) {
       document.body.style.overflow = 'hidden';
@@ -248,37 +279,54 @@ export default function DashboardPage() {
     showPaymentSettingsModal,
     showStockModal,
     selectedTableModal,
-    showDeviceLimitModal,
     showInactivityModal,
+    sessionReplaced,
   ]);
 
-  // MAX 3 DEVICES SESSION LOCK (Removed pagehide listener so navigation doesn't clear session)
+  // SINGLE OWNER SESSION GUARD: Auto-logout with 5s dialog if another Owner signs in elsewhere
   useEffect(() => {
-    if (!session?.restaurantId) return;
+    if (!session?.restaurantId || session.role !== 'owner') return;
 
-    const checkDevice = async () => {
-      const allowed = await registerAndVerifyDevice(session.restaurantId);
-      if (!allowed) {
+    let cancelled = false;
+
+    const enforceSingleOwner = async () => {
+      const stillActive = await isRoleSessionActive(session.restaurantId, 'owner');
+      if (!stillActive && !cancelled) {
         localStorage.removeItem('restro_session');
-        setShowDeviceLimitModal(true);
+        clearLocalSessionToken();
+        setSessionReplaced(true);
       }
     };
 
-    checkDevice();
+    enforceSingleOwner();
 
-    const heartbeatInterval = setInterval(async () => {
-      const stillValid = await sendDeviceHeartbeat(session.restaurantId);
-      if (!stillValid) {
-        localStorage.removeItem('restro_session');
-        clearInterval(heartbeatInterval);
-        setShowDeviceLimitModal(true);
-      }
-    }, 15000);
+    const sessionChannel = supabase
+      .channel(`owner-single-session-${session.restaurantId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'active_role_sessions',
+          filter: `restaurant_id=eq.${session.restaurantId}`,
+        },
+        (payload) => {
+          const row = payload.new as { role?: string } | null;
+          if (!row || row.role === 'owner') {
+            enforceSingleOwner();
+          }
+        }
+      )
+      .subscribe();
+
+    const pollTimer = setInterval(enforceSingleOwner, 5000);
 
     return () => {
-      clearInterval(heartbeatInterval);
+      cancelled = true;
+      supabase.removeChannel(sessionChannel);
+      clearInterval(pollTimer);
     };
-  }, [session?.restaurantId]);
+  }, [session?.restaurantId, session?.role]);
 
   // 1-HOUR INACTIVITY AUTO LOGOUT (60 Minutes)
   useEffect(() => {
@@ -288,7 +336,7 @@ export default function DashboardPage() {
     let inactivityTimer: ReturnType<typeof setTimeout>;
 
     const triggerInactivityLogout = async () => {
-      await removeCurrentDevice(session.restaurantId);
+      await releaseRoleSessionIfOwner(session.restaurantId, 'owner');
       localStorage.removeItem('restro_session');
       setShowInactivityModal(true);
     };
@@ -328,22 +376,27 @@ export default function DashboardPage() {
       supabase
         .from('restaurants')
         .select(
-          'name, city, total_tables, subscription_status, selected_plan, trial_ends_at, razorpay_key_id, razorpay_key_secret, upi_id, bank_account_name'
+          'id, name, city, total_tables, owner_phone, outlet_mode, outlet_label, subscription_status, selected_plan, trial_ends_at, razorpay_key_id, razorpay_key_secret, upi_id, bank_account_name'
         )
         .eq('id', session.restaurantId)
         .single(),
       supabase
         .from('orders')
         .select(
-          'id, table_number, status, total_amount, payment_method, payment_status, customer_name, customer_phone, invoice_number, razorpay_payment_id, created_at, order_items(id, item_name, quantity, price, notes)'
+          'id, restaurant_id, table_number, status, total_amount, payment_method, payment_status, customer_name, customer_phone, invoice_number, razorpay_payment_id, created_at, order_items(id, item_name, quantity, price, notes)'
         )
         .eq('restaurant_id', session.restaurantId)
         .order('created_at', { ascending: false }),
     ]);
 
+    let resolvedOwnerPhone = session.ownerPhone || '';
+
     if (restData) {
       if (restData.total_tables) {
         setActualTablesCount(Number(restData.total_tables));
+      }
+      if (restData.owner_phone) {
+        resolvedOwnerPhone = String(restData.owner_phone);
       }
 
       const upi = restData.upi_id || '';
@@ -378,15 +431,68 @@ export default function DashboardPage() {
       setSubInfo({ status, selectedPlan, daysLeft, isExpired });
     }
 
-    if (ordersData) {
-      setOrders(ordersData as OrderRecord[]);
+    const currentOutletOrders = ((ordersData || []) as OrderRecord[]).map((o) => ({
+      ...o,
+      restaurant_id: o.restaurant_id || session.restaurantId,
+    }));
+    setOrders(currentOutletOrders);
+
+    // Owner-only: fetch other outlets owned by the same owner_phone for Combined & Outlet-wise Sales
+    if (session.role === 'owner' && resolvedOwnerPhone) {
+      const { data: siblingOutlets } = await supabase
+        .from('restaurants')
+        .select('id, name, city, outlet_mode, outlet_label')
+        .eq('owner_phone', resolvedOwnerPhone);
+
+      const outletsList: OutletMeta[] =
+        siblingOutlets && siblingOutlets.length > 0
+          ? (siblingOutlets as OutletMeta[])
+          : [
+              {
+                id: session.restaurantId,
+                name: session.brandName || session.restaurantName,
+                city: session.city,
+                outlet_mode: session.outletMode,
+                outlet_label: session.outletLabel,
+              },
+            ];
+
+      setOwnerOutlets(outletsList);
+
+      const outletIds = outletsList.map((o) => o.id);
+      if (outletIds.length > 1) {
+        const { data: combinedOrders } = await supabase
+          .from('orders')
+          .select(
+            'id, restaurant_id, table_number, status, total_amount, payment_method, payment_status, customer_name, customer_phone, invoice_number, razorpay_payment_id, created_at, order_items(id, item_name, quantity, price, notes)'
+          )
+          .in('restaurant_id', outletIds)
+          .order('created_at', { ascending: false });
+
+        if (combinedOrders) {
+          setAllOutletOrders(combinedOrders as OrderRecord[]);
+        }
+      } else {
+        setAllOutletOrders(currentOutletOrders);
+      }
+    } else {
+      setOwnerOutlets([]);
+      setAllOutletOrders(currentOutletOrders);
+      setSalesScope('current');
     }
 
     setLoading(false);
-  }, [session?.restaurantId]);
+  }, [session]);
 
   useEffect(() => {
     if (!session?.restaurantId) return;
+
+    setLoading(true);
+    setOrders([]);
+    setAllOutletOrders([]);
+    setOwnerOutlets([]);
+    setSalesScope('current');
+
     fetchDashboardData();
 
     const channel = supabase
@@ -412,6 +518,13 @@ export default function DashboardPage() {
       clearInterval(interval);
     };
   }, [session?.restaurantId, fetchDashboardData]);
+
+  const handleOpenSalesModal = () => {
+    setShowSalesModal(true);
+    if (session?.restaurantId) {
+      fetchDashboardData();
+    }
+  };
 
   const handleOpenPaymentSettings = () => {
     setOwnerUpiId(savedPaymentInfo.upiId);
@@ -453,7 +566,7 @@ export default function DashboardPage() {
 
   const handleLogout = async () => {
     if (session?.restaurantId) {
-      await removeCurrentDevice(session.restaurantId);
+      await releaseRoleSessionIfOwner(session.restaurantId, 'owner');
     }
     localStorage.removeItem('restro_session');
     router.push('/');
@@ -506,7 +619,7 @@ export default function DashboardPage() {
     try {
       const loaded = await loadRazorpayScript();
       if (!loaded) {
-        setUpgradeErrorMsg('Payment gateway load nahi ho paya. Internet check karein.');
+        setUpgradeErrorMsg('Unable to load payment gateway. Please check your connection.');
         setUpgradingPlanId(null);
         return;
       }
@@ -525,7 +638,7 @@ export default function DashboardPage() {
 
       const orderData = await res.json();
       if (!res.ok || !orderData.orderId) {
-        setUpgradeErrorMsg(orderData.error || 'Payment start karne mein error aaya.');
+        setUpgradeErrorMsg(orderData.error || 'Unable to initiate payment.');
         setUpgradingPlanId(null);
         return;
       }
@@ -559,7 +672,7 @@ export default function DashboardPage() {
 
           setUpgradingPlanId(null);
           setUpgradeSuccessBanner(
-            `${plan.name} (${plan.price}) successfully activate ho gaya hai!`
+            `${plan.name} (${plan.price}) has been activated successfully!`
           );
           fetchDashboardData();
           setTimeout(() => setUpgradeSuccessBanner(null), 7000);
@@ -577,7 +690,7 @@ export default function DashboardPage() {
       const rzp = new RazorpayConstructor(options);
       rzp.open();
     } catch {
-      setUpgradeErrorMsg('Payment process mein dikkat aayi. Dobara try karein.');
+      setUpgradeErrorMsg('Something went wrong during payment. Please try again.');
       setUpgradingPlanId(null);
     }
   };
@@ -607,7 +720,7 @@ export default function DashboardPage() {
     setSavingPaymentSettings(false);
 
     if (error) {
-      setPaymentSettingsMsg('Save karne mein error aaya. Dobara try karein.');
+      setPaymentSettingsMsg('Failed to save payment details. Please try again.');
       return;
     }
 
@@ -619,7 +732,7 @@ export default function DashboardPage() {
     });
     setIsPaymentConfigured(Boolean(cleanUpi || (cleanKeyId && cleanSecret)));
     setPaymentSettingsMsg(
-      'Payment details save ho gayi hain! Ab customers seedha aapke UPI / account mein pay kar sakenge.'
+      'Payment settings saved! Customers can now pay directly to your UPI or account.'
     );
     setTimeout(() => {
       setPaymentSettingsMsg(null);
@@ -630,7 +743,7 @@ export default function DashboardPage() {
   const handleWhatsAppSupport = () => {
     if (!session) return;
     const msg = encodeURIComponent(
-      `Hi RestroSync! Mujhe plan activation mein help chahiye:\n• Restaurant: ${session.restaurantName} (${session.city})\n• ID: ${session.restaurantId}`
+      `Hi RestroSync! I need help activating my plan:\n• Restaurant: ${session.restaurantName} (${session.city})\n• ID: ${session.restaurantId}`
     );
     window.open(`https://wa.me/${ADMIN_WHATSAPP}?text=${msg}`, '_blank');
   };
@@ -644,7 +757,17 @@ export default function DashboardPage() {
   }
 
   const isOwner = session.role === 'owner';
+  const hasMultipleOwnerOutlets = isOwner && ownerOutlets.length > 1;
+  const activeSalesScope: 'current' | 'all_outlets' =
+    hasMultipleOwnerOutlets && salesScope === 'all_outlets' ? 'all_outlets' : 'current';
 
+  const outletNameById: Record<string, string> = {};
+  ownerOutlets.forEach((o) => {
+    outletNameById[o.id] = formatOutletTitle(o);
+  });
+  outletNameById[session.restaurantId] = session.restaurantName;
+
+  // Strictly isolated to current outlet for floor, KDS queue, and default sales
   const activeOrders = orders.filter((o) => o.status !== 'completed');
   const completedOrders = orders.filter((o) => o.status === 'completed');
 
@@ -654,52 +777,66 @@ export default function DashboardPage() {
   );
   const todayRevenue = todayCompleted.reduce((sum, o) => sum + Number(o.total_amount), 0);
 
+  const sourceSalesPool =
+    activeSalesScope === 'all_outlets'
+      ? allOutletOrders.filter((o) => o.status === 'completed')
+      : completedOrders;
+
   const cleanSearch = billSearchQuery.trim().toLowerCase();
 
-  const filteredSalesOrders = (cleanSearch ? orders : completedOrders).filter((ord) => {
-    if (cleanSearch) {
-      const inv = (ord.invoice_number || '').toLowerCase();
-      const billNo = `bill-${ord.id.slice(0, 6).toLowerCase()}`;
-      const payId = (ord.razorpay_payment_id || '').toLowerCase();
-      const custName = (ord.customer_name || '').toLowerCase();
-      const custPhone = (ord.customer_phone || '').toLowerCase();
+  const applyDateAndSearchFilter = (list: OrderRecord[]) =>
+    list.filter((ord) => {
+      if (cleanSearch) {
+        const inv = (ord.invoice_number || '').toLowerCase();
+        const billNo = `bill-${ord.id.slice(0, 6).toLowerCase()}`;
+        const payId = (ord.razorpay_payment_id || '').toLowerCase();
+        const custName = (ord.customer_name || '').toLowerCase();
+        const custPhone = (ord.customer_phone || '').toLowerCase();
 
-      return (
-        inv.includes(cleanSearch) ||
-        billNo.includes(cleanSearch) ||
-        payId.includes(cleanSearch) ||
-        custName.includes(cleanSearch) ||
-        custPhone.includes(cleanSearch)
-      );
-    }
-
-    const ordDate = new Date(ord.created_at);
-
-    if (salesFilter === 'today') {
-      return ordDate.toDateString() === todayStr;
-    }
-
-    if (salesFilter === '7days') {
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-      sevenDaysAgo.setHours(0, 0, 0, 0);
-      return ordDate >= sevenDaysAgo;
-    }
-
-    if (salesFilter === 'custom') {
-      if (customFromDate) {
-        const start = new Date(`${customFromDate}T00:00:00`);
-        if (ordDate < start) return false;
+        return (
+          inv.includes(cleanSearch) ||
+          billNo.includes(cleanSearch) ||
+          payId.includes(cleanSearch) ||
+          custName.includes(cleanSearch) ||
+          custPhone.includes(cleanSearch)
+        );
       }
-      if (customToDate) {
-        const end = new Date(`${customToDate}T23:59:59.999`);
-        if (ordDate > end) return false;
+
+      const ordDate = new Date(ord.created_at);
+
+      if (salesFilter === 'today') {
+        return ordDate.toDateString() === todayStr;
       }
+
+      if (salesFilter === '7days') {
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        sevenDaysAgo.setHours(0, 0, 0, 0);
+        return ordDate >= sevenDaysAgo;
+      }
+
+      if (salesFilter === 'custom') {
+        if (customFromDate) {
+          const start = new Date(`${customFromDate}T00:00:00`);
+          if (ordDate < start) return false;
+        }
+        if (customToDate) {
+          const end = new Date(`${customToDate}T23:59:59.999`);
+          if (ordDate > end) return false;
+        }
+        return true;
+      }
+
       return true;
-    }
+    });
 
-    return true;
-  });
+  const filteredSalesOrders = applyDateAndSearchFilter(
+    cleanSearch
+      ? activeSalesScope === 'all_outlets'
+        ? allOutletOrders
+        : orders
+      : sourceSalesPool
+  );
 
   const filteredTotalSales = filteredSalesOrders.reduce(
     (sum, o) => sum + Number(o.total_amount),
@@ -711,6 +848,27 @@ export default function DashboardPage() {
   const filteredUpiSales = filteredSalesOrders
     .filter((o) => (o.payment_method || '').toLowerCase() === 'upi')
     .reduce((sum, o) => sum + Number(o.total_amount), 0);
+
+  // Per-outlet breakdown when viewing All Outlets Combined
+  const outletBreakdownRows = hasMultipleOwnerOutlets
+    ? ownerOutlets.map((out) => {
+        const outOrders = applyDateAndSearchFilter(
+          allOutletOrders.filter(
+            (o) =>
+              (o.restaurant_id || session.restaurantId) === out.id &&
+              (cleanSearch ? true : o.status === 'completed')
+          )
+        );
+        const total = outOrders.reduce((s, o) => s + Number(o.total_amount), 0);
+        return {
+          id: out.id,
+          title: formatOutletTitle(out),
+          total,
+          count: outOrders.length,
+          isCurrent: out.id === session.restaurantId,
+        };
+      })
+    : [];
 
   const occupiedTablesCount = new Set(activeOrders.map((o) => o.table_number)).size;
   const cookingOrdersCount = activeOrders.filter(
@@ -731,7 +889,6 @@ export default function DashboardPage() {
     modalTableOrders.length > 0 &&
     modalTableOrders.every((o) => o.payment_status === 'paid');
 
-  // Merge same dishes across multiple KOTs on the selected table into single lines
   const consolidatedTableItems: MergedBillItem[] = Object.values(
     modalTableOrders.reduce<Record<string, MergedBillItem>>((acc, ord) => {
       (ord.order_items || []).forEach((item) => {
@@ -760,7 +917,6 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 pb-16">
-      {/* Top Navbar */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -782,7 +938,6 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Owner Action Buttons */}
           <div className="flex items-center gap-2 flex-wrap">
             <Link
               href={`/kitchen/${session.restaurantId}`}
@@ -805,7 +960,7 @@ export default function DashboardPage() {
               <>
                 <button
                   type="button"
-                  onClick={() => setShowSalesModal(true)}
+                  onClick={handleOpenSalesModal}
                   className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition"
                 >
                   <IndianRupee className="w-4 h-4" />
@@ -856,7 +1011,6 @@ export default function DashboardPage() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 space-y-6">
-        {/* PLAN ACTIVATION SUCCESS BANNER */}
         {upgradeSuccessBanner && (
           <div className="bg-emerald-600 text-white p-4 rounded-2xl shadow-md flex items-center gap-2.5 text-xs sm:text-sm font-extrabold">
             <CheckCircle2 className="w-5 h-5 shrink-0" />
@@ -864,7 +1018,6 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* OWNER SUBSCRIPTION / 14-DAY FREE TRIAL BANNER */}
         {isOwner && subInfo.status !== 'active' && (
           <section
             className={`rounded-2xl p-4 border flex flex-wrap items-center justify-between gap-3 shadow-sm ${
@@ -890,7 +1043,7 @@ export default function DashboardPage() {
               <div>
                 <p className="text-xs sm:text-sm font-extrabold">
                   {subInfo.isExpired
-                    ? 'Aapka 14-Day Free Trial Khatam Ho Gaya Hai!'
+                    ? 'Your 14-Day Free Trial Has Ended!'
                     : `Free Trial Active • ${subInfo.daysLeft} Day${
                         subInfo.daysLeft === 1 ? '' : 's'
                       } Left`}
@@ -900,8 +1053,8 @@ export default function DashboardPage() {
                     subInfo.isExpired ? 'text-red-700' : 'text-slate-300'
                   }`}
                 >
-                  Chosen Plan: <strong>{subInfo.selectedPlan}</strong> • Instant online
-                  payment karke plan turant activate karein.
+                  Selected Plan: <strong>{subInfo.selectedPlan}</strong> • Complete online payment
+                  to activate your plan immediately.
                 </p>
               </div>
             </div>
@@ -920,7 +1073,6 @@ export default function DashboardPage() {
           </section>
         )}
 
-        {/* OWNER UPI / PAYMENT NOT CONFIGURED ALERT */}
         {isOwner && !isPaymentConfigured && (
           <section className="bg-amber-50 border border-amber-300 text-amber-950 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-sm">
             <div className="flex items-center gap-3">
@@ -929,10 +1081,11 @@ export default function DashboardPage() {
               </div>
               <div>
                 <p className="text-xs sm:text-sm font-extrabold">
-                  Apna Merchant UPI ID Connect Karein (0% Fee Direct Payments)
+                  Connect Your Merchant UPI ID (0% Fee Direct Payments)
                 </p>
                 <p className="text-[11px] text-amber-800 mt-0.5">
-                  Customers ke khane ka paisa seedha aapke GPay / PhonePe / Paytm Merchant box mein aane ke liye apna UPI ID save karein.
+                  Save your UPI ID so customer payments go straight to your GPay, PhonePe, or
+                  Paytm merchant account.
                 </p>
               </div>
             </div>
@@ -947,11 +1100,10 @@ export default function DashboardPage() {
           </section>
         )}
 
-        {/* TOP KPI CARDS */}
         <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <button
             type="button"
-            onClick={() => setShowSalesModal(true)}
+            onClick={handleOpenSalesModal}
             className="bg-white hover:bg-emerald-50/40 p-5 rounded-2xl border-2 border-emerald-200 hover:border-emerald-500 shadow-sm text-left transition cursor-pointer group"
           >
             <div className="flex items-center justify-between text-slate-600 text-xs font-bold">
@@ -998,7 +1150,6 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        {/* READY TO SERVE PRIORITY ALERT BANNER */}
         {readyToServeCount > 0 && (
           <section className="bg-emerald-600 text-white rounded-2xl p-4 shadow-md flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
@@ -1030,7 +1181,6 @@ export default function DashboardPage() {
           </section>
         )}
 
-        {/* LIVE FLOOR TABLE STATUS GRID */}
         <section className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-5">
             <div>
@@ -1038,8 +1188,8 @@ export default function DashboardPage() {
                 Live Floor & Table Status
               </h2>
               <p className="text-xs text-slate-500">
-                Free table par click karke order lein; Guest khana khaakar uth jaye tab Occupied
-                table par click karke Free karein.
+                Click a Free table to take an order; once guests leave, click an Occupied table to
+                mark it Free.
               </p>
             </div>
 
@@ -1162,7 +1312,6 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        {/* LIVE KITCHEN QUEUE FEED */}
         <section className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-sm">
           <div className="flex items-center justify-between gap-2 mb-4">
             <h2 className="text-sm sm:text-base font-extrabold text-slate-900 flex items-center gap-2">
@@ -1176,7 +1325,7 @@ export default function DashboardPage() {
 
           {activeOrders.length === 0 ? (
             <p className="text-xs text-slate-400 py-6 text-center">
-              Abhi koi active order nahi hai. Naya order aate hi yahan live dikhega.
+              No active orders right now. New orders will appear here live.
             </p>
           ) : (
             <div className="divide-y divide-slate-100">
@@ -1258,7 +1407,6 @@ export default function DashboardPage() {
           )}
         </section>
 
-        {/* RECENT SETTLED BILLS HISTORY — SIRF OWNER KE LIYE */}
         {isOwner && (
           <section className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-sm">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
@@ -1268,7 +1416,7 @@ export default function DashboardPage() {
               </h2>
               <button
                 type="button"
-                onClick={() => setShowSalesModal(true)}
+                onClick={handleOpenSalesModal}
                 className="text-xs font-extrabold text-orange-600 hover:underline flex items-center gap-1.5 self-start sm:self-auto"
               >
                 <Search className="w-3.5 h-3.5 shrink-0" />
@@ -1278,7 +1426,7 @@ export default function DashboardPage() {
 
             {completedOrders.length === 0 ? (
               <p className="text-xs text-slate-400 py-6 text-center">
-                Abhi tak koi bill settle nahi hua hai.
+                No settled bills yet.
               </p>
             ) : (
               <div className="divide-y divide-slate-100">
@@ -1332,7 +1480,6 @@ export default function DashboardPage() {
         )}
       </main>
 
-      {/* OWNER PLAN UPGRADE / RAZORPAY ACTIVATION MODAL */}
       {isOwner && showUpgradeModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[999]">
           <div className="bg-white rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl max-h-[85vh] overflow-y-auto overscroll-contain border border-slate-200">
@@ -1342,7 +1489,7 @@ export default function DashboardPage() {
                   <Crown className="w-5 h-5 text-orange-600" /> Activate RestroSync Plan
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Online payment karte hi aapka plan turant activate ho jayega
+                  Your plan activates immediately upon completing payment
                 </p>
               </div>
               <button
@@ -1414,7 +1561,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* OWNER PAYMENT SETUP MODAL (MERCHANT UPI ID PRIMARY + OPTIONAL RAZORPAY) */}
       {isOwner && showPaymentSettingsModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[999]">
           <div className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
@@ -1424,7 +1570,7 @@ export default function DashboardPage() {
                   <KeyRound className="w-5 h-5 text-purple-600" /> Restaurant Payment Setup
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  0% Fee • Customer ka payment seedha aapke UPI / Bank mein jayega
+                  0% Fee • Customer payments go straight to your UPI or bank account
                 </p>
               </div>
               <button
@@ -1460,17 +1606,18 @@ export default function DashboardPage() {
                   required={!ownerRzpKeyId}
                   value={ownerUpiId}
                   onChange={(e) => setOwnerUpiId(e.target.value)}
-                  placeholder="e.g. gpay-112233@okbizaxis ya paytmqr...@ptys"
+                  placeholder="e.g. gpay-112233@okbizaxis or paytmqr...@ptys"
                   className="w-full px-3.5 py-2.5 bg-emerald-50/40 focus:bg-white border border-emerald-400 focus:border-orange-500 rounded-xl text-xs font-mono font-bold outline-none"
                 />
                 <p className="text-[10px] text-slate-500 mt-1">
-                  Apne Google Pay Business / PhonePe Business / Paytm QR box ki UPI ID daalein.
+                  Enter the UPI ID from your Google Pay Business, PhonePe Business, or Paytm QR
+                  stand.
                 </p>
               </div>
 
               <div className="pt-2 border-t border-slate-100 space-y-3">
                 <p className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">
-                  Optional: Razorpay Keys (Sirf Card / Auto-Webhook Ke Liye)
+                  Optional: Razorpay Keys (For Card / Auto-Webhook)
                 </p>
 
                 <div>
@@ -1518,7 +1665,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* OWNER FULL SALES HISTORY & BILL/INVOICE TRACKER MODAL */}
       {isOwner && showSalesModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 z-[999]">
           <div className="bg-white rounded-3xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl max-h-[88vh] flex flex-col overflow-hidden border border-slate-200">
@@ -1528,7 +1674,9 @@ export default function DashboardPage() {
                   Bills, Invoice Tracker & Sales History
                 </h3>
                 <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5">
-                  Invoice No., Bill No., UTR / Payment ID, Name ya Mobile se bill track karein
+                  {activeSalesScope === 'all_outlets'
+                    ? `Combined view across ${ownerOutlets.length} outlets • Track by Invoice, UTR, Name, or Phone`
+                    : `${session.restaurantName} • Track by Invoice No., Bill No., UTR / Payment ID, Name, or Phone`}
                 </p>
               </div>
               <button
@@ -1539,6 +1687,34 @@ export default function DashboardPage() {
                 <X className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
             </div>
+
+            {hasMultipleOwnerOutlets && (
+              <div className="flex items-center gap-2 pt-3 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setSalesScope('current')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition ${
+                    activeSalesScope === 'current'
+                      ? 'bg-orange-600 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  This Outlet Only
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSalesScope('all_outlets')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 ${
+                    activeSalesScope === 'all_outlets'
+                      ? 'bg-orange-600 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  <Store className="w-3.5 h-3.5" />
+                  <span>All Outlets Combined ({ownerOutlets.length})</span>
+                </button>
+              </div>
+            )}
 
             <div className="pt-3 shrink-0">
               <div className="relative">
@@ -1624,7 +1800,11 @@ export default function DashboardPage() {
               <div className="col-span-2 sm:col-span-1 bg-emerald-50 border border-emerald-200 p-3 rounded-2xl flex sm:block items-center justify-between">
                 <div>
                   <p className="text-[11px] font-bold text-emerald-700">
-                    {cleanSearch ? 'Matched Amount' : 'Total Revenue'}
+                    {cleanSearch
+                      ? 'Matched Amount'
+                      : activeSalesScope === 'all_outlets'
+                      ? 'Combined Revenue'
+                      : 'Total Revenue'}
                   </p>
                   <p className="text-xl font-extrabold text-emerald-900 mt-0.5">
                     ₹{filteredTotalSales.toLocaleString('en-IN')}
@@ -1654,89 +1834,120 @@ export default function DashboardPage() {
               </div>
             </div>
 
+            {activeSalesScope === 'all_outlets' && outletBreakdownRows.length > 0 && (
+              <div className="mb-3 bg-orange-50/50 border border-orange-200/80 rounded-2xl p-3 shrink-0">
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-orange-800 mb-2">
+                  Outlet-Wise Breakdown
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {outletBreakdownRows.map((row) => (
+                    <div
+                      key={row.id}
+                      className="bg-white border border-slate-200/90 rounded-xl px-3 py-2 flex items-center justify-between text-xs"
+                    >
+                      <div className="min-w-0 pr-2">
+                        <p className="font-bold text-slate-800 truncate">{row.title}</p>
+                        <p className="text-[10px] text-slate-400">{row.count} Bills</p>
+                      </div>
+                      <span className="font-extrabold text-slate-900 shrink-0">
+                        ₹{row.total.toLocaleString('en-IN')}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="flex-1 overflow-y-auto overscroll-contain divide-y divide-slate-100 border-t border-slate-100 pr-1 pb-2">
               {filteredSalesOrders.length === 0 ? (
                 <p className="text-xs text-slate-400 text-center py-10">
-                  Koi matching bill ya invoice nahi mila.
+                  No matching bills or invoices found.
                 </p>
               ) : (
-                filteredSalesOrders.map((ord) => (
-                  <div
-                    key={ord.id}
-                    className="py-3 flex items-start justify-between gap-3 text-xs"
-                  >
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="font-extrabold text-slate-900">
-                          Table {ord.table_number}
-                        </span>
-                        <span className="text-[10px] font-mono font-extrabold bg-orange-50 text-orange-700 border border-orange-200 px-1.5 py-0.5 rounded">
-                          {ord.invoice_number || `INV-${ord.id.slice(0, 6).toUpperCase()}`}
-                        </span>
-                        <span className="text-[10px] font-mono font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
-                          BILL-{ord.id.slice(0, 6).toUpperCase()}
-                        </span>
-                        <span className="text-[10px] text-slate-400">
-                          {new Date(ord.created_at).toLocaleString('en-IN', {
-                            day: '2-digit',
-                            month: 'short',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </span>
+                filteredSalesOrders.map((ord) => {
+                  const ordOutletId = ord.restaurant_id || session.restaurantId;
+                  return (
+                    <div
+                      key={ord.id}
+                      className="py-3 flex items-start justify-between gap-3 text-xs"
+                    >
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {activeSalesScope === 'all_outlets' && (
+                            <span className="text-[10px] font-extrabold bg-slate-900 text-white px-2 py-0.5 rounded">
+                              {outletNameById[ordOutletId] || session.restaurantName}
+                            </span>
+                          )}
+                          <span className="font-extrabold text-slate-900">
+                            Table {ord.table_number}
+                          </span>
+                          <span className="text-[10px] font-mono font-extrabold bg-orange-50 text-orange-700 border border-orange-200 px-1.5 py-0.5 rounded">
+                            {ord.invoice_number || `INV-${ord.id.slice(0, 6).toUpperCase()}`}
+                          </span>
+                          <span className="text-[10px] font-mono font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                            BILL-{ord.id.slice(0, 6).toUpperCase()}
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            {new Date(ord.created_at).toLocaleString('en-IN', {
+                              day: '2-digit',
+                              month: 'short',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        </div>
+
+                        {(ord.customer_name || ord.customer_phone) && (
+                          <p className="text-[11px] font-bold text-slate-700 flex flex-wrap items-center gap-2">
+                            {ord.customer_name && (
+                              <span className="flex items-center gap-1">
+                                <User className="w-3 h-3 text-slate-400" /> {ord.customer_name}
+                              </span>
+                            )}
+                            {ord.customer_phone && (
+                              <span className="flex items-center gap-1">
+                                <Phone className="w-3 h-3 text-slate-400" /> {ord.customer_phone}
+                              </span>
+                            )}
+                          </p>
+                        )}
+
+                        {ord.razorpay_payment_id && (
+                          <p className="text-[10px] font-mono text-emerald-700 font-bold">
+                            Payment / UTR Ref: {ord.razorpay_payment_id}
+                          </p>
+                        )}
+
+                        <p className="text-slate-600 leading-relaxed break-words">
+                          {ord.order_items
+                            ?.map((i) => `${i.quantity}× ${i.item_name}`)
+                            .join(', ')}
+                        </p>
                       </div>
 
-                      {(ord.customer_name || ord.customer_phone) && (
-                        <p className="text-[11px] font-bold text-slate-700 flex flex-wrap items-center gap-2">
-                          {ord.customer_name && (
-                            <span className="flex items-center gap-1">
-                              <User className="w-3 h-3 text-slate-400" /> {ord.customer_name}
-                            </span>
-                          )}
-                          {ord.customer_phone && (
-                            <span className="flex items-center gap-1">
-                              <Phone className="w-3 h-3 text-slate-400" /> {ord.customer_phone}
-                            </span>
-                          )}
-                        </p>
-                      )}
-
-                      {ord.razorpay_payment_id && (
-                        <p className="text-[10px] font-mono text-emerald-700 font-bold">
-                          Payment / UTR Ref: {ord.razorpay_payment_id}
-                        </p>
-                      )}
-
-                      <p className="text-slate-600 leading-relaxed break-words">
-                        {ord.order_items
-                          ?.map((i) => `${i.quantity}× ${i.item_name}`)
-                          .join(', ')}
-                      </p>
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        <span className="font-extrabold text-slate-900 text-sm">
+                          ₹{ord.total_amount}
+                        </span>
+                        <span
+                          className={`uppercase text-[9px] font-extrabold px-2 py-0.5 rounded-md ${
+                            (ord.payment_method || '').toLowerCase() === 'upi'
+                              ? 'bg-blue-50 text-blue-700'
+                              : 'bg-emerald-50 text-emerald-700'
+                          }`}
+                        >
+                          {ord.payment_method || 'CASH'}
+                        </span>
+                      </div>
                     </div>
-
-                    <div className="flex flex-col items-end gap-1 shrink-0">
-                      <span className="font-extrabold text-slate-900 text-sm">
-                        ₹{ord.total_amount}
-                      </span>
-                      <span
-                        className={`uppercase text-[9px] font-extrabold px-2 py-0.5 rounded-md ${
-                          (ord.payment_method || '').toLowerCase() === 'upi'
-                            ? 'bg-blue-50 text-blue-700'
-                            : 'bg-emerald-50 text-emerald-700'
-                        }`}
-                      >
-                        {ord.payment_method || 'CASH'}
-                      </span>
-                    </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
         </div>
       )}
 
-      {/* TABLE ACTION MODAL (CONSOLIDATED BILL + INDIVIDUAL KOT TRACKING) */}
       {selectedTableModal !== null && (
         <div
           onClick={() => setSelectedTableModal(null)}
@@ -1777,11 +1988,10 @@ export default function DashboardPage() {
 
             {modalTableOrders.length === 0 ? (
               <div className="py-8 text-center text-xs text-slate-500">
-                Is table par abhi koi active order nahi hai.
+                No active orders on this table right now.
               </div>
             ) : (
               <div className="py-4 space-y-4 overflow-y-auto overscroll-contain flex-1">
-                {/* 1. CONSOLIDATED BILL SUMMARY */}
                 <div className="bg-orange-50/70 border border-orange-200 rounded-2xl p-3.5 space-y-2">
                   <div className="flex items-center justify-between border-b border-orange-200/70 pb-1.5">
                     <span className="text-[11px] font-extrabold uppercase tracking-wider text-orange-800">
@@ -1815,7 +2025,6 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                {/* 2. INDIVIDUAL KOT STATUSES */}
                 <div className="space-y-2">
                   <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 px-1">
                     Kitchen KOT Status ({modalTableOrders.length})
@@ -1949,7 +2158,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* QUICK STOCK AVAILABILITY MODAL */}
       {showStockModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[999]">
           <div className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl max-h-[85vh] flex flex-col overflow-hidden">
@@ -1959,7 +2167,7 @@ export default function DashboardPage() {
                   Quick Dish Stock Toggle
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Koi dish khatam ho gayi ho toh Sold Out mark karein
+                  Mark dishes as Sold Out when they run out
                 </p>
               </div>
               <button
@@ -1976,7 +2184,7 @@ export default function DashboardPage() {
                 <p className="text-xs text-slate-500 text-center py-8">Loading menu items...</p>
               ) : stockItems.length === 0 ? (
                 <p className="text-xs text-slate-500 text-center py-8">
-                  Abhi menu mein koi item add nahi hai.
+                  No menu items added yet.
                 </p>
               ) : (
                 stockItems.map((item) => (
@@ -2008,35 +2216,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* MAX 3 DEVICES LOGOUT / BLOCK DIALOG */}
-      {showDeviceLimitModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[999]">
-          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl text-center space-y-4 border border-slate-200">
-            <div className="w-12 h-12 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center mx-auto">
-              <AlertTriangle className="w-6 h-6" />
-            </div>
-
-            <div>
-              <h3 className="text-lg font-extrabold text-slate-900">
-                Maximum 3 Devices Limit Reached
-              </h3>
-              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                Is restaurant account par pehle se 3 devices active hain. Naye device par login karne ke liye pehle kisi ek purane device se Logout karein ya uska browser close karein.
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => router.push('/')}
-              className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-3 rounded-xl text-xs shadow-sm transition"
-            >
-              OK, Back to Home &rarr;
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 1-HOUR INACTIVITY AUTO-LOGOUT DIALOG */}
       {showInactivityModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[999]">
           <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl text-center space-y-4 border border-slate-200">
@@ -2049,7 +2228,8 @@ export default function DashboardPage() {
                 Session Expired (1 Hour Inactive)
               </h3>
               <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                Security ke liye 1 ghante tak koi activity na hone par aapka Owner Dashboard automatic logout kar diya gaya hai.
+                For your security, you were automatically logged out from the Owner Dashboard after
+                1 hour of inactivity.
               </p>
             </div>
 
@@ -2063,6 +2243,14 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      <SessionReplacedDialog
+        open={sessionReplaced}
+        role="owner"
+        onComplete={() => {
+          window.location.replace('/');
+        }}
+      />
     </div>
   );
 }

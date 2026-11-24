@@ -97,8 +97,8 @@ export default function TableQRCodesPage() {
               Scan to Order — Ready for Every Table
             </p>
             <p className="text-xs text-orange-700 mt-0.5 leading-relaxed">
-              &ldquo;Print All QRs&rdquo; dabakar PDF save/print karein, ya kisi bhi table ka{' '}
-              <strong>Live Menu</strong> kholkar customer ordering preview karein.
+              Click &ldquo;Print All QRs&rdquo; to save or print as PDF, or open{' '}
+              <strong>Open Menu</strong> on any table to preview customer ordering.
             </p>
           </div>
         </div>

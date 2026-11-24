@@ -250,10 +250,11 @@ export default function OrderHistoryPage() {
               <div className="bg-white rounded-2xl p-12 text-center border border-slate-200">
                 <Calendar className="w-10 h-10 text-slate-300 mx-auto mb-2" />
                 <p className="text-sm font-semibold text-slate-600">
-                  Is period mein koi settled bill nahi hai.
+                  No settled bills found for this period.
                 </p>
                 <p className="text-xs text-slate-400 mt-1">
-                  Dashboard par occupied table ka bill settle karte hi yahan record dikhega.
+                  Settled bills will appear here as soon as you settle an occupied table on the
+                  dashboard.
                 </p>
               </div>
             ) : (

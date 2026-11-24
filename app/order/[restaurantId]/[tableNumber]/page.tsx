@@ -289,12 +289,12 @@ function CustomerOrderContent() {
     const cleanPhone = customerPhone.replace(/\D/g, '');
 
     if (cleanName.length < 2) {
-      setFormError('Kripya apna poora naam (Customer Name) likhein.');
+      setFormError('Please enter your full name.');
       return false;
     }
 
     if (cleanPhone.length !== 10) {
-      setFormError('Kripya 10-digit ka valid mobile number likhein.');
+      setFormError('Please enter a valid 10-digit mobile number.');
       return false;
     }
 
@@ -381,7 +381,7 @@ function CustomerOrderContent() {
     }
 
     if (!createdOrder) {
-      setFormError('Order save karne mein error aaya. Dobara try karein.');
+      setFormError('Failed to place your order. Please try again.');
       setPlacingOrder(false);
       return;
     }
@@ -457,7 +457,7 @@ function CustomerOrderContent() {
       try {
         const loaded = await loadRazorpayScript();
         if (!loaded) {
-          setFormError('Payment gateway load nahi ho paya. Internet check karein.');
+          setFormError('Unable to load payment gateway. Please check your connection.');
           setPlacingOrder(false);
           return;
         }
@@ -474,7 +474,7 @@ function CustomerOrderContent() {
 
         const orderData = await res.json();
         if (!res.ok || !orderData.orderId || !orderData.keyId) {
-          setFormError(orderData.error || 'Payment start karne mein error aaya.');
+          setFormError(orderData.error || 'Unable to start payment.');
           setPlacingOrder(false);
           return;
         }
@@ -511,7 +511,7 @@ function CustomerOrderContent() {
         const rzp = new RazorpayConstructor(options);
         rzp.open();
       } catch {
-        setFormError('Payment process mein dikkat aayi. Dobara try karein.');
+        setFormError('Something went wrong during payment. Please try again.');
         setPlacingOrder(false);
       }
       return;
@@ -545,7 +545,7 @@ function CustomerOrderContent() {
   if (!restaurant) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4 text-center">
-        <p className="text-slate-600 font-semibold">Invalid QR Code. Restaurant nahi mila.</p>
+        <p className="text-slate-600 font-semibold">Invalid QR Code. Restaurant not found.</p>
       </div>
     );
   }
@@ -716,8 +716,8 @@ function CustomerOrderContent() {
               </h2>
               <p className="text-xs text-slate-300 mt-1">
                 {hasRazorpayOnlinePayment
-                  ? 'Apni pasandida dishes select karein, online payment karein aur digital invoice download karein.'
-                  : 'Apni pasandida dishes select karke order place karein; payment counter / reception par hoga.'}
+                  ? 'Select your favorite dishes, pay online, and download your digital invoice.'
+                  : 'Select your favorite dishes and place your order; payment will be settled at the counter or reception.'}
               </p>
             </div>
             <div className="hidden sm:flex w-14 h-14 rounded-2xl bg-orange-500/20 text-orange-400 items-center justify-center shrink-0">
@@ -733,8 +733,8 @@ function CustomerOrderContent() {
                   <p className="font-bold text-sm">Order Sent to Kitchen!</p>
                   <p className="text-xs text-emerald-100">
                     {hasRazorpayOnlinePayment
-                      ? 'Chef ne aapka order receive kar liya hai. Digital bill neeche tracker se kabhi bhi download karein.'
-                      : 'Aapka order place ho gaya hai! Kripya payment counter ya reception par karein.'}
+                      ? 'Your order has been received by the kitchen. Download your digital bill anytime from the tracker below.'
+                      : 'Your order has been placed! Please settle payment at the counter or reception.'}
                   </p>
                 </div>
               </div>
@@ -747,12 +747,12 @@ function CustomerOrderContent() {
                 <BookOpen className="w-7 h-7" />
               </div>
               <h3 className="text-base font-extrabold text-slate-900">
-                {restaurant.name} ka Menu Abhi Khali Hai
+                {restaurant.name}&apos;s Menu Is Empty
               </h3>
               <p className="text-xs text-slate-500 mt-1.5 max-w-md mx-auto leading-relaxed">
                 {hasStaffSession
-                  ? 'Abhi tak is restaurant mein koi dish add nahi hui hai. Neeche button par click karke apni dishes aur prices add karein.'
-                  : 'Digital menu abhi update ho raha hai. Kripya order ke liye staff se sampark karein.'}
+                  ? 'No dishes have been added to this restaurant yet. Click below to add dishes and prices.'
+                  : 'The digital menu is currently being updated. Please ask our staff for assistance.'}
               </p>
 
               {hasStaffSession && (
@@ -767,7 +767,7 @@ function CustomerOrderContent() {
           ) : filteredItems.length === 0 ? (
             <div className="bg-white rounded-2xl p-10 text-center border border-slate-200">
               <p className="text-sm font-semibold text-slate-600">
-                Is filter ya search se koi dish nahi mili.
+                No dishes match your current filter or search.
               </p>
               <button
                 onClick={() => {
@@ -996,9 +996,9 @@ function CustomerOrderContent() {
             {cartEntries.length === 0 ? (
               <div className="py-10 text-center">
                 <ShoppingBag className="w-9 h-9 text-slate-200 mx-auto mb-2" />
-                <p className="text-xs font-semibold text-slate-500">Cart abhi khali hai</p>
+                <p className="text-xs font-semibold text-slate-500">Your cart is empty</p>
                 <p className="text-[11px] text-slate-400 mt-0.5">
-                  Menu se + ADD dabakar items select karein
+                  Tap + ADD on dishes to add items
                 </p>
               </div>
             ) : (
@@ -1082,7 +1082,8 @@ function CustomerOrderContent() {
 
                 {!hasRazorpayOnlinePayment && (
                   <p className="text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
-                    Order direct place hoga aur payment <strong>counter / reception</strong> par hoga.
+                    Order will be placed directly and payment will be made at the{' '}
+                    <strong>counter / reception</strong>.
                   </p>
                 )}
 
@@ -1171,7 +1172,7 @@ function CustomerOrderContent() {
                   Your Order • Table {tableNumber}
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Bill aur invoice ke liye apna naam aur mobile number bharein
+                  Enter your name and mobile number for your bill and invoice
                 </p>
               </div>
               <button
@@ -1268,7 +1269,8 @@ function CustomerOrderContent() {
             <div className="pt-3 border-t border-slate-200 space-y-2 shrink-0">
               {!hasRazorpayOnlinePayment && (
                 <p className="text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
-                  Order direct place hoga aur payment <strong>counter / reception</strong> par hoga.
+                  Order will be placed directly and payment will be made at the{' '}
+                  <strong>counter / reception</strong>.
                 </p>
               )}
 

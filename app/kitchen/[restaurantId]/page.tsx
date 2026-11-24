@@ -5,10 +5,11 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import {
-  registerAndVerifyDevice,
-  sendDeviceHeartbeat,
-  removeCurrentDevice,
-} from '@/lib/deviceGuard';
+  isRoleSessionActive,
+  releaseRoleSessionIfOwner,
+  clearLocalSessionToken,
+} from '@/lib/roleSessionGuard';
+import SessionReplacedDialog from '@/components/SessionReplacedDialog';
 import {
   ChefHat,
   ArrowLeft,
@@ -21,7 +22,6 @@ import {
   LogOut,
   PackageCheck,
   X,
-  AlertTriangle,
 } from 'lucide-react';
 
 interface SessionData {
@@ -71,13 +71,12 @@ function KitchenDisplayContent() {
   const [stockItems, setStockItems] = useState<MenuStockItem[]>([]);
   const [loadingStock, setLoadingStock] = useState(false);
 
-  // Max 3 Devices Limit Modal
-  const [showDeviceLimitModal, setShowDeviceLimitModal] = useState(false);
+  // Session Replaced 5s Dialog
+  const [sessionReplaced, setSessionReplaced] = useState(false);
 
   const knownOrderIdsRef = useRef<Set<string>>(new Set());
   const isInitialLoadRef = useRef(true);
 
-  // Verify Session & Role
   useEffect(() => {
     const raw = localStorage.getItem('restro_session');
     if (!raw) {
@@ -99,41 +98,50 @@ function KitchenDisplayContent() {
     }
   }, [restaurantId, router]);
 
-  // MAX 3 DEVICES SESSION LOCK + AUTO LOGOUT ON BROWSER CLOSE
   useEffect(() => {
-    if (!session?.restaurantId) return;
+    if (!session?.restaurantId || !session?.role) return;
 
-    const checkDevice = async () => {
-      const allowed = await registerAndVerifyDevice(session.restaurantId);
-      if (!allowed) {
+    let cancelled = false;
+    const activeRole = session.role;
+
+    const enforceSingleRole = async () => {
+      const stillActive = await isRoleSessionActive(session.restaurantId, activeRole);
+      if (!stillActive && !cancelled) {
         localStorage.removeItem('restro_session');
-        setShowDeviceLimitModal(true);
+        clearLocalSessionToken();
+        setSessionReplaced(true);
       }
     };
 
-    checkDevice();
+    enforceSingleRole();
 
-    const heartbeatInterval = setInterval(async () => {
-      const stillValid = await sendDeviceHeartbeat(session.restaurantId);
-      if (!stillValid) {
-        localStorage.removeItem('restro_session');
-        clearInterval(heartbeatInterval);
-        setShowDeviceLimitModal(true);
-      }
-    }, 15000);
+    const sessionChannel = supabase
+      .channel(`kitchen-single-session-${session.restaurantId}-${activeRole}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'active_role_sessions',
+          filter: `restaurant_id=eq.${session.restaurantId}`,
+        },
+        (payload) => {
+          const row = payload.new as { role?: string } | null;
+          if (!row || row.role === activeRole) {
+            enforceSingleRole();
+          }
+        }
+      )
+      .subscribe();
 
-    const handleBrowserClose = () => {
-      localStorage.removeItem('restro_session');
-      removeCurrentDevice(session.restaurantId);
-    };
-
-    window.addEventListener('pagehide', handleBrowserClose);
+    const pollTimer = setInterval(enforceSingleRole, 5000);
 
     return () => {
-      clearInterval(heartbeatInterval);
-      window.removeEventListener('pagehide', handleBrowserClose);
+      cancelled = true;
+      supabase.removeChannel(sessionChannel);
+      clearInterval(pollTimer);
     };
-  }, [session?.restaurantId]);
+  }, [session?.restaurantId, session?.role]);
 
   const playNotificationSound = useCallback(() => {
     if (!soundEnabled) return;
@@ -288,8 +296,8 @@ function KitchenDisplayContent() {
   };
 
   const handleLogout = async () => {
-    if (restaurantId) {
-      await removeCurrentDevice(restaurantId);
+    if (restaurantId && session?.role) {
+      await releaseRoleSessionIfOwner(restaurantId, session.role);
     }
     localStorage.removeItem('restro_session');
     router.push('/');
@@ -316,7 +324,6 @@ function KitchenDisplayContent() {
       <header className="bg-slate-900 border-b border-slate-800 sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 py-3.5 sm:py-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            {/* Back button sirf Owner ke liye */}
             {isOwner && (
               <button
                 onClick={() => router.push('/dashboard')}
@@ -387,7 +394,6 @@ function KitchenDisplayContent() {
               <RefreshCw className="w-4 h-4" />
             </button>
 
-            {/* Dashboard button sirf Owner ko dikhega */}
             {isOwner && (
               <Link
                 href="/dashboard"
@@ -397,7 +403,6 @@ function KitchenDisplayContent() {
               </Link>
             )}
 
-            {/* Logout Button (Staff & Owner dono ke liye) */}
             <button
               type="button"
               onClick={handleLogout}
@@ -414,9 +419,10 @@ function KitchenDisplayContent() {
         {orders.length === 0 ? (
           <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-16 text-center max-w-md mx-auto mt-10">
             <ChefHat className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-            <h2 className="text-lg font-bold text-slate-200">Abhi Koi Pending Order Nahi Hai</h2>
+            <h2 className="text-lg font-bold text-slate-200">No Pending Orders Right Now</h2>
             <p className="text-xs text-slate-400 mt-1">
-              Jaise hi koi table order place karega, yahan bell bajegi aur KOT card aa jayega.
+              As soon as a table places an order, a chime will sound and the KOT card will appear
+              here.
             </p>
           </div>
         ) : (
@@ -521,7 +527,6 @@ function KitchenDisplayContent() {
         )}
       </main>
 
-      {/* QUICK STOCK AVAILABILITY MODAL */}
       {showStockModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-slate-900 border border-slate-700 text-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl max-h-[85vh] flex flex-col overflow-hidden">
@@ -529,7 +534,7 @@ function KitchenDisplayContent() {
               <div>
                 <h3 className="text-lg font-extrabold text-white">Quick Dish Stock Toggle</h3>
                 <p className="text-xs text-slate-400">
-                  Koi dish khatam ho gayi ho toh Sold Out mark karein
+                  Mark dishes as Sold Out when they run out
                 </p>
               </div>
               <button
@@ -545,7 +550,7 @@ function KitchenDisplayContent() {
                 <p className="text-xs text-slate-400 text-center py-8">Loading menu items...</p>
               ) : stockItems.length === 0 ? (
                 <p className="text-xs text-slate-400 text-center py-8">
-                  Abhi menu mein koi item add nahi hai.
+                  No menu items added yet.
                 </p>
               ) : (
                 stockItems.map((item) => (
@@ -577,33 +582,13 @@ function KitchenDisplayContent() {
         </div>
       )}
 
-      {/* MAX 3 DEVICES LOGOUT / BLOCK DIALOG */}
-      {showDeviceLimitModal && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-700 text-white rounded-3xl max-w-sm w-full p-6 shadow-2xl text-center space-y-4">
-            <div className="w-12 h-12 rounded-2xl bg-red-500/20 text-red-400 flex items-center justify-center mx-auto">
-              <AlertTriangle className="w-6 h-6" />
-            </div>
-
-            <div>
-              <h3 className="text-lg font-extrabold text-white">
-                Maximum 3 Devices Limit Reached
-              </h3>
-              <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
-                Is restaurant account par pehle se 3 devices active hain. Naye device par login karne ke liye pehle kisi ek purane device se Logout karein ya uska browser close karein.
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => router.push('/')}
-              className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-3 rounded-xl text-xs shadow-sm transition"
-            >
-              OK, Back to Home &rarr;
-            </button>
-          </div>
-        </div>
-      )}
+      <SessionReplacedDialog
+        open={sessionReplaced}
+        role={session.role}
+        onComplete={() => {
+          window.location.replace('/');
+        }}
+      />
     </div>
   );
 }

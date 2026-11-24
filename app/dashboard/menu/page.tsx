@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+import React, { useState, useEffect, useCallback, useMemo } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 import {
   ArrowLeft,
   Plus,
@@ -14,14 +14,14 @@ import {
   Search,
   UtensilsCrossed,
   AlertTriangle,
-} from 'lucide-react';
+} from "lucide-react";
 
 interface SessionData {
   restaurantId: string;
   restaurantName: string;
   city: string;
   totalTables: number;
-  role: 'owner' | 'staff';
+  role: "owner" | "staff";
 }
 
 interface MenuItem {
@@ -35,12 +35,12 @@ interface MenuItem {
 }
 
 const CATEGORIES = [
-  'Starters',
-  'Fast Food',
-  'Main Course',
-  'Breads & Rice',
-  'Beverages',
-  'Desserts',
+  "Starters",
+  "Fast Food",
+  "Main Course",
+  "Breads & Rice",
+  "Beverages",
+  "Desserts",
 ];
 
 export default function MenuManagerPage() {
@@ -48,22 +48,27 @@ export default function MenuManagerPage() {
   const [session, setSession] = useState<SessionData | null>(null);
   const [items, setItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Custom category states
+  const [extraCategories, setExtraCategories] = useState<string[]>([]);
+  const [showCategoryInput, setShowCategoryInput] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
 
   // Add New Dish Form States
-  const [name, setName] = useState('');
-  const [price, setPrice] = useState('');
-  const [category, setCategory] = useState('Fast Food');
-  const [description, setDescription] = useState('');
+  const [name, setName] = useState("");
+  const [price, setPrice] = useState("");
+  const [category, setCategory] = useState("Fast Food");
+  const [description, setDescription] = useState("");
   const [isVeg, setIsVeg] = useState(true);
   const [adding, setAdding] = useState(false);
 
   // Edit Dish Modal States
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
-  const [editName, setEditName] = useState('');
-  const [editPrice, setEditPrice] = useState('');
-  const [editCategory, setEditCategory] = useState('');
-  const [editDescription, setEditDescription] = useState('');
+  const [editName, setEditName] = useState("");
+  const [editPrice, setEditPrice] = useState("");
+  const [editCategory, setEditCategory] = useState("");
+  const [editDescription, setEditDescription] = useState("");
   const [editIsVeg, setEditIsVeg] = useState(true);
   const [savingEdit, setSavingEdit] = useState(false);
 
@@ -72,14 +77,14 @@ export default function MenuManagerPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem('restro_session');
+    const saved = localStorage.getItem("restro_session");
     if (!saved) {
-      router.push('/');
+      router.push("/");
       return;
     }
     const parsed: SessionData = JSON.parse(saved);
-    if (parsed.role !== 'owner') {
-      router.push('/dashboard');
+    if (parsed.role !== "owner") {
+      router.push("/dashboard");
       return;
     }
     setSession(parsed);
@@ -87,10 +92,10 @@ export default function MenuManagerPage() {
 
   const fetchMenu = useCallback(async (restaurantId: string) => {
     const { data, error } = await supabase
-      .from('menu_items')
-      .select('*')
-      .eq('restaurant_id', restaurantId)
-      .order('category', { ascending: true });
+      .from("menu_items")
+      .select("*")
+      .eq("restaurant_id", restaurantId)
+      .order("category", { ascending: true });
 
     if (!error && data) {
       setItems(data);
@@ -104,18 +109,50 @@ export default function MenuManagerPage() {
     }
   }, [session, fetchMenu]);
 
+  const availableCategories = useMemo(() => {
+    const merged = new Set<string>(CATEGORIES);
+    extraCategories.forEach((cat) => {
+      const trimmed = cat.trim();
+      if (trimmed) merged.add(trimmed);
+    });
+    items.forEach((item) => {
+      const trimmed = item.category?.trim();
+      if (trimmed) merged.add(trimmed);
+    });
+    return Array.from(merged);
+  }, [items, extraCategories]);
+
+  const handleCreateCategory = () => {
+    const trimmed = newCategoryName.trim();
+    if (!trimmed) return;
+
+    const existingMatch = availableCategories.find(
+      (c) => c.toLowerCase() === trimmed.toLowerCase(),
+    );
+    const finalCat = existingMatch || trimmed;
+
+    setExtraCategories((prev) =>
+      prev.some((c) => c.toLowerCase() === finalCat.toLowerCase())
+        ? prev
+        : [...prev, finalCat],
+    );
+    setCategory(finalCat);
+    setNewCategoryName("");
+    setShowCategoryInput(false);
+  };
+
   // Add New Dish
   const handleAddDish = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!session || session.role !== 'owner' || !name.trim() || !price) return;
+    if (!session || session.role !== "owner" || !name.trim() || !price) return;
 
     setAdding(true);
-    const { error } = await supabase.from('menu_items').insert([
+    const { error } = await supabase.from("menu_items").insert([
       {
         restaurant_id: session.restaurantId,
         name: name.trim(),
         price: Number(price),
-        category,
+        category: category.trim(),
         description: description.trim() || null,
         is_veg: isVeg,
         is_available: true,
@@ -124,9 +161,9 @@ export default function MenuManagerPage() {
 
     setAdding(false);
     if (!error) {
-      setName('');
-      setPrice('');
-      setDescription('');
+      setName("");
+      setPrice("");
+      setDescription("");
       fetchMenu(session.restaurantId);
     }
   };
@@ -137,19 +174,25 @@ export default function MenuManagerPage() {
     setEditName(item.name);
     setEditPrice(String(item.price));
     setEditCategory(item.category);
-    setEditDescription(item.description || '');
+    setEditDescription(item.description || "");
     setEditIsVeg(item.is_veg);
   };
 
   // Save Edited Dish
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!session || session.role !== 'owner' || !editingItem || !editName.trim() || !editPrice)
+    if (
+      !session ||
+      session.role !== "owner" ||
+      !editingItem ||
+      !editName.trim() ||
+      !editPrice
+    )
       return;
 
     setSavingEdit(true);
     const { error } = await supabase
-      .from('menu_items')
+      .from("menu_items")
       .update({
         name: editName.trim(),
         price: Number(editPrice),
@@ -157,7 +200,7 @@ export default function MenuManagerPage() {
         description: editDescription.trim() || null,
         is_veg: editIsVeg,
       })
-      .eq('id', editingItem.id);
+      .eq("id", editingItem.id);
 
     setSavingEdit(false);
     if (!error) {
@@ -168,11 +211,11 @@ export default function MenuManagerPage() {
 
   // Toggle Availability (In Stock / Sold Out)
   const handleToggleStock = async (item: MenuItem) => {
-    if (!session || session.role !== 'owner') return;
+    if (!session || session.role !== "owner") return;
     const { error } = await supabase
-      .from('menu_items')
+      .from("menu_items")
       .update({ is_available: !item.is_available })
-      .eq('id', item.id);
+      .eq("id", item.id);
 
     if (!error) {
       fetchMenu(session.restaurantId);
@@ -181,20 +224,20 @@ export default function MenuManagerPage() {
 
   // Confirm & Execute Delete (Safely detaches past order history reference first)
   const confirmDeleteDish = async () => {
-    if (!session || session.role !== 'owner' || !deletingItem) return;
+    if (!session || session.role !== "owner" || !deletingItem) return;
     setIsDeleting(true);
 
     // 1. Detach foreign key from past order_items so historical bills stay intact
     await supabase
-      .from('order_items')
+      .from("order_items")
       .update({ menu_item_id: null })
-      .eq('menu_item_id', deletingItem.id);
+      .eq("menu_item_id", deletingItem.id);
 
     // 2. Delete the dish from menu_items
     const { error } = await supabase
-      .from('menu_items')
+      .from("menu_items")
       .delete()
-      .eq('id', deletingItem.id);
+      .eq("id", deletingItem.id);
 
     setIsDeleting(false);
 
@@ -212,12 +255,12 @@ export default function MenuManagerPage() {
     );
   }
 
-  const isOwnerWeb = session.role === 'owner';
+  const isOwnerWeb = session.role === "owner";
 
   const filteredItems = items.filter(
     (i) =>
       i.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      i.category.toLowerCase().includes(searchQuery.toLowerCase())
+      i.category.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
   return (
@@ -233,7 +276,9 @@ export default function MenuManagerPage() {
               <ArrowLeft className="w-5 h-5" />
             </Link>
             <div>
-              <h1 className="text-lg font-bold text-slate-900">Menu & Prices Manager</h1>
+              <h1 className="text-lg font-bold text-slate-900">
+                Menu & Prices Manager
+              </h1>
               <p className="text-xs text-slate-500">
                 {session.restaurantName} • {items.length} Total Dishes
               </p>
@@ -246,7 +291,7 @@ export default function MenuManagerPage() {
         {/* Left Column: Add New Dish Form (Owner + Desktop Web Only Sticky) */}
         <section
           className={`bg-white border border-slate-200 rounded-2xl p-5 h-fit shadow-sm ${
-            isOwnerWeb ? 'lg:sticky lg:top-21' : ''
+            isOwnerWeb ? "lg:sticky lg:top-21" : ""
           }`}
         >
           <h2 className="text-base font-extrabold text-slate-900 mb-4 flex items-center gap-2">
@@ -255,7 +300,9 @@ export default function MenuManagerPage() {
 
           <form onSubmit={handleAddDish} className="space-y-3.5">
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Dish Name *</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Dish Name *
+              </label>
               <input
                 type="text"
                 required
@@ -266,9 +313,11 @@ export default function MenuManagerPage() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Price (₹) *</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Price (₹) *
+                </label>
                 <input
                   type="number"
                   required
@@ -281,18 +330,36 @@ export default function MenuManagerPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Category</label>
-                <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-orange-500"
-                >
-                  {CATEGORIES.map((cat) => (
-                    <option key={cat} value={cat}>
-                      {cat}
-                    </option>
-                  ))}
-                </select>
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Category
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowCategoryInput((prev) => !prev);
+                      setNewCategoryName("");
+                    }}
+                    title="Add Category"
+                    className="shrink-0 text-orange-700 text-xs font-bold flex items-center gap-1 transition mb-1"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Category</span>
+                  </button>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <select
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    className="w-full min-w-0 px-3 py-2 border border-slate-300 bg-white rounded-xl text-sm outline-none focus:border-orange-500"
+                  >
+                    {availableCategories.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
 
@@ -316,8 +383,8 @@ export default function MenuManagerPage() {
                 onClick={() => setIsVeg(true)}
                 className={`py-2 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition ${
                   isVeg
-                    ? 'bg-emerald-50 border-emerald-600 text-emerald-700'
-                    : 'bg-white border-slate-200 text-slate-600'
+                    ? "bg-emerald-50 border-emerald-600 text-emerald-700"
+                    : "bg-white border-slate-200 text-slate-600"
                 }`}
               >
                 <span className="w-3 h-3 border border-emerald-600 flex items-center justify-center">
@@ -331,8 +398,8 @@ export default function MenuManagerPage() {
                 onClick={() => setIsVeg(false)}
                 className={`py-2 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition ${
                   !isVeg
-                    ? 'bg-red-50 border-red-600 text-red-700'
-                    : 'bg-white border-slate-200 text-slate-600'
+                    ? "bg-red-50 border-red-600 text-red-700"
+                    : "bg-white border-slate-200 text-slate-600"
                 }`}
               >
                 <span className="w-3 h-3 border border-red-600 flex items-center justify-center">
@@ -347,8 +414,37 @@ export default function MenuManagerPage() {
               disabled={adding}
               className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-2.5 rounded-xl text-sm shadow-sm transition disabled:opacity-50"
             >
-              {adding ? 'Adding Dish...' : '+ Add to Menu'}
+              {adding ? "Adding Dish..." : "+ Add to Menu"}
             </button>
+            {showCategoryInput && (
+                  <div className="mt-2 flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      autoFocus
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          handleCreateCategory();
+                        } else if (e.key === "Escape") {
+                          setShowCategoryInput(false);
+                          setNewCategoryName("");
+                        }
+                      }}
+                      placeholder="Category name & press Enter..."
+                      className="w-full px-3 py-1.5 border border-orange-400 bg-orange-50/40 rounded-xl text-xs outline-none focus:border-orange-600"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleCreateCategory}
+                      title="Save Category"
+                      className="p-1.5 rounded-xs bg-orange-600 hover:bg-orange-700 text-white transition shrink-0"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
           </form>
         </section>
 
@@ -357,8 +453,8 @@ export default function MenuManagerPage() {
           <div
             className={
               isOwnerWeb
-                ? 'lg:sticky lg:top-[72px] lg:z-20 pt-3 pb-3 bg-slate-50'
-                : 'pt-1 pb-2'
+                ? "lg:sticky lg:top-[72px] lg:z-20 pt-3 pb-3 bg-slate-50"
+                : "pt-1 pb-2"
             }
           >
             <div className="relative">
@@ -376,7 +472,9 @@ export default function MenuManagerPage() {
           {filteredItems.length === 0 ? (
             <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center">
               <UtensilsCrossed className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-              <p className="text-sm font-semibold text-slate-600">Koi dish nahi mili.</p>
+              <p className="text-sm font-semibold text-slate-600">
+                No dishes found.
+              </p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -389,12 +487,12 @@ export default function MenuManagerPage() {
                     <div className="flex items-center gap-2 mb-1">
                       <span
                         className={`w-3.5 h-3.5 border flex items-center justify-center shrink-0 ${
-                          item.is_veg ? 'border-emerald-600' : 'border-red-600'
+                          item.is_veg ? "border-emerald-600" : "border-red-600"
                         }`}
                       >
                         <span
                           className={`w-1.5 h-1.5 rounded-full ${
-                            item.is_veg ? 'bg-emerald-600' : 'bg-red-600'
+                            item.is_veg ? "bg-emerald-600" : "bg-red-600"
                           }`}
                         ></span>
                       </span>
@@ -403,10 +501,16 @@ export default function MenuManagerPage() {
                       </span>
                     </div>
 
-                    <h3 className="font-bold text-slate-900 text-base">{item.name}</h3>
-                    <p className="font-extrabold text-orange-600 text-sm">₹{item.price}</p>
+                    <h3 className="font-bold text-slate-900 text-base">
+                      {item.name}
+                    </h3>
+                    <p className="font-extrabold text-orange-600 text-sm">
+                      ₹{item.price}
+                    </p>
                     {item.description && (
-                      <p className="text-xs text-slate-500 mt-0.5">{item.description}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {item.description}
+                      </p>
                     )}
                   </div>
 
@@ -416,11 +520,11 @@ export default function MenuManagerPage() {
                       onClick={() => handleToggleStock(item)}
                       className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
                         item.is_available
-                          ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
-                          : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                          ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                          : "bg-slate-200 text-slate-600 hover:bg-slate-300"
                       }`}
                     >
-                      {item.is_available ? 'In Stock' : 'Sold Out'}
+                      {item.is_available ? "In Stock" : "Sold Out"}
                     </button>
 
                     <button
@@ -463,7 +567,9 @@ export default function MenuManagerPage() {
 
             <form onSubmit={handleSaveEdit} className="space-y-3.5">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Dish Name *</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Dish Name *
+                </label>
                 <input
                   type="text"
                   required
@@ -475,7 +581,9 @@ export default function MenuManagerPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Price (₹) *</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Price (₹) *
+                  </label>
                   <input
                     type="number"
                     required
@@ -487,13 +595,15 @@ export default function MenuManagerPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Category</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Category
+                  </label>
                   <select
                     value={editCategory}
                     onChange={(e) => setEditCategory(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-slate-300 bg-white rounded-xl text-sm outline-none focus:border-blue-500"
                   >
-                    {CATEGORIES.map((cat) => (
+                    {availableCategories.map((cat) => (
                       <option key={cat} value={cat}>
                         {cat}
                       </option>
@@ -503,7 +613,9 @@ export default function MenuManagerPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Description</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Description
+                </label>
                 <input
                   type="text"
                   value={editDescription}
@@ -518,8 +630,8 @@ export default function MenuManagerPage() {
                   onClick={() => setEditIsVeg(true)}
                   className={`py-2 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition ${
                     editIsVeg
-                      ? 'bg-emerald-50 border-emerald-600 text-emerald-700'
-                      : 'bg-white border-slate-200 text-slate-600'
+                      ? "bg-emerald-50 border-emerald-600 text-emerald-700"
+                      : "bg-white border-slate-200 text-slate-600"
                   }`}
                 >
                   Pure Veg
@@ -530,8 +642,8 @@ export default function MenuManagerPage() {
                   onClick={() => setEditIsVeg(false)}
                   className={`py-2 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition ${
                     !editIsVeg
-                      ? 'bg-red-50 border-red-600 text-red-700'
-                      : 'bg-white border-slate-200 text-slate-600'
+                      ? "bg-red-50 border-red-600 text-red-700"
+                      : "bg-white border-slate-200 text-slate-600"
                   }`}
                 >
                   Non-Veg
@@ -552,7 +664,7 @@ export default function MenuManagerPage() {
                   className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl text-sm flex items-center justify-center gap-1.5 transition disabled:opacity-50"
                 >
                   <Check className="w-4 h-4" />
-                  {savingEdit ? 'Saving...' : 'Save Changes'}
+                  {savingEdit ? "Saving..." : "Save Changes"}
                 </button>
               </div>
             </form>
@@ -567,10 +679,13 @@ export default function MenuManagerPage() {
             <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-3">
               <AlertTriangle className="w-6 h-6" />
             </div>
-            <h3 className="text-lg font-extrabold text-slate-900">Delete Dish?</h3>
+            <h3 className="text-lg font-extrabold text-slate-900">
+              Delete Dish?
+            </h3>
             <p className="text-xs text-slate-500 mt-1 mb-5">
-              Kya aap sach mein <strong className="text-slate-800">{deletingItem.name}</strong> ko
-              menu se hatana chahte hain?
+              Are you sure you want to remove{" "}
+              <strong className="text-slate-800">{deletingItem.name}</strong>{" "}
+              from the menu?
             </p>
 
             <div className="flex gap-2.5">
@@ -588,7 +703,7 @@ export default function MenuManagerPage() {
                 disabled={isDeleting}
                 className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-sm transition disabled:opacity-50"
               >
-                {isDeleting ? 'Deleting...' : 'Yes, Delete'}
+                {isDeleting ? "Deleting..." : "Yes, Delete"}
               </button>
             </div>
           </div>

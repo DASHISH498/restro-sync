@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { claimSingleRoleSession } from '@/lib/roleSessionGuard';
 import {
   UtensilsCrossed,
   Search,
@@ -21,6 +22,7 @@ import {
   Hash,
   Check,
   Sparkles,
+  Store,
 } from 'lucide-react';
 
 interface Restaurant {
@@ -31,7 +33,11 @@ interface Restaurant {
   owner_pin: string;
   staff_pin?: string | null;
   owner_phone?: string | null;
+  outlet_mode?: 'single' | 'multiple' | null;
+  outlet_label?: string | null;
 }
+
+type ResetTargetRole = 'owner' | 'staff';
 
 const PRICING_PLANS = [
   {
@@ -111,6 +117,14 @@ const PRICING_PLANS = [
   },
 ];
 
+function formatRestaurantDisplayName(rest: Restaurant): string {
+  const label = rest.outlet_label?.trim();
+  if (rest.outlet_mode === 'multiple' && label) {
+    return `${rest.name} — ${label}`;
+  }
+  return rest.name;
+}
+
 export default function HomePage() {
   const router = useRouter();
 
@@ -126,14 +140,17 @@ export default function HomePage() {
 
   // Forgot PIN States
   const [isForgotMode, setIsForgotMode] = useState(false);
+  const [resetTargetRole, setResetTargetRole] = useState<ResetTargetRole>('owner');
   const [recoveryPhone, setRecoveryPhone] = useState('');
-  const [newOwnerPin, setNewOwnerPin] = useState('');
+  const [newPin, setNewPin] = useState('');
   const [resettingPin, setResettingPin] = useState(false);
   const [resetSuccessMsg, setResetSuccessMsg] = useState('');
 
   // Register Restaurant Modal States
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [selectedPlanLabel, setSelectedPlanLabel] = useState<string>('Yearly (₹5,499)');
+  const [outletMode, setOutletMode] = useState<'single' | 'multiple'>('single');
+  const [outletLabel, setOutletLabel] = useState('');
   const [regName, setRegName] = useState('');
   const [regCity, setRegCity] = useState('');
   const [regPhone, setRegPhone] = useState('');
@@ -149,16 +166,27 @@ export default function HomePage() {
     setVerifying(false);
     setErrorMsg('');
     setIsForgotMode(false);
+    setResetTargetRole('owner');
     setShowRegisterModal(false);
 
     const fetchRestaurants = async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('restaurants')
-        .select('id, name, city, total_tables, owner_pin, staff_pin, owner_phone')
+        .select(
+          'id, name, city, total_tables, owner_pin, staff_pin, owner_phone, outlet_mode, outlet_label'
+        )
         .order('created_at', { ascending: false });
 
-      if (data) {
-        setRestaurants(data);
+      if (!error && data) {
+        setRestaurants(data as Restaurant[]);
+      } else {
+        const { data: fallbackData } = await supabase
+          .from('restaurants')
+          .select('id, name, city, total_tables, owner_pin, staff_pin, owner_phone')
+          .order('created_at', { ascending: false });
+        if (fallbackData) {
+          setRestaurants(fallbackData as Restaurant[]);
+        }
       }
       setLoading(false);
     };
@@ -166,15 +194,15 @@ export default function HomePage() {
     fetchRestaurants();
   }, []);
 
-  // --- LOGIN & FORGOT PIN HANDLERS ---
   const handleOpenPinModal = (rest: Restaurant) => {
     setSelectedRestaurant(rest);
     setPin('');
     setErrorMsg('');
     setVerifying(false);
     setIsForgotMode(false);
+    setResetTargetRole('owner');
     setRecoveryPhone('');
-    setNewOwnerPin('');
+    setNewPin('');
     setResetSuccessMsg('');
   };
 
@@ -184,8 +212,18 @@ export default function HomePage() {
     setErrorMsg('');
     setVerifying(false);
     setIsForgotMode(false);
+    setResetTargetRole('owner');
     setRecoveryPhone('');
-    setNewOwnerPin('');
+    setNewPin('');
+    setResetSuccessMsg('');
+  };
+
+  const handleStartForgotMode = (targetRole: ResetTargetRole) => {
+    setResetTargetRole(targetRole);
+    setIsForgotMode(true);
+    setRecoveryPhone('');
+    setNewPin('');
+    setErrorMsg('');
     setResetSuccessMsg('');
   };
 
@@ -202,19 +240,28 @@ export default function HomePage() {
       selectedRestaurant.staff_pin && activePin === selectedRestaurant.staff_pin;
 
     if (isOwner || isStaff) {
+      const role: 'owner' | 'staff' = isOwner ? 'owner' : 'staff';
+      await claimSingleRoleSession(selectedRestaurant.id, role);
+
+      const displayName = formatRestaurantDisplayName(selectedRestaurant);
+
       localStorage.setItem(
         'restro_session',
         JSON.stringify({
           restaurantId: selectedRestaurant.id,
-          restaurantName: selectedRestaurant.name,
+          restaurantName: displayName,
+          brandName: selectedRestaurant.name,
+          outletLabel: selectedRestaurant.outlet_label || null,
+          outletMode: selectedRestaurant.outlet_mode || 'single',
+          ownerPhone: selectedRestaurant.owner_phone || null,
           city: selectedRestaurant.city,
           totalTables: selectedRestaurant.total_tables,
-          role: isOwner ? 'owner' : 'staff',
+          role,
         })
       );
-      router.push('/dashboard');
+      router.push(role === 'owner' ? '/dashboard' : `/kitchen/${selectedRestaurant.id}`);
     } else {
-      setErrorMsg('Galat PIN! Kripya sahi 6-digit PIN dalein.');
+      setErrorMsg('Incorrect PIN! Please enter a valid 6-digit PIN.');
       setPin('');
       setVerifying(false);
     }
@@ -230,70 +277,73 @@ export default function HomePage() {
     }
   };
 
-  const handleResetOwnerPin = async (e: React.FormEvent) => {
+  const handleResetPin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedRestaurant) return;
     setErrorMsg('');
     setResetSuccessMsg('');
 
+    const roleLabel = resetTargetRole === 'owner' ? 'Owner' : 'Staff';
     const cleanPhone = recoveryPhone.replace(/\D/g, '');
     if (cleanPhone.length !== 10) {
-      setErrorMsg('Kripya 10-digit registered mobile number dalein.');
+      setErrorMsg('Please enter a valid 10-digit registered owner mobile number.');
       return;
     }
-    if (newOwnerPin.length !== 6) {
-      setErrorMsg('Naya 6-digit Owner PIN dalein.');
+    if (newPin.length !== 6) {
+      setErrorMsg(`Please enter a new 6-digit ${roleLabel} PIN.`);
       return;
     }
 
     if (!selectedRestaurant.owner_phone) {
-      setErrorMsg(
-        'Is restaurant ke saath koi mobile number linked nahi hai. Admin se sampark karein.'
-      );
+      setErrorMsg('No mobile number is linked with this restaurant. Please contact support.');
       return;
     }
 
     if (cleanPhone !== selectedRestaurant.owner_phone) {
-      setErrorMsg('Mobile number match nahi hua! Registered owner number dalein.');
+      setErrorMsg('Mobile number does not match! Enter the registered owner number.');
       return;
     }
 
     setResettingPin(true);
 
+    const updatePayload =
+      resetTargetRole === 'owner' ? { owner_pin: newPin } : { staff_pin: newPin };
+
     const { error } = await supabase
       .from('restaurants')
-      .update({ owner_pin: newOwnerPin })
+      .update(updatePayload)
       .eq('id', selectedRestaurant.id);
 
     setResettingPin(false);
 
     if (error) {
-      setErrorMsg('PIN update karne mein error aaya. Dubara try karein.');
+      setErrorMsg(`Failed to update ${roleLabel} PIN. Please try again.`);
       return;
     }
 
     const updatedRest: Restaurant = {
       ...selectedRestaurant,
-      owner_pin: newOwnerPin,
+      ...updatePayload,
     };
     setSelectedRestaurant(updatedRest);
     setRestaurants((prev) =>
       prev.map((r) => (r.id === updatedRest.id ? updatedRest : r))
     );
 
-    setResetSuccessMsg('Owner PIN reset ho gaya! Ab naye PIN se login karein.');
+    setResetSuccessMsg(`${roleLabel} PIN has been reset! Please sign in with your new PIN.`);
     setTimeout(() => {
       setIsForgotMode(false);
       setPin('');
       setRecoveryPhone('');
-      setNewOwnerPin('');
+      setNewPin('');
       setResetSuccessMsg('');
     }, 1500);
   };
 
-  // --- REGISTER RESTAURANT HANDLER (WITH 14-DAY TRIAL & SELECTED PLAN) ---
   const handleOpenRegisterModal = (planName = 'Yearly (₹5,499)') => {
     setSelectedPlanLabel(planName);
+    setOutletMode('single');
+    setOutletLabel('');
     setRegName('');
     setRegCity('');
     setRegPhone('');
@@ -309,20 +359,26 @@ export default function HomePage() {
     setRegError('');
 
     const cleanPhone = regPhone.replace(/\D/g, '');
+    const cleanOutletLabel = outletLabel.trim();
+
     if (!regName.trim() || !regCity.trim()) {
-      setRegError('Restaurant ka naam aur city zaroori hai.');
+      setRegError('Restaurant name and city are required.');
+      return;
+    }
+    if (outletMode === 'multiple' && !cleanOutletLabel) {
+      setRegError('Please enter the Outlet / Location Name for multiple outlets.');
       return;
     }
     if (cleanPhone.length !== 10) {
-      setRegError('Kripya sahi 10-digit Owner Mobile Number dalein.');
+      setRegError('Please enter a valid 10-digit Owner Mobile Number.');
       return;
     }
     if (regOwnerPin.length !== 6) {
-      setRegError('6-digit Owner PIN set karna zaroori hai.');
+      setRegError('Setting a 6-digit Owner PIN is required.');
       return;
     }
     if (regStaffPin && regStaffPin.length !== 6) {
-      setRegError('Staff PIN bhi 6-digit ka hona chahiye (ya khali chhodein).');
+      setRegError('Staff PIN must also be 6 digits (or left blank).');
       return;
     }
 
@@ -332,37 +388,79 @@ export default function HomePage() {
     const trialEnd = new Date();
     trialEnd.setDate(trialEnd.getDate() + 14);
 
-    const { data, error } = await supabase
+    const basePayload = {
+      name: regName.trim(),
+      city: regCity.trim(),
+      phone: cleanPhone,
+      owner_phone: cleanPhone,
+      total_tables: finalTables,
+      owner_pin: regOwnerPin,
+      staff_pin: regStaffPin || null,
+      subscription_status: 'free_trial',
+      selected_plan: selectedPlanLabel,
+      trial_ends_at: trialEnd.toISOString(),
+    };
+
+    let savedOutletMode: 'single' | 'multiple' = outletMode;
+    let savedOutletLabel: string | null =
+      outletMode === 'multiple' ? cleanOutletLabel : null;
+
+    let insertResult = await supabase
       .from('restaurants')
       .insert([
         {
-          name: regName.trim(),
-          city: regCity.trim(),
-          phone: cleanPhone,
-          owner_phone: cleanPhone,
-          total_tables: finalTables,
-          owner_pin: regOwnerPin,
-          staff_pin: regStaffPin || null,
-          subscription_status: 'free_trial',
-          selected_plan: selectedPlanLabel,
-          trial_ends_at: trialEnd.toISOString(),
+          ...basePayload,
+          outlet_mode: outletMode,
+          outlet_label: savedOutletLabel,
         },
       ])
       .select()
       .single();
 
+    if (insertResult.error) {
+      const errText = insertResult.error.message.toLowerCase();
+      const isMissingColumnError =
+        errText.includes('outlet_mode') ||
+        errText.includes('outlet_label') ||
+        errText.includes('column') ||
+        errText.includes('schema cache');
+
+      if (isMissingColumnError) {
+        insertResult = await supabase
+          .from('restaurants')
+          .insert([basePayload])
+          .select()
+          .single();
+        savedOutletMode = 'single';
+        savedOutletLabel = null;
+      }
+    }
+
+    const { data, error } = insertResult;
     setRegistering(false);
 
     if (error || !data) {
-      setRegError('Registration fail hua. Kripya dubara try karein.');
+      setRegError(error?.message || 'Registration failed. Please try again.');
       return;
     }
+
+    await claimSingleRoleSession(data.id, 'owner');
+
+    const createdRest: Restaurant = {
+      ...(data as Restaurant),
+      outlet_mode: savedOutletMode,
+      outlet_label: savedOutletLabel,
+    };
 
     localStorage.setItem(
       'restro_session',
       JSON.stringify({
         restaurantId: data.id,
-        restaurantName: data.name,
+        restaurantName: formatRestaurantDisplayName(createdRest),
+        brandName: data.name,
+        outletLabel: createdRest.outlet_label,
+        outletMode: savedOutletMode,
+        ownerPhone: cleanPhone,
         city: data.city,
         totalTables: data.total_tables,
         role: 'owner',
@@ -372,15 +470,19 @@ export default function HomePage() {
     router.push('/dashboard');
   };
 
-  const filteredRestaurants = restaurants.filter(
-    (r) =>
-      r.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      r.city.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredRestaurants = restaurants.filter((r) => {
+    const q = searchQuery.toLowerCase();
+    return (
+      r.name.toLowerCase().includes(q) ||
+      r.city.toLowerCase().includes(q) ||
+      (r.outlet_label && r.outlet_label.toLowerCase().includes(q))
+    );
+  });
+
+  const activeResetLabel = resetTargetRole === 'owner' ? 'Owner' : 'Staff';
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
-      {/* Top Navbar */}
       <header className="bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
@@ -412,24 +514,22 @@ export default function HomePage() {
         </div>
       </header>
 
-      {/* Hero Section & Restaurant Search */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-12 pb-20">
         <div className="text-center max-w-2xl mx-auto">
           <span className="inline-block bg-orange-100 text-orange-700 text-xs font-bold px-3.5 py-1 rounded-full mb-4">
-            14–Day Free Trial • No Hardware Needed
+            14-Day Free Trial • No Hardware Needed
           </span>
 
           <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-slate-900 leading-tight">
-            Table Se Seedha Kitchen Tak —{' '}
+            From Table Straight to Kitchen —{' '}
             <span className="text-orange-600">Smart Restaurant POS & KDS</span>
           </h1>
 
           <p className="text-sm sm:text-base text-slate-500 mt-4 leading-relaxed">
-            Apne restaurant ka naam search karein, 6-digit PIN dalein aur turant Table Orders,
-            QR Menu aur Live Kitchen Display manage karein.
+            Search your restaurant name or location, enter your 6-digit PIN, and manage Table
+            Orders, QR Menus, and Live Kitchen Display in real time.
           </p>
 
-          {/* Search Input Box */}
           <div className="mt-8 max-w-lg mx-auto">
             <div className="relative">
               <Search className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
@@ -438,19 +538,18 @@ export default function HomePage() {
                 autoComplete="off"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search restaurant name or city..."
+                placeholder="Search restaurant name, location, or city..."
                 className="w-full pl-12 pr-4 py-3.5 bg-white border-2 border-slate-200 focus:border-orange-500 rounded-2xl text-sm sm:text-base font-medium shadow-sm outline-none transition"
               />
             </div>
 
-            {/* Search Results List */}
             {searchQuery.trim().length > 0 && (
               <div className="mt-3 bg-white border border-slate-200 rounded-2xl shadow-lg overflow-hidden text-left">
                 {loading ? (
                   <p className="p-4 text-xs text-slate-500 text-center">Searching...</p>
                 ) : filteredRestaurants.length === 0 ? (
                   <p className="p-4 text-xs text-slate-500 text-center">
-                    Koi restaurant nahi mila. Naya register karein!
+                    No restaurant found. Register a new one!
                   </p>
                 ) : (
                   <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto">
@@ -466,7 +565,9 @@ export default function HomePage() {
                             <Building2 className="w-5 h-5" />
                           </div>
                           <div>
-                            <p className="font-bold text-slate-900 text-sm">{rest.name}</p>
+                            <p className="font-bold text-slate-900 text-sm">
+                              {formatRestaurantDisplayName(rest)}
+                            </p>
                             <p className="text-xs text-slate-500">
                               {rest.city} • {rest.total_tables} Tables
                             </p>
@@ -474,7 +575,7 @@ export default function HomePage() {
                         </div>
 
                         <span className="text-xs font-extrabold text-orange-600 flex items-center gap-1">
-                          Login <ArrowRight className="w-3.5 h-3.5" />
+                          Select & Login <ArrowRight className="w-3.5 h-3.5" />
                         </span>
                       </button>
                     ))}
@@ -489,16 +590,15 @@ export default function HomePage() {
                 onClick={() => handleOpenRegisterModal('Yearly (₹5,499)')}
                 className="text-xs font-bold text-orange-600 hover:underline"
               >
-                Naya Restaurant hai? Yahan Free Register Karein &rarr;
+                New restaurant? Register for free here &rarr;
               </button>
             </div>
           </div>
         </div>
 
-        {/* Features Grid */}
         <section className="mt-20 max-w-6xl mx-auto">
           <h2 className="text-center text-xl sm:text-2xl font-extrabold text-slate-900 mb-8">
-            Ek Hi Portal Mein Sab Kuch
+            Everything in One Portal
           </h2>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -510,8 +610,8 @@ export default function HomePage() {
                 1. Auto Table QR & Cart
               </h3>
               <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                Har table ke liye alag QR code. Customer scan karke bina app download kiye seedha
-                order bhej sakta hai.
+                Dedicated QR code for every table. Customers scan and order directly without
+                installing an app.
               </p>
             </div>
 
@@ -523,7 +623,8 @@ export default function HomePage() {
                 2. Live Kitchen Display (KDS)
               </h3>
               <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                Naya order aate hi kitchen screen par sound alert aur live KOT ticket dikhega.
+                Get instant alerts and live KOT tickets on the kitchen screen as soon as an order
+                arrives.
               </p>
             </div>
 
@@ -535,24 +636,23 @@ export default function HomePage() {
                 3. Easy Menu & Billing
               </h3>
               <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                Real-time dish availability toggle, Cash/UPI settlement aur daily sales tracking.
+                Real-time dish availability toggle, Cash/UPI settlement, and daily sales tracking.
               </p>
             </div>
           </div>
         </section>
 
-        {/* PRICING PLANS SECTION */}
         <section id="pricing" className="mt-24 scroll-mt-24">
           <div className="text-center max-w-2xl mx-auto mb-10">
             <span className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-extrabold px-3.5 py-1 rounded-full mb-3">
               <Sparkles className="w-3.5 h-3.5" /> Simple & Transparent Plans
             </span>
             <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900">
-              Apne Restaurant Ke Liye Best Plan Chunein
+              Choose the Best Plan for Your Restaurant
             </h2>
             <p className="text-xs sm:text-sm text-slate-500 mt-2">
-              Har plan ke saath pehle <strong>14 Din Bilkul Free Trial</strong> milega. Koi setup fee
-              ya hidden charge nahi.
+              Every plan includes a <strong>14-Day Free Trial</strong> with zero setup fee or hidden
+              charges.
             </p>
           </div>
 
@@ -645,7 +745,6 @@ export default function HomePage() {
         </section>
       </main>
 
-      {/* REGISTER RESTAURANT MODAL */}
       {showRegisterModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl relative max-h-[92vh] overflow-y-auto">
@@ -663,14 +762,47 @@ export default function HomePage() {
               </span>
               <h3 className="text-xl font-extrabold text-slate-900">Register Restaurant</h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Details bharein aur turant apna POS & QR Menu shuru karein.
+                Fill in your details to launch your POS & QR Menu right away.
               </p>
             </div>
 
             <form onSubmit={handleRegisterRestaurant} autoComplete="off" className="space-y-3.5">
               <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  Restaurant Setup Type *
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOutletMode('single');
+                      setOutletLabel('');
+                    }}
+                    className={`py-2.5 px-3 rounded-xl border text-xs font-extrabold transition ${
+                      outletMode === 'single'
+                        ? 'bg-orange-50 border-orange-500 text-orange-700'
+                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    Single Outlet
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOutletMode('multiple')}
+                    className={`py-2.5 px-3 rounded-xl border text-xs font-extrabold transition ${
+                      outletMode === 'multiple'
+                        ? 'bg-orange-50 border-orange-500 text-orange-700'
+                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    Multiple Outlets
+                  </button>
+                </div>
+              </div>
+
+              <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Restaurant / Cafe Name *
+                  Restaurant / Brand Name *
                 </label>
                 <div className="relative">
                   <Building2 className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -684,6 +816,25 @@ export default function HomePage() {
                   />
                 </div>
               </div>
+
+              {outletMode === 'multiple' && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Outlet / Location Name *
+                  </label>
+                  <div className="relative">
+                    <Store className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      required
+                      value={outletLabel}
+                      onChange={(e) => setOutletLabel(e.target.value)}
+                      placeholder="e.g. Location A (Vaishali Nagar)"
+                      className="w-full pl-10 pr-3.5 py-2.5 border border-orange-300 focus:border-orange-500 rounded-xl text-sm outline-none transition"
+                    />
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">City *</label>
@@ -702,7 +853,7 @@ export default function HomePage() {
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Owner Mobile Number (For Forgot PIN Recovery) *
+                  Owner Mobile Number (For Forgot PIN & Combined Sales) *
                 </label>
                 <div className="relative">
                   <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -802,7 +953,6 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* PIN LOGIN & FORGOT PIN RESET MODAL */}
       {selectedRestaurant && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-3xl max-w-sm w-full p-7 shadow-2xl relative text-center">
@@ -819,7 +969,7 @@ export default function HomePage() {
             </div>
 
             <h3 className="text-lg font-extrabold text-slate-900">
-              {selectedRestaurant.name}
+              {formatRestaurantDisplayName(selectedRestaurant)}
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">{selectedRestaurant.city}</p>
 
@@ -856,27 +1006,32 @@ export default function HomePage() {
                   {verifying ? 'Checking PIN...' : 'Unlock Dashboard'}
                 </button>
 
-                <div className="pt-1">
+                <div className="pt-1 flex flex-col items-center gap-1.5">
                   <button
                     type="button"
-                    onClick={() => {
-                      setIsForgotMode(true);
-                      setErrorMsg('');
-                    }}
+                    onClick={() => handleStartForgotMode('owner')}
                     className="text-xs font-bold text-slate-500 hover:text-orange-600 transition"
                   >
                     Forgot Owner PIN? Reset Here &rarr;
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleStartForgotMode('staff')}
+                    className="text-xs font-bold text-slate-500 hover:text-orange-600 transition"
+                  >
+                    Forgot Staff PIN? Reset Here &rarr;
                   </button>
                 </div>
               </form>
             ) : (
               <form
-                onSubmit={handleResetOwnerPin}
+                onSubmit={handleResetPin}
                 autoComplete="off"
                 className="mt-5 space-y-3.5 text-left"
               >
                 <p className="text-xs text-slate-500 text-center">
-                  Registered <strong>Owner Mobile Number</strong> verify karke naya 6-digit PIN set karein.
+                  Verify your registered <strong>Owner Mobile Number</strong> to set a new 6-digit{' '}
+                  <strong>{activeResetLabel} PIN</strong>.
                 </p>
 
                 <div>
@@ -902,7 +1057,7 @@ export default function HomePage() {
 
                 <div>
                   <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                    Set New 6-Digit Owner PIN
+                    Set New 6-Digit {activeResetLabel} PIN
                   </label>
                   <div className="relative">
                     <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -912,9 +1067,9 @@ export default function HomePage() {
                       maxLength={6}
                       required
                       autoComplete="new-password"
-                      value={newOwnerPin}
+                      value={newPin}
                       onChange={(e) =>
-                        setNewOwnerPin(e.target.value.replace(/\D/g, '').slice(0, 6))
+                        setNewPin(e.target.value.replace(/\D/g, '').slice(0, 6))
                       }
                       placeholder="••••••"
                       className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm font-bold tracking-widest outline-none transition"
@@ -939,7 +1094,9 @@ export default function HomePage() {
                   disabled={resettingPin}
                   className="w-full bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white font-extrabold py-3 rounded-2xl text-sm shadow-md transition"
                 >
-                  {resettingPin ? 'Updating PIN...' : 'Verify & Set New PIN'}
+                  {resettingPin
+                    ? `Updating ${activeResetLabel} PIN...`
+                    : `Verify & Set New ${activeResetLabel} PIN`}
                 </button>
 
                 <div className="text-center pt-1">

@@ -102,7 +102,7 @@ export default function RestaurantSettingsPage() {
       setSavedToast(true);
       setTimeout(() => setSavedToast(false), 3500);
     } else {
-      alert('Settings save karne mein error aaya.');
+      alert('Failed to save settings.');
     }
   };
 
@@ -130,7 +130,7 @@ export default function RestaurantSettingsPage() {
               <Settings className="w-4 h-4 text-orange-600" /> Restaurant Settings
             </h1>
             <p className="text-xs text-slate-500">
-              Tables count, cafe details aur login PINs manage karein
+              Manage seating tables, cafe details, and login PINs
             </p>
           </div>
         </div>
@@ -141,7 +141,7 @@ export default function RestaurantSettingsPage() {
           <div className="bg-emerald-600 text-white p-4 rounded-2xl shadow-md flex items-center gap-3">
             <CheckCircle2 className="w-5 h-5 shrink-0" />
             <p className="text-sm font-bold">
-              Settings updated! Naye tables aur details turant active ho gaye hain.
+              Settings updated! Your new table count and details are now active.
             </p>
           </div>
         )}
@@ -193,8 +193,8 @@ export default function RestaurantSettingsPage() {
                 className="w-full sm:w-48 px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm font-bold outline-none focus:border-orange-500"
               />
               <p className="text-[11px] text-slate-400 mt-1">
-                Tables badhane par Dashboard aur Table QR Codes page par naye QR codes apne aap
-                aa jayenge.
+                Updating the table count automatically refreshes tables on the Dashboard and Table QR
+                Codes page.
               </p>
             </div>
           </section>
