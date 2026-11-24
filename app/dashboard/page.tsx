@@ -178,7 +178,7 @@ const MULTI_UPGRADE_PLANS: UpgradePlanOption[] = [
     id: 'multi_1_month',
     name: '1 Month Plan',
     price: '₹1,115',
-    amount: 1,
+    amount: 1115,
     durationDays: 30,
     maxOutlets: 2,
     tag: 'Up to 2 Outlets',
@@ -614,7 +614,6 @@ export default function DashboardPage() {
         }
       } else {
         setAllOutletOrders(currentOutletOrders);
-        setSalesScope('current');
       }
     } else {
       setOwnerOutlets([]);
@@ -783,7 +782,6 @@ export default function DashboardPage() {
     const targetTitle = formatOutletTitle(outletToRemove);
     const isCurrentOutlet = targetId === session.restaurantId;
 
-    // Clean up child records if present before deleting restaurant row
     const { data: outletOrders } = await supabase
       .from('orders')
       .select('id')
@@ -1172,17 +1170,30 @@ export default function DashboardPage() {
     );
   }
 
-  const hasMultipleOwnerOutlets = isOwner && ownerOutlets.length > 1;
   const activeSalesScope: 'current' | 'all_outlets' =
-    hasMultipleOwnerOutlets && salesScope === 'all_outlets' && masterUnlocked
+    isMultiOutletMode && salesScope === 'all_outlets' && masterUnlocked
       ? 'all_outlets'
       : 'current';
 
   const activeUpgradePlans =
     upgradeModeTab === 'multiple' ? MULTI_UPGRADE_PLANS : SINGLE_UPGRADE_PLANS;
 
+  const outletsForDisplay: OutletMeta[] =
+    ownerOutlets.length > 0
+      ? ownerOutlets
+      : [
+          {
+            id: session.restaurantId,
+            name: session.brandName || session.restaurantName,
+            city: session.city,
+            total_tables: session.totalTables,
+            outlet_mode: session.outletMode,
+            outlet_label: session.outletLabel,
+          },
+        ];
+
   const outletNameById: Record<string, string> = {};
-  ownerOutlets.forEach((o) => {
+  outletsForDisplay.forEach((o) => {
     outletNameById[o.id] = formatOutletTitle(o);
   });
   outletNameById[session.restaurantId] = session.restaurantName;
@@ -1269,8 +1280,8 @@ export default function DashboardPage() {
     .reduce((sum, o) => sum + Number(o.total_amount), 0);
 
   const outletBreakdownRows =
-    activeSalesScope === 'all_outlets' && hasMultipleOwnerOutlets
-      ? ownerOutlets.map((out) => {
+    activeSalesScope === 'all_outlets' && isMultiOutletMode
+      ? outletsForDisplay.map((out) => {
           const outOrders = applyDateAndSearchFilter(
             allOutletOrders.filter(
               (o) =>
@@ -1438,7 +1449,6 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* Single-outlet owner upgrade banner only (hidden in multi-outlet branch counter view) */}
         {isOwner && !isMultiOutletMode && subInfo.status !== 'active' && (
           <section
             className={`rounded-2xl p-4 border flex flex-wrap items-center justify-between gap-3 shadow-sm ${
@@ -1935,7 +1945,7 @@ export default function DashboardPage() {
                   required
                   value={newOutletLabel}
                   onChange={(e) => setNewOutletLabel(e.target.value)}
-                  placeholder="e.g. Branch 3 (Mansarovar)"
+                  placeholder="e.g. Branch 2 (Malviya Nagar)"
                   className="w-full px-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none"
                 />
               </div>
@@ -2284,7 +2294,7 @@ export default function DashboardPage() {
                 </h3>
                 <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5">
                   {activeSalesScope === 'all_outlets'
-                    ? `Owner Vault • Combined view across ${ownerOutlets.length} outlets`
+                    ? `Owner Vault • Combined view across ${outletsForDisplay.length} outlet(s)`
                     : `${session.restaurantName} • Track by Invoice No., Bill No., UTR / Payment ID, Name, or Phone`}
                 </p>
               </div>
@@ -2297,7 +2307,7 @@ export default function DashboardPage() {
               </button>
             </div>
 
-            {hasMultipleOwnerOutlets && (
+            {isMultiOutletMode && (
               <div className="flex items-center gap-2 pt-3 shrink-0 flex-wrap">
                 <button
                   type="button"
@@ -2320,7 +2330,7 @@ export default function DashboardPage() {
                   }`}
                 >
                   <Lock className="w-3.5 h-3.5" />
-                  <span>Owner Combined & Outlets ({ownerOutlets.length})</span>
+                  <span>Owner Combined & Outlets ({outletsForDisplay.length})</span>
                 </button>
               </div>
             )}
@@ -2443,8 +2453,7 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* Asli Malik Panel: Outlet-Wise Sales + Add / Remove Outlets */}
-            {activeSalesScope === 'all_outlets' && masterUnlocked && hasMultipleOwnerOutlets && (
+            {activeSalesScope === 'all_outlets' && masterUnlocked && isMultiOutletMode && (
               <div className="mb-3 bg-slate-50 border border-slate-200 rounded-2xl p-3.5 shrink-0 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
@@ -2498,7 +2507,7 @@ export default function DashboardPage() {
                       <button
                         type="button"
                         onClick={() => {
-                          const target = ownerOutlets.find((o) => o.id === row.id) || null;
+                          const target = outletsForDisplay.find((o) => o.id === row.id) || null;
                           setRemoveOutletError('');
                           setOutletToRemove(target);
                         }}
