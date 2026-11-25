@@ -1148,7 +1148,7 @@ export default function DashboardPage() {
     const printedAt = new Date().toLocaleString("en-IN", {
       day: "2-digit",
       month: "short",
-      year: "numeric",
+      year: "2-digit",
       hour: "2-digit",
       minute: "2-digit",
     });
@@ -1157,8 +1157,8 @@ export default function DashboardPage() {
       .map(
         (it) => `
           <tr>
-            <td style="padding:4px 0;vertical-align:top;">${it.quantity}&times; ${it.item_name}</td>
-            <td style="padding:4px 0;text-align:right;font-weight:700;white-space:nowrap;">&#8377;${(it.price * it.quantity).toLocaleString("en-IN")}</td>
+            <td class="item-name">${it.quantity}x ${it.item_name}</td>
+            <td class="item-amt">&#8377;${(it.price * it.quantity).toLocaleString("en-IN")}</td>
           </tr>
         `,
       )
@@ -1171,70 +1171,137 @@ export default function DashboardPage() {
           <meta charset="utf-8" />
           <title>Bill - Table ${tableNum}</title>
           <style>
-            @page { margin: 8mm; }
-            body {
-              font-family: Arial, Helvetica, sans-serif;
-              color: #0f172a;
-              max-width: 320px;
+            @page {
+              size: 58mm auto;
+              margin: 0mm;
+            }
+            * {
+              box-sizing: border-box;
+              margin: 0;
+              padding: 0;
+            }
+            html, body {
+              width: 58mm;
+              max-width: 58mm;
+              background: #fff;
+              color: #000;
+              font-family: 'Courier New', Courier, monospace;
+              font-size: 11px;
+              line-height: 1.3;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+            .receipt {
+              width: 48mm;
               margin: 0 auto;
-              padding: 12px;
-              font-size: 12px;
+              padding: 2mm 0 4mm 0;
             }
             .center { text-align: center; }
-            .title { font-size: 16px; font-weight: 800; margin: 0; }
-            .muted { color: #64748b; font-size: 11px; margin-top: 2px; }
-            .hr { border-top: 1px dashed #94a3b8; margin: 10px 0; }
-            table { width: 100%; border-collapse: collapse; }
-            .total-row td {
-              border-top: 1px solid #0f172a;
-              padding-top: 8px;
-              font-size: 14px;
-              font-weight: 800;
+            .store-name {
+              font-size: 13px;
+              font-weight: 900;
+              text-transform: uppercase;
+              word-break: break-word;
             }
-            .badge {
-              display: inline-block;
-              margin-top: 8px;
-              padding: 3px 8px;
-              border-radius: 6px;
-              font-size: 11px;
+            .meta {
+              font-size: 10px;
               font-weight: 700;
-              background: #f1f5f9;
+              margin-top: 2px;
+            }
+            .divider {
+              border-top: 1px dashed #000;
+              margin: 5px 0;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+            }
+            th {
+              font-size: 10px;
+              font-weight: 900;
+              border-bottom: 1px dashed #000;
+              padding-bottom: 3px;
+              text-align: left;
+            }
+            th.right { text-align: right; }
+            td.item-name {
+              padding: 3px 2px 3px 0;
+              font-size: 10.5px;
+              font-weight: 700;
+              vertical-align: top;
+              word-break: break-word;
+            }
+            td.item-amt {
+              padding: 3px 0;
+              font-size: 10.5px;
+              font-weight: 900;
+              text-align: right;
+              vertical-align: top;
+              white-space: nowrap;
+            }
+            .total-row td {
+              border-top: 1px solid #000;
+              border-bottom: 1px solid #000;
+              padding: 5px 0;
+              font-size: 12.5px;
+              font-weight: 900;
+            }
+            .pay-mode {
+              margin-top: 5px;
+              font-size: 10.5px;
+              font-weight: 900;
+            }
+            .thanks {
+              margin-top: 4px;
+              font-size: 10px;
+              font-weight: 700;
             }
           </style>
         </head>
         <body>
-          <div class="center">
-            <p class="title">${session.restaurantName}</p>
-            ${session.city ? `<p class="muted">${session.city}</p>` : ""}
-            <p class="muted">Table ${tableNum} &bull; ${printedAt}</p>
-            ${invoiceNumber ? `<p class="muted">Invoice: ${invoiceNumber}</p>` : ""}
-            ${
-              guestName || guestPhone
-                ? `<p class="muted">Guest: ${guestName || "Walk-in Guest"}${
-                    guestPhone ? ` (${guestPhone})` : ""
-                  }</p>`
-                : ""
-            }
-          </div>
-          <div class="hr"></div>
-          <table>
-            <tbody>
-              ${itemRowsHtml}
-              <tr class="total-row">
-                <td>Total Bill</td>
-                <td style="text-align:right;">&#8377;${totalAmount.toLocaleString("en-IN")}</td>
-              </tr>
-            </tbody>
-          </table>
-          <div class="center">
-            <span class="badge">Paid via ${method.toUpperCase()}</span>
-            <p class="muted" style="margin-top:10px;">Thank you for visiting!</p>
+          <div class="receipt">
+            <div class="center">
+              <div class="store-name">${session.restaurantName}</div>
+              ${session.city ? `<div class="meta">${session.city}</div>` : ""}
+              <div class="meta">Table: ${tableNum} | ${printedAt}</div>
+              ${invoiceNumber ? `<div class="meta">${invoiceNumber}</div>` : ""}
+              ${
+                guestName || guestPhone
+                  ? `<div class="meta">${guestName || "Guest"}${
+                      guestPhone ? ` (${guestPhone})` : ""
+                    }</div>`
+                  : ""
+              }
+            </div>
+
+            <div class="divider"></div>
+
+            <table>
+              <thead>
+                <tr>
+                  <th>ITEM</th>
+                  <th class="right">AMT</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${itemRowsHtml}
+                <tr class="total-row">
+                  <td>TOTAL</td>
+                  <td style="text-align:right;">&#8377;${totalAmount.toLocaleString("en-IN")}</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div class="center">
+              <div class="pay-mode">PAID BY ${method.toUpperCase()}</div>
+              <div class="thanks">Thank You! Visit Again</div>
+            </div>
           </div>
         </body>
       </html>
     `;
 
-    const printWin = window.open("", "_blank", "width=380,height=560");
+    const printWin = window.open("", "_blank", "width=260,height=520");
     if (printWin) {
       printWin.document.open();
       printWin.document.write(receiptHtml);
