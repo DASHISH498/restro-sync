@@ -820,7 +820,9 @@ export default function HomePage() {
         setSelectedPlanLabel(label);
         setSelectedPlanAmount(plan.amount);
         setOutletMode(mode);
-        setOutletLabel('');
+        if (mode === 'single') {
+          setOutletLabel('');
+        }
         setRegName('');
         setRegCity('');
         setRegTables(10);
@@ -1091,6 +1093,12 @@ export default function HomePage() {
     pricingTab === 'single' ? SINGLE_OUTLET_PLANS : MULTIPLE_OUTLET_PLANS;
   const isSelectedMultiOutlet = selectedRestaurant?.outlet_mode === 'multiple';
 
+  // Lock setup type strictly when a paid plan (single or multiple) was chosen
+  const isPaidPlanSelected =
+    !isTrialFlow && !selectedPlanLabel.toLowerCase().includes('trial');
+  const isSingleLocked = isPaidPlanSelected && outletMode === 'multiple';
+  const isMultipleLocked = isPaidPlanSelected && outletMode === 'single';
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <header className="bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-30">
@@ -1218,7 +1226,7 @@ export default function HomePage() {
                 <QrCode className="w-5 h-5" />
               </div>
               <h3 className="font-extrabold text-slate-900 text-base">
-                1. Auto Table QR &amp; Cart
+1. Auto Table QR &amp; Cart
               </h3>
               <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
                 Dedicated QR code for every table. Customers scan and order directly without
@@ -1231,7 +1239,7 @@ export default function HomePage() {
                 <ChefHat className="w-5 h-5" />
               </div>
               <h3 className="font-extrabold text-slate-900 text-base">
-                2. Live Kitchen Display (KDS)
+2. Live Kitchen Display (KDS)
               </h3>
               <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
                 Get instant alerts and live KOT tickets on the kitchen screen as soon as an order
@@ -1244,7 +1252,7 @@ export default function HomePage() {
                 <Receipt className="w-5 h-5" />
               </div>
               <h3 className="font-extrabold text-slate-900 text-base">
-                3. Easy Menu &amp; Billing
+3. Easy Menu &amp; Billing
               </h3>
               <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
                 Real-time dish availability toggle, Cash/UPI settlement, and daily sales tracking.
@@ -1476,7 +1484,9 @@ export default function HomePage() {
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
+                    disabled={isSingleLocked}
                     onClick={() => {
+                      if (isSingleLocked) return;
                       setOutletMode('single');
                       setOutletLabel('');
                       setRegError('');
@@ -1485,13 +1495,19 @@ export default function HomePage() {
                       outletMode === 'single'
                         ? 'bg-orange-50 border-orange-500 text-orange-700'
                         : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    } ${
+                      isSingleLocked
+                        ? 'opacity-45 cursor-not-allowed bg-slate-100 text-slate-400 hover:bg-slate-100'
+                        : ''
                     }`}
                   >
                     Single Outlet
                   </button>
                   <button
                     type="button"
+                    disabled={isMultipleLocked}
                     onClick={() => {
+                      if (isMultipleLocked) return;
                       setOutletMode('multiple');
                       setRegError('');
                     }}
@@ -1499,6 +1515,10 @@ export default function HomePage() {
                       outletMode === 'multiple'
                         ? 'bg-orange-50 border-orange-500 text-orange-700'
                         : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    } ${
+                      isMultipleLocked
+                        ? 'opacity-45 cursor-not-allowed bg-slate-100 text-slate-400 hover:bg-slate-100'
+                        : ''
                     }`}
                   >
                     Multiple Outlets
