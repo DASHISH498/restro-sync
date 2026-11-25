@@ -573,7 +573,7 @@ export default function HomePage() {
       })
     );
 
-    router.push('/dashboard');
+    router.replace('/dashboard');
   };
 
   const handlePinLogin = async (e?: React.FormEvent, enteredPin?: string) => {
@@ -612,7 +612,11 @@ export default function HomePage() {
           role,
         })
       );
-      router.push(role === 'owner' ? '/dashboard' : `/kitchen/${selectedRestaurant.id}`);
+      if (role === 'owner') {
+        router.replace('/dashboard');
+      } else {
+        router.push(`/kitchen/${selectedRestaurant.id}`);
+      }
     } else {
       setErrorMsg('Incorrect PIN! Please enter a valid 6-digit PIN.');
       setPin('');
@@ -970,7 +974,7 @@ export default function HomePage() {
       })
     );
 
-    router.push('/dashboard');
+    router.replace('/dashboard');
   };
 
   const handleRegisterRestaurant = async (e: React.FormEvent) => {
@@ -1093,7 +1097,6 @@ export default function HomePage() {
     pricingTab === 'single' ? SINGLE_OUTLET_PLANS : MULTIPLE_OUTLET_PLANS;
   const isSelectedMultiOutlet = selectedRestaurant?.outlet_mode === 'multiple';
 
-  // Lock setup type strictly when a paid plan (single or multiple) was chosen
   const isPaidPlanSelected =
     !isTrialFlow && !selectedPlanLabel.toLowerCase().includes('trial');
   const isSingleLocked = isPaidPlanSelected && outletMode === 'multiple';
@@ -1226,7 +1229,7 @@ export default function HomePage() {
                 <QrCode className="w-5 h-5" />
               </div>
               <h3 className="font-extrabold text-slate-900 text-base">
-1. Auto Table QR &amp; Cart
+                1. Auto Table QR &amp; Cart
               </h3>
               <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
                 Dedicated QR code for every table. Customers scan and order directly without
@@ -1239,7 +1242,7 @@ export default function HomePage() {
                 <ChefHat className="w-5 h-5" />
               </div>
               <h3 className="font-extrabold text-slate-900 text-base">
-2. Live Kitchen Display (KDS)
+                2. Live Kitchen Display (KDS)
               </h3>
               <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
                 Get instant alerts and live KOT tickets on the kitchen screen as soon as an order
@@ -1252,7 +1255,7 @@ export default function HomePage() {
                 <Receipt className="w-5 h-5" />
               </div>
               <h3 className="font-extrabold text-slate-900 text-base">
-3. Easy Menu &amp; Billing
+                3. Easy Menu &amp; Billing
               </h3>
               <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
                 Real-time dish availability toggle, Cash/UPI settlement, and daily sales tracking.
