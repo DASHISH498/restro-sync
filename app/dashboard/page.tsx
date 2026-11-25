@@ -103,6 +103,12 @@ interface OrderRecord {
   }[];
 }
 
+interface ArchivedOutletRecord {
+  outlet: OutletMeta;
+  deletedAt: string;
+  orders: OrderRecord[];
+}
+
 interface MenuStockItem {
   id: string;
   name: string;
@@ -268,6 +274,14 @@ function formatOutletTitle(outlet: {
   return outlet.city ? `${outlet.name} (${outlet.city})` : outlet.name;
 }
 
+function getArchivedOutletsStorageKey(
+  ownerPhone?: string | null,
+  fallbackId?: string,
+): string {
+  const cleanPhone = (ownerPhone || "").replace(/\D/g, "");
+  return `restro_deleted_outlets_${cleanPhone || fallbackId || "default"}`;
+}
+
 export default function DashboardPage() {
   const router = useRouter();
 
@@ -297,6 +311,15 @@ export default function DashboardPage() {
   const [selectedOutletDropdown, setSelectedOutletDropdown] =
     useState<string>("all");
   const [malikBillSearch, setMalikBillSearch] = useState<string>("");
+
+  // Deleted Outlets Archive State
+  const [archivedOutlets, setArchivedOutlets] = useState<
+    ArchivedOutletRecord[]
+  >([]);
+  const [showDeletedOutletsModal, setShowDeletedOutletsModal] = useState(false);
+  const [selectedArchivedOutletId, setSelectedArchivedOutletId] = useState<
+    string | null
+  >(null);
 
   // Add Linked Outlet Modal (Malik-only)
   const [showAddOutletModal, setShowAddOutletModal] = useState(false);
@@ -404,6 +427,18 @@ export default function DashboardPage() {
       if (parsed.totalTables) {
         setActualTablesCount(parsed.totalTables);
       }
+
+      const archiveKey = getArchivedOutletsStorageKey(
+        parsed.ownerPhone,
+        parsed.restaurantId,
+      );
+      const rawArchive = localStorage.getItem(archiveKey);
+      if (rawArchive) {
+        const parsedArchive = JSON.parse(rawArchive);
+        if (Array.isArray(parsedArchive)) {
+          setArchivedOutlets(parsedArchive);
+        }
+      }
     } catch {
       router.push("/");
     }
@@ -415,6 +450,7 @@ export default function DashboardPage() {
       showUpgradeModal ||
       showAddOutletModal ||
       outletToRemove !== null ||
+      showDeletedOutletsModal ||
       showPaymentSettingsModal ||
       showStockModal ||
       selectedTableModal !== null ||
@@ -435,6 +471,7 @@ export default function DashboardPage() {
     showUpgradeModal,
     showAddOutletModal,
     outletToRemove,
+    showDeletedOutletsModal,
     showPaymentSettingsModal,
     showStockModal,
     selectedTableModal,
@@ -601,6 +638,22 @@ export default function DashboardPage() {
       }
 
       setSubInfo({ status, planType, selectedPlan, daysLeft, isExpired });
+    }
+
+    const archiveKey = getArchivedOutletsStorageKey(
+      resolvedOwnerPhone,
+      session.restaurantId,
+    );
+    try {
+      const rawArchive = localStorage.getItem(archiveKey);
+      if (rawArchive) {
+        const parsedArchive = JSON.parse(rawArchive);
+        if (Array.isArray(parsedArchive)) {
+          setArchivedOutlets(parsedArchive);
+        }
+      }
+    } catch {
+      // Ignore storage error
     }
 
     const currentOutletOrders = ((ordersData || []) as OrderRecord[]).map(
@@ -808,16 +861,20 @@ export default function DashboardPage() {
     setRemovingOutletId(outletToRemove.id);
     setRemoveOutletError("");
 
-    const targetId = outletToRemove.id;
-    const targetTitle = formatOutletTitle(outletToRemove);
+    const targetOutlet = outletToRemove;
+    const targetId = targetOutlet.id;
+    const targetTitle = formatOutletTitle(targetOutlet);
     const isCurrentOutlet = targetId === session.restaurantId;
 
-    const { data: outletOrders } = await supabase
+    const { data: fullOutletOrders } = await supabase
       .from("orders")
-      .select("id")
-      .eq("restaurant_id", targetId);
+      .select(
+        "id, restaurant_id, table_number, status, total_amount, payment_method, payment_status, customer_name, customer_phone, invoice_number, razorpay_payment_id, created_at, order_items(id, item_name, quantity, price, notes)",
+      )
+      .eq("restaurant_id", targetId)
+      .order("created_at", { ascending: false });
 
-    const orderIds = (outletOrders || []).map((o) => o.id);
+    const orderIds = (fullOutletOrders || []).map((o) => o.id);
     if (orderIds.length > 0) {
       await supabase.from("order_items").delete().in("order_id", orderIds);
       await supabase.from("orders").delete().eq("restaurant_id", targetId);
@@ -841,6 +898,26 @@ export default function DashboardPage() {
       return;
     }
 
+    const archiveKey = getArchivedOutletsStorageKey(
+      session.ownerPhone,
+      session.restaurantId,
+    );
+    const nextArchived: ArchivedOutletRecord[] = [
+      {
+        outlet: targetOutlet,
+        deletedAt: new Date().toISOString(),
+        orders: (fullOutletOrders || []) as OrderRecord[],
+      },
+      ...archivedOutlets.filter((item) => item.outlet.id !== targetId),
+    ];
+
+    setArchivedOutlets(nextArchived);
+    try {
+      localStorage.setItem(archiveKey, JSON.stringify(nextArchived));
+    } catch {
+      // Ignore storage error
+    }
+
     setOutletToRemove(null);
     if (selectedOutletDropdown === targetId) {
       setSelectedOutletDropdown("all");
@@ -854,7 +931,9 @@ export default function DashboardPage() {
       return;
     }
 
-    setUpgradeSuccessBanner(`Outlet "${targetTitle}" has been removed.`);
+    setUpgradeSuccessBanner(
+      `Outlet "${targetTitle}" removed. Its sales & order history is saved under "Deleted Outlets".`,
+    );
     setTimeout(() => setUpgradeSuccessBanner(null), 6000);
     fetchDashboardData();
   };
@@ -1190,7 +1269,6 @@ export default function DashboardPage() {
 
   const malikDateFilteredOrders = filterMalikOrdersByDate(allOutletOrders);
 
-  // Per-outlet cards sorted so highest sales outlets show first
   const malikOutletReportCards = outletsForDisplay
     .map((out) => {
       const outOrders = malikDateFilteredOrders.filter(
@@ -1227,7 +1305,6 @@ export default function DashboardPage() {
         null
       : null;
 
-  // Orders scoped to either All Outlets or the Dropdown-Selected Outlet
   const scopedMalikOrders =
     selectedOutletDropdown === "all"
       ? malikDateFilteredOrders
@@ -1441,6 +1518,20 @@ export default function DashboardPage() {
                 <button
                   type="button"
                   onClick={() => {
+                    setSelectedArchivedOutletId(
+                      archivedOutlets[0]?.outlet.id || null,
+                    );
+                    setShowDeletedOutletsModal(true);
+                  }}
+                  className="bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition"
+                >
+                  <Trash2 className="w-4 h-4 text-red-600" />
+                  <span>Deleted Outlets ({archivedOutlets.length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
                     setUpgradeErrorMsg(null);
                     setUpgradeModeTab("multiple");
                     setShowUpgradeModal(true);
@@ -1546,10 +1637,8 @@ export default function DashboardPage() {
         {/* ==================== MALIK COMMAND VIEW ==================== */}
         {isMalikMode ? (
           <>
-            {/* Filter Bar + Outlet Selector Dropdown */}
             <section className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3 shadow-xs">
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-                {/* Date Range Filters */}
                 <div className="flex items-center gap-2 flex-wrap">
                   {(
                     [
@@ -1577,7 +1666,6 @@ export default function DashboardPage() {
                   ))}
                 </div>
 
-                {/* Outlet Selector Dropdown */}
                 <div className="flex items-center gap-2 w-full lg:w-auto">
                   <div className="relative flex-1 lg:w-80">
                     <Filter className="w-4 h-4 text-orange-600 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -1590,11 +1678,13 @@ export default function DashboardPage() {
                       className="w-full pl-10 pr-4 py-2.5 bg-orange-50/60 hover:bg-orange-50 border-2 border-orange-300 focus:border-orange-500 rounded-xl text-xs font-extrabold text-slate-900 outline-none cursor-pointer transition"
                     >
                       <option value="all">
-                        All Outlets Combined ({outletsForDisplay.length} Branches)
+                        All Outlets Combined ({outletsForDisplay.length}{" "}
+                        Branches)
                       </option>
                       {malikOutletReportCards.map((out) => (
                         <option key={out.id} value={out.id}>
-                          {out.title} — ₹{out.totalSale.toLocaleString("en-IN")} ({out.billsCount} bills)
+                          {out.title} — ₹{out.totalSale.toLocaleString("en-IN")}{" "}
+                          ({out.billsCount} bills)
                         </option>
                       ))}
                     </select>
@@ -1640,7 +1730,6 @@ export default function DashboardPage() {
               )}
             </section>
 
-            {/* Top Summary Cards (Auto-updates for All Outlets vs Dropdown-Selected Outlet) */}
             <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
                 <div className="flex items-center justify-between text-slate-500 text-xs font-bold">
@@ -1676,7 +1765,9 @@ export default function DashboardPage() {
               <div className="bg-emerald-50/70 p-5 rounded-2xl border-2 border-emerald-200 shadow-xs">
                 <div className="flex items-center justify-between text-emerald-800 text-xs font-bold">
                   <span>
-                    {selectedOutletMeta ? "Outlet Total Sales" : "Combined Total Sales"}
+                    {selectedOutletMeta
+                      ? "Outlet Total Sales"
+                      : "Combined Total Sales"}
                   </span>
                   <IndianRupee className="w-4 h-4 text-emerald-600" />
                 </div>
@@ -1721,21 +1812,22 @@ export default function DashboardPage() {
               </div>
             </section>
 
-            {/* ==================== SELECTED OUTLET DETAILED CUSTOMER & ORDER REPORT ==================== */}
             {selectedOutletMeta ? (
               <section className="bg-white border border-slate-200 rounded-3xl p-5 sm:p-6 shadow-xs space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
                   <div>
                     <div className="flex items-center gap-2 flex-wrap">
                       <h2 className="text-base sm:text-lg font-extrabold text-slate-900">
-                        {selectedOutletMeta.title} — Detailed Sales &amp; Customer Orders
+                        {selectedOutletMeta.title} — Detailed Sales &amp;
+                        Customer Orders
                       </h2>
                       <span className="text-[11px] font-bold bg-orange-50 text-orange-700 border border-orange-200 px-2.5 py-0.5 rounded-full">
                         {selectedOutletMeta.city}
                       </span>
                     </div>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      Customer Name, Mobile Number, Ordered Items, Table No., and Cash/UPI Payment Details
+                      Customer Name, Mobile Number, Ordered Items, Table No., and
+                      Cash/UPI Payment Details
                     </p>
                   </div>
 
@@ -1776,7 +1868,6 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                {/* Branch & Staff PINs Strip */}
                 <div className="flex flex-wrap items-center gap-2 text-xs font-mono bg-slate-50 border border-slate-200 rounded-2xl p-3">
                   <span className="bg-white border border-slate-200 text-slate-800 px-3 py-1 rounded-lg font-bold">
                     Branch PIN:{" "}
@@ -1792,7 +1883,6 @@ export default function DashboardPage() {
                   </span>
                 </div>
 
-                {/* Search Customer / Mobile / Item / Invoice inside Selected Outlet */}
                 <div className="relative">
                   <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
@@ -1813,11 +1903,11 @@ export default function DashboardPage() {
                   )}
                 </div>
 
-                {/* Customer & Order Cards */}
                 {visibleMalikOrders.length === 0 ? (
                   <div className="py-12 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
                     <p className="text-xs font-bold text-slate-500">
-                      No orders found for {selectedOutletMeta.title} in this filter.
+                      No orders found for {selectedOutletMeta.title} in this
+                      filter.
                     </p>
                   </div>
                 ) : (
@@ -1831,7 +1921,6 @@ export default function DashboardPage() {
                           className="p-4 bg-white hover:bg-slate-50/70 flex flex-col sm:flex-row sm:items-start justify-between gap-3 text-xs transition"
                         >
                           <div className="space-y-1.5 min-w-0 flex-1">
-                            {/* Top Row: Customer Name, Mobile Number, Table & Time */}
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="font-extrabold text-slate-900 bg-slate-100 px-2.5 py-0.5 rounded-md">
                                 Table {ord.table_number}
@@ -1868,7 +1957,6 @@ export default function DashboardPage() {
                               </span>
                             </div>
 
-                            {/* Ordered Items Detail */}
                             <div className="bg-slate-50 border border-slate-200/70 rounded-xl p-2.5 space-y-1">
                               <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
                                 Ordered Items
@@ -1893,7 +1981,6 @@ export default function DashboardPage() {
                             )}
                           </div>
 
-                          {/* Right Side: Amount & Payment Method */}
                           <div className="flex sm:flex-col items-center sm:items-end justify-between gap-1.5 shrink-0 pt-1 sm:pt-0">
                             <span className="text-base font-extrabold text-slate-900">
                               ₹{Number(ord.total_amount).toLocaleString("en-IN")}
@@ -1915,7 +2002,6 @@ export default function DashboardPage() {
                 )}
               </section>
             ) : (
-              /* ==================== ALL OUTLETS OVERVIEW GRID (Sorted by Highest Sales First) ==================== */
               <section className="bg-white border border-slate-200 rounded-3xl p-5 sm:p-6 shadow-xs space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
@@ -1923,7 +2009,9 @@ export default function DashboardPage() {
                       Outlet-Wise Sales Report &amp; Branches
                     </h2>
                     <p className="text-xs text-slate-500">
-                      Outlets with active sales appear first • Select any outlet from the dropdown or click a card for customer &amp; order details
+                      Outlets with active sales appear first • Select any outlet
+                      from the dropdown or click a card for customer &amp; order
+                      details
                     </p>
                   </div>
 
@@ -2577,6 +2665,238 @@ export default function DashboardPage() {
         )}
       </main>
 
+      {/* Malik-Only Deleted Outlets Archive Modal */}
+      {isMalikMode &&
+        showDeletedOutletsModal &&
+        (() => {
+          const activeArchived =
+            archivedOutlets.find(
+              (a) => a.outlet.id === selectedArchivedOutletId,
+            ) ||
+            archivedOutlets[0] ||
+            null;
+
+          const archivedCompletedOrders = (activeArchived?.orders || []).filter(
+            (o) => o.status === "completed",
+          );
+          const archivedSourceOrders =
+            archivedCompletedOrders.length > 0
+              ? archivedCompletedOrders
+              : activeArchived?.orders || [];
+
+          const archivedTotalSale = archivedSourceOrders.reduce(
+            (sum, o) => sum + Number(o.total_amount),
+            0,
+          );
+          const archivedCashSale = archivedSourceOrders
+            .filter((o) => (o.payment_method || "").toLowerCase() === "cash")
+            .reduce((sum, o) => sum + Number(o.total_amount), 0);
+          const archivedUpiSale = archivedSourceOrders
+            .filter((o) => (o.payment_method || "").toLowerCase() === "upi")
+            .reduce((sum, o) => sum + Number(o.total_amount), 0);
+
+          return (
+            <div
+              onClick={() => setShowDeletedOutletsModal(false)}
+              className="fixed inset-0 bg-black/65 backdrop-blur-xs flex items-center justify-center p-4 z-[1035]"
+            >
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className="bg-white rounded-3xl max-w-4xl w-full p-5 sm:p-6 shadow-2xl border border-slate-200 max-h-[88vh] flex flex-col overflow-hidden"
+              >
+                <div className="flex items-center justify-between pb-3.5 border-b border-slate-200 shrink-0">
+                  <div>
+                    <h3 className="text-base sm:text-lg font-extrabold text-slate-900">
+                      Deleted Outlets Archive ({archivedOutlets.length})
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Select a deleted outlet to inspect its sales report,
+                      customer details, and orders
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowDeletedOutletsModal(false)}
+                    className="p-2 rounded-full hover:bg-slate-100 text-slate-500"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {archivedOutlets.length === 0 ? (
+                  <div className="py-14 text-center text-xs font-semibold text-slate-400">
+                    No deleted outlets recorded yet.
+                  </div>
+                ) : (
+                  <div className="flex-1 overflow-y-auto pt-4 grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
+                    <div className="md:col-span-4 space-y-2">
+                      {archivedOutlets.map((rec) => {
+                        const isSelected =
+                          activeArchived?.outlet.id === rec.outlet.id;
+                        const recCompleted = rec.orders.filter(
+                          (o) => o.status === "completed",
+                        );
+                        const listOrders =
+                          recCompleted.length > 0 ? recCompleted : rec.orders;
+                        const recTotal = listOrders.reduce(
+                          (s, o) => s + Number(o.total_amount),
+                          0,
+                        );
+
+                        return (
+                          <button
+                            key={rec.outlet.id}
+                            type="button"
+                            onClick={() =>
+                              setSelectedArchivedOutletId(rec.outlet.id)
+                            }
+                            className={`w-full text-left p-3.5 rounded-2xl border-2 transition ${
+                              isSelected
+                                ? "border-orange-500 bg-orange-50/60"
+                                : "border-slate-200 bg-slate-50/70 hover:bg-slate-100"
+                            }`}
+                          >
+                            <p className="text-xs font-extrabold text-slate-900 truncate">
+                              {formatOutletTitle(rec.outlet)}
+                            </p>
+                            <p className="text-[11px] text-slate-500 mt-0.5">
+                              {rec.outlet.city} • Deleted{" "}
+                              {new Date(rec.deletedAt).toLocaleDateString(
+                                "en-IN",
+                                {
+                                  day: "2-digit",
+                                  month: "short",
+                                },
+                              )}
+                            </p>
+                            <p className="text-xs font-extrabold text-emerald-700 mt-1.5">
+                              Sales: ₹{recTotal.toLocaleString("en-IN")} (
+                              {listOrders.length} orders)
+                            </p>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {activeArchived && (
+                      <div className="md:col-span-8 bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-200">
+                          <div>
+                            <h4 className="text-sm sm:text-base font-extrabold text-slate-900">
+                              {formatOutletTitle(activeArchived.outlet)}
+                            </h4>
+                            <p className="text-[11px] text-slate-500">
+                              {activeArchived.outlet.city} • Deleted on{" "}
+                              {new Date(
+                                activeArchived.deletedAt,
+                              ).toLocaleString("en-IN", {
+                                day: "2-digit",
+                                month: "short",
+                                year: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </p>
+                          </div>
+                          <span className="text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full bg-red-100 text-red-700">
+                            Deleted Outlet
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2.5">
+                          <div className="bg-white border border-slate-200 rounded-xl p-3">
+                            <p className="text-[10px] font-bold text-slate-500">
+                              Total Sales
+                            </p>
+                            <p className="text-base font-extrabold text-emerald-700 mt-0.5">
+                              ₹{archivedTotalSale.toLocaleString("en-IN")}
+                            </p>
+                          </div>
+                          <div className="bg-white border border-slate-200 rounded-xl p-3">
+                            <p className="text-[10px] font-bold text-slate-500">
+                              Cash
+                            </p>
+                            <p className="text-base font-extrabold text-slate-900 mt-0.5">
+                              ₹{archivedCashSale.toLocaleString("en-IN")}
+                            </p>
+                          </div>
+                          <div className="bg-white border border-slate-200 rounded-xl p-3">
+                            <p className="text-[10px] font-bold text-slate-500">
+                              UPI / Online
+                            </p>
+                            <p className="text-base font-extrabold text-blue-700 mt-0.5">
+                              ₹{archivedUpiSale.toLocaleString("en-IN")}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                          {archivedSourceOrders.length === 0 ? (
+                            <p className="text-xs text-slate-400 text-center py-8 bg-white rounded-xl border border-slate-200">
+                              No order records found for this deleted outlet.
+                            </p>
+                          ) : (
+                            archivedSourceOrders.map((ord) => (
+                              <div
+                                key={ord.id}
+                                className="bg-white border border-slate-200 rounded-xl p-3 text-xs flex items-start justify-between gap-3"
+                              >
+                                <div className="space-y-1 min-w-0 flex-1">
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <span className="font-extrabold text-slate-900">
+                                      Table {ord.table_number}
+                                    </span>
+                                    <span className="font-bold text-slate-800">
+                                      • {ord.customer_name || "Walk-in Guest"}
+                                    </span>
+                                    {ord.customer_phone && (
+                                      <span className="text-slate-600 font-semibold">
+                                        ({ord.customer_phone})
+                                      </span>
+                                    )}
+                                    <span className="text-[10px] font-mono bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded">
+                                      {ord.invoice_number ||
+                                        `INV-${ord.id.slice(0, 6).toUpperCase()}`}
+                                    </span>
+                                  </div>
+                                  <p className="text-slate-600">
+                                    {ord.order_items
+                                      ?.map(
+                                        (i) => `${i.quantity}× ${i.item_name}`,
+                                      )
+                                      .join(", ")}
+                                  </p>
+                                  {ord.razorpay_payment_id && (
+                                    <p className="text-[10px] font-mono text-emerald-700 font-bold">
+                                      Ref: {ord.razorpay_payment_id}
+                                    </p>
+                                  )}
+                                </div>
+
+                                <div className="text-right shrink-0">
+                                  <p className="font-extrabold text-slate-900">
+                                    ₹
+                                    {Number(ord.total_amount).toLocaleString(
+                                      "en-IN",
+                                    )}
+                                  </p>
+                                  <span className="uppercase text-[10px] font-extrabold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
+                                    {ord.payment_method || "CASH"}
+                                  </span>
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
       {/* Malik-Only Add Outlet Modal */}
       {isMalikMode && showAddOutletModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-[1020]">
@@ -2730,10 +3050,9 @@ export default function DashboardPage() {
               </h3>
               <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
                 Are you sure you want to remove{" "}
-                <strong>{formatOutletTitle(outletToRemove)}</strong>?
-                {outletToRemove.id === session.restaurantId
-                  ? " Since this is your active session outlet, you will be logged out after removal."
-                  : " This will free up an outlet slot under your plan."}
+                <strong>{formatOutletTitle(outletToRemove)}</strong>? Its sales
+                and order history will remain accessible under{" "}
+                <strong>Deleted Outlets</strong>.
               </p>
             </div>
 
