@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { claimSingleRoleSession } from '@/lib/roleSessionGuard';
+import { getMaxOutletsForPlan } from '@/lib/planFeatures';
 import {
   UtensilsCrossed,
   Search,
@@ -74,16 +75,16 @@ const SINGLE_OUTLET_PLANS: PricingPlan[] = [
     badge: null,
     popular: false,
     features: [
-      'Unlimited Table QR Menus',
+      'QR Table Menu & Instant Cart',
       'Live Kitchen Display (KDS)',
-      'Owner & Staff PIN Roles',
-      'Daily Sales & Billing History',
+      'Owner & Staff 6-Digit PINs',
+      'Daily Table Bill Settlement',
     ],
   },
   {
     id: '3_months',
     duration: '3 Months',
-    subtitle: 'Quarterly Plan',
+    subtitle: 'Quarterly Operations',
     price: '₹1,699',
     perMonth: '₹566 / month',
     amount: 1699,
@@ -92,16 +93,16 @@ const SINGLE_OUTLET_PLANS: PricingPlan[] = [
     badge: 'Save ₹98',
     popular: false,
     features: [
-      'Everything in 1 Month Plan',
-      'Quick Dish Stock Toggle',
-      'Cash & UPI Payment Split',
-      'Priority WhatsApp Support',
+      '1-Click Dish Stock Toggle',
+      'Cash & UPI Payment Split View',
+      'Invoice, Bill & UTR Search',
+      'Mobile PIN Reset via Owner Phone',
     ],
   },
   {
     id: '6_months',
     duration: '6 Months',
-    subtitle: 'Half-Yearly Plan',
+    subtitle: 'Half-Yearly Analytics',
     price: '₹3,299',
     perMonth: '₹550 / month',
     amount: 3299,
@@ -110,10 +111,10 @@ const SINGLE_OUTLET_PLANS: PricingPlan[] = [
     badge: 'Save ₹295',
     popular: false,
     features: [
-      'Everything in 3 Months Plan',
-      'Custom Date Range Reports',
-      'Unlimited Tables & Dishes',
-      'Free Menu Setup Support',
+      'Custom Date Range Sales Filter',
+      'Last 7 Days & All-Time History',
+      'Customer Name & Phone on Bills',
+      'Printable Digital Bill Receipts',
     ],
   },
   {
@@ -128,16 +129,16 @@ const SINGLE_OUTLET_PLANS: PricingPlan[] = [
     badge: 'Save ₹1,689',
     popular: true,
     features: [
-      'Everything in 6 Months Plan',
-      'Best Annual Value (23% Off)',
-      'Dedicated Onboarding Call',
-      'All Future Updates Included',
+      'Full 12-Month Billing Archive',
+      'Best Annual Savings (23% Off)',
+      'Priority Menu & QR Onboarding',
+      'All Standard Updates Included',
     ],
   },
   {
     id: 'lifetime',
     duration: 'Lifetime',
-    subtitle: 'One-Time Payment',
+    subtitle: 'One-Time License',
     price: '₹19,999',
     perMonth: 'Pay once, use forever',
     amount: 19999,
@@ -146,10 +147,10 @@ const SINGLE_OUTLET_PLANS: PricingPlan[] = [
     badge: 'Zero Renewal',
     popular: false,
     features: [
-      'Lifetime POS & KDS Access',
-      'No Monthly or Yearly Fees',
-      'VIP Priority Support',
-      'All Future Pro Features Free',
+      'Lifetime Access • Zero Renewal',
+      'All Future POS & KDS Releases',
+      'Dedicated VIP Support Line',
+      'Permanent Single-Outlet License',
     ],
   },
 ];
@@ -158,73 +159,73 @@ const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
   {
     id: 'multi_1_month',
     duration: '1 Month',
-    subtitle: 'Up to 2 Outlets • Monthly',
+    subtitle: 'Up to 2 Outlets • Starter Chain',
     price: '₹1,115',
     perMonth: '₹1,115 / month',
     amount: 1115,
     durationDays: 30,
     maxOutlets: 2,
-    badge: '7% Below Market',
+    badge: 'Up to 2 Outlets',
     popular: false,
     features: [
-      'Up to 2 Outlets Linked by Phone',
-      'Combined Sales View Across Outlets',
-      'Master Password Protected Summary',
-      'Separate Table QRs & KDS per Branch',
+      'Link up to 2 Outlets by Phone',
+      'Combined Sales & Cash/UPI Split',
+      'Malik Master Password Vault',
+      'Branch & Staff PINs per Outlet',
     ],
   },
   {
     id: 'multi_3_months',
     duration: '3 Months',
-    subtitle: 'Up to 5 Outlets • Quarterly',
+    subtitle: 'Up to 5 Outlets • Branch Drilldown',
     price: '₹11,159',
     perMonth: '₹3,720 / month',
     amount: 11159,
     durationDays: 90,
     maxOutlets: 5,
-    badge: '7% Below ₹12k Tier',
+    badge: 'Up to 5 Outlets',
     popular: false,
     features: [
-      'Everything in 1 Month Multi Plan',
-      'Up to 5 Outlets Under One Owner',
-      'Outlet-Wise Revenue Breakdown',
-      'Invoice & UTR Search Across Branches',
+      'Link up to 5 Outlets Under 1 Owner',
+      'Outlet Dropdown Drilldown View',
+      'Customer Name, Phone & Dish List',
+      'Invoice & UTR Search per Branch',
     ],
   },
   {
     id: 'multi_6_months',
     duration: '6 Months',
-    subtitle: 'Up to 8 Outlets • Half-Yearly',
+    subtitle: 'Up to 8 Outlets • Custom Reports',
     price: '₹18,599',
     perMonth: '₹3,100 / month',
     amount: 18599,
     durationDays: 180,
     maxOutlets: 8,
-    badge: '7% Below ₹20k Tier',
+    badge: 'Up to 8 Outlets',
     popular: false,
     features: [
-      'Everything in 3 Months Multi Plan',
-      'Up to 8 Active Outlets Supported',
-      'Custom Date-Range Multi-Branch Reports',
-      'Per-Outlet Quick Stock Control',
+      'Link up to 8 Active Outlets',
+      'Custom Date Range (From–To) Filter',
+      'Deleted Outlets Sales Archive',
+      'Historical Orders Saved on Delete',
     ],
   },
   {
     id: 'multi_yearly',
     duration: 'Yearly',
-    subtitle: 'Up to 15 Outlets • 12 Months',
+    subtitle: 'Up to 15 Outlets • Full Chain Pro',
     price: '₹27,899',
     perMonth: '₹2,325 / month',
     amount: 27899,
     durationDays: 365,
     maxOutlets: 15,
-    badge: '7% Below ₹30k Tier',
+    badge: 'Up to 15 Outlets',
     popular: true,
     features: [
-      'Everything in 6 Months Multi Plan',
-      'Up to 15 Outlets Under One Owner',
-      'Full-Year Chain Sales & Cash/UPI Split',
-      'Priority Multi-Outlet Setup Help',
+      'Link up to 15 Outlets Under 1 Owner',
+      '1-Click Restore Deleted Outlets',
+      'Active-Sale Priority Card Sorting',
+      'Priority Multi-Branch Setup Help',
     ],
   },
   {
@@ -236,13 +237,13 @@ const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
     amount: 37199,
     durationDays: 36500,
     maxOutlets: null,
-    badge: '7% Below ₹40k Tier',
+    badge: 'Unlimited Outlets',
     popular: false,
     features: [
-      'Unlimited Outlets Under Owner Phone',
-      'One-Time Fee • Zero Renewal Charges',
-      'All Chain Analytics & Master Lock',
-      'Dedicated VIP Support Included',
+      'Unlimited Outlets • Zero Renewal',
+      'All Multi-Outlet Tools Unlocked',
+      'Future Chain Features Included',
+      'Dedicated VIP Brand Support',
     ],
   },
 ];
@@ -252,14 +253,7 @@ function getPlanMaxOutlets(
   planLabel: string,
   mode: OutletTabMode
 ): number | null {
-  const allPlans = [...SINGLE_OUTLET_PLANS, ...MULTIPLE_OUTLET_PLANS];
-  const matched = allPlans.find(
-    (p) =>
-      p.id === planId ||
-      planLabel.toLowerCase().includes(`${p.duration.toLowerCase()} (${p.price.toLowerCase()})`)
-  );
-  if (matched) return matched.maxOutlets;
-  return mode === 'multiple' ? 2 : 1;
+  return getMaxOutletsForPlan(planId, planLabel, mode);
 }
 
 function formatRestaurantDisplayName(rest: Restaurant): string {
@@ -337,6 +331,24 @@ export default function HomePage() {
   const [regStaffPin, setRegStaffPin] = useState('');
   const [registering, setRegistering] = useState(false);
   const [regError, setRegError] = useState('');
+
+  useEffect(() => {
+    const anyModalOpen =
+      showRegisterModal || limitDialog.open || selectedRestaurant !== null;
+
+    if (anyModalOpen) {
+      document.body.style.overflow = 'hidden';
+      document.documentElement.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+      document.documentElement.style.overflow = '';
+    }
+
+    return () => {
+      document.body.style.overflow = '';
+      document.documentElement.style.overflow = '';
+    };
+  }, [showRegisterModal, limitDialog.open, selectedRestaurant]);
 
   useEffect(() => {
     setSelectedRestaurant(null);
@@ -851,6 +863,12 @@ export default function HomePage() {
 
     await claimSingleRoleSession(data.id, 'owner');
 
+    if (savedOutletMode === 'multiple') {
+      localStorage.setItem(MALIK_VAULT_UNLOCKED_KEY, '1');
+    } else {
+      localStorage.removeItem(MALIK_VAULT_UNLOCKED_KEY);
+    }
+
     const createdRest: Restaurant = {
       ...(data as Restaurant),
       outlet_mode: savedOutletMode,
@@ -979,20 +997,20 @@ export default function HomePage() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <header className="bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 sm:py-4 flex items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
             <div className="bg-orange-600 text-white p-2 rounded-xl shadow-sm">
               <UtensilsCrossed className="w-5 h-5" />
             </div>
-            <span className="text-xl font-extrabold tracking-tight text-slate-900">
+            <span className="text-lg sm:text-xl font-extrabold tracking-tight text-slate-900 whitespace-nowrap">
               Restro<span className="text-orange-600">Sync</span>
             </span>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 sm:gap-4 shrink-0">
             <a
               href="#pricing"
-              className="hidden sm:inline-block text-xs font-extrabold text-slate-600 hover:text-orange-600 transition"
+              className="hidden sm:inline-block text-xs font-extrabold text-slate-600 hover:text-orange-600 transition whitespace-nowrap"
             >
               Plans &amp; Pricing
             </a>
@@ -1000,16 +1018,16 @@ export default function HomePage() {
             <button
               type="button"
               onClick={() => handleOpenRegisterModal('Yearly (₹5,499)', 'single')}
-              className="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 shadow-sm transition"
+              className="bg-orange-600 hover:bg-orange-700 text-white px-3.5 sm:px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 shadow-sm transition whitespace-nowrap shrink-0"
             >
-              <Plus className="w-4 h-4" />
+              <Plus className="w-4 h-4 shrink-0" />
               <span>Register Restaurant</span>
             </button>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-12 pb-20">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-10 sm:pt-12 pb-20">
         <div className="text-center max-w-2xl mx-auto">
           <span className="inline-block bg-orange-100 text-orange-700 text-xs font-bold px-3.5 py-1 rounded-full mb-4">
             14-Day Free Trial • No Hardware Needed
@@ -1047,30 +1065,31 @@ export default function HomePage() {
                     No restaurant found. Register a new one!
                   </p>
                 ) : (
-                  <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto">
+                  <div className="divide-y divide-slate-100 max-h-72 overflow-y-auto">
                     {filteredRestaurants.map((rest) => (
                       <button
                         key={rest.id}
                         type="button"
                         onClick={() => handleOpenPinModal(rest)}
-                        className="w-full p-4 hover:bg-orange-50/70 flex items-center justify-between transition text-left"
+                        className="w-full px-3.5 py-3 sm:p-4 hover:bg-orange-50/70 flex items-center justify-between gap-3 transition text-left"
                       >
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center shrink-0">
-                            <Building2 className="w-5 h-5" />
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center shrink-0">
+                            <Building2 className="w-4 h-4 sm:w-5 sm:h-5" />
                           </div>
-                          <div>
-                            <p className="font-bold text-slate-900 text-sm">
+                          <div className="min-w-0 flex-1">
+                            <p className="font-bold text-slate-900 text-xs sm:text-sm leading-snug break-words">
                               {formatRestaurantDisplayName(rest)}
                             </p>
-                            <p className="text-xs text-slate-500">
+                            <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 truncate">
                               {rest.city} • {rest.total_tables} Tables
                             </p>
                           </div>
                         </div>
 
-                        <span className="text-xs font-extrabold text-orange-600 flex items-center gap-1">
-                          Select &amp; Login <ArrowRight className="w-3.5 h-3.5" />
+                        <span className="text-xs font-extrabold text-orange-600 flex items-center gap-1 whitespace-nowrap shrink-0">
+                          <span>Select &amp; Login</span>
+                          <ArrowRight className="w-3.5 h-3.5 shrink-0" />
                         </span>
                       </button>
                     ))}
@@ -1152,20 +1171,20 @@ export default function HomePage() {
               </p>
             </div>
 
-            <div className="inline-flex bg-slate-200/80 p-1 rounded-2xl border border-slate-300/70 self-start md:self-auto shrink-0">
+            <div className="inline-flex bg-slate-200/80 p-1 rounded-2xl border border-slate-300/70 self-start md:self-auto shrink-0 max-w-full overflow-x-auto">
               <button
                 type="button"
                 onClick={() => {
                   setPricingTab('single');
                   setPlanErrorMsg(null);
                 }}
-                className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold flex items-center gap-2 transition cursor-pointer ${
+                className={`px-3.5 sm:px-4 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold flex items-center gap-2 transition cursor-pointer whitespace-nowrap shrink-0 ${
                   pricingTab === 'single'
                     ? 'bg-slate-900 text-white shadow-sm'
                     : 'text-slate-700 hover:text-slate-900'
                 }`}
               >
-                <Store className="w-4 h-4" />
+                <Store className="w-4 h-4 shrink-0" />
                 <span>Single Outlet</span>
               </button>
 
@@ -1175,13 +1194,13 @@ export default function HomePage() {
                   setPricingTab('multiple');
                   setPlanErrorMsg(null);
                 }}
-                className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold flex items-center gap-2 transition cursor-pointer ${
+                className={`px-3.5 sm:px-4 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold flex items-center gap-2 transition cursor-pointer whitespace-nowrap shrink-0 ${
                   pricingTab === 'multiple'
                     ? 'bg-orange-600 text-white shadow-sm'
                     : 'text-slate-700 hover:text-slate-900'
                 }`}
               >
-                <Building2 className="w-4 h-4" />
+                <Building2 className="w-4 h-4 shrink-0" />
                 <span>Multiple Outlets</span>
               </button>
             </div>
@@ -1221,11 +1240,11 @@ export default function HomePage() {
                   )}
 
                   <div>
-                    <div className="flex items-center justify-between gap-1">
+                    <div className="flex items-center justify-between gap-1.5">
                       <h3 className="text-base font-extrabold">{plan.duration}</h3>
                       {plan.badge && (
                         <span
-                          className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full whitespace-nowrap ${
+                          className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full whitespace-nowrap shrink-0 ${
                             plan.popular
                               ? 'bg-orange-500/20 text-orange-300'
                               : isLifetime
@@ -1318,8 +1337,14 @@ export default function HomePage() {
       </main>
 
       {showRegisterModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl relative max-h-[92vh] overflow-y-auto">
+        <div
+          onClick={() => setShowRegisterModal(false)}
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 overscroll-none touch-none"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-7 shadow-2xl relative max-h-[92vh] overflow-y-auto overscroll-contain touch-pan-y"
+          >
             <button
               type="button"
               onClick={() => setShowRegisterModal(false)}
@@ -1328,9 +1353,9 @@ export default function HomePage() {
               <X className="w-5 h-5" />
             </button>
 
-            <div className="text-center mb-5">
+            <div className="text-center mb-5 pr-6">
               <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full mb-2">
-                <CheckCircle2 className="w-3.5 h-3.5" />{' '}
+                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />{' '}
                 {verifiedPlanCheckout?.planLabel === selectedPlanLabel &&
                 verifiedPlanCheckout?.outletMode === outletMode
                   ? `Paid & Active • ${selectedPlanLabel}`
@@ -1537,8 +1562,14 @@ export default function HomePage() {
       )}
 
       {limitDialog.open && (
-        <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-red-200 text-center space-y-4">
+        <div
+          onClick={() => setLimitDialog((prev) => ({ ...prev, open: false }))}
+          className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-center justify-center p-4 z-[60] overscroll-none touch-none"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-red-200 text-center space-y-4 max-h-[90vh] overflow-y-auto overscroll-contain touch-pan-y"
+          >
             <div className="w-12 h-12 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center mx-auto">
               <AlertTriangle className="w-6 h-6" />
             </div>
@@ -1573,7 +1604,7 @@ export default function HomePage() {
                 }}
                 className="flex-1 py-2.5 px-4 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-extrabold flex items-center justify-center gap-1.5 shadow-sm transition"
               >
-                <Crown className="w-3.5 h-3.5" />
+                <Crown className="w-3.5 h-3.5 shrink-0" />
                 <span>Choose Higher Outlet Plan</span>
               </button>
             </div>
@@ -1582,8 +1613,14 @@ export default function HomePage() {
       )}
 
       {selectedRestaurant && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl max-w-sm w-full p-7 shadow-2xl relative text-center">
+        <div
+          onClick={handleClosePinModal}
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 overscroll-none touch-none"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-3xl max-w-sm w-full p-5 sm:p-7 shadow-2xl relative text-center max-h-[92vh] overflow-y-auto overscroll-contain touch-pan-y"
+          >
             <button
               type="button"
               onClick={handleClosePinModal}
@@ -1602,12 +1639,11 @@ export default function HomePage() {
               )}
             </div>
 
-            <h3 className="text-lg font-extrabold text-slate-900">
+            <h3 className="text-lg font-extrabold text-slate-900 break-words px-4">
               {formatRestaurantDisplayName(selectedRestaurant)}
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">{selectedRestaurant.city}</p>
 
-            {/* Step 1 for Multi-Outlet: Choose Branch Manager/Staff vs Malik */}
             {isSelectedMultiOutlet && loginStep === 'choose_role' && !isForgotMode ? (
               <div className="mt-5 space-y-3 text-left">
                 <p className="text-xs text-slate-500 text-center">
@@ -1620,9 +1656,9 @@ export default function HomePage() {
                     setLoginStep('branch_pin');
                     setErrorMsg('');
                   }}
-                  className="w-full p-4 rounded-2xl border-2 border-slate-200 hover:border-orange-500 hover:bg-orange-50/50 transition flex items-center justify-between"
+                  className="w-full p-4 rounded-2xl border-2 border-slate-200 hover:border-orange-500 hover:bg-orange-50/50 transition flex items-center justify-between gap-3"
                 >
-                  <div>
+                  <div className="min-w-0">
                     <p className="font-extrabold text-sm text-slate-900">
                       Branch Manager / Staff
                     </p>
@@ -1639,9 +1675,9 @@ export default function HomePage() {
                     setLoginStep('malik_master');
                     setErrorMsg('');
                   }}
-                  className="w-full p-4 rounded-2xl border-2 border-slate-900 bg-slate-900 text-white hover:bg-slate-800 transition flex items-center justify-between"
+                  className="w-full p-4 rounded-2xl border-2 border-slate-900 bg-slate-900 text-white hover:bg-slate-800 transition flex items-center justify-between gap-3"
                 >
-                  <div>
+                  <div className="min-w-0">
                     <p className="font-extrabold text-sm">Outlets Owner</p>
                     <p className="text-[11px] text-slate-300 mt-0.5">
                       Master Password for all outlets &amp; sales report
@@ -1806,7 +1842,7 @@ export default function HomePage() {
                   value={pin}
                   onChange={(e) => handlePinChange(e.target.value)}
                   placeholder="••••••"
-                  className="w-full text-center text-2xl tracking-[0.65em] font-extrabold py-3.5 border-2 border-slate-200 focus:border-orange-500 rounded-2xl outline-none transition"
+                  className="w-full text-center text-2xl tracking-[0.45em] sm:tracking-[0.65em] font-extrabold py-3.5 px-3 border-2 border-slate-200 focus:border-orange-500 rounded-2xl outline-none transition"
                 />
 
                 {errorMsg && (

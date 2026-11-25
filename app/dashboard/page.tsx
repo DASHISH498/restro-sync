@@ -9,6 +9,10 @@ import {
   releaseRoleSessionIfOwner,
   clearLocalSessionToken,
 } from "@/lib/roleSessionGuard";
+import {
+  getMultiOutletCapabilities,
+  getMaxOutletsForPlan,
+} from "@/lib/planFeatures";
 import SessionReplacedDialog from "@/components/SessionReplacedDialog";
 import {
   UtensilsCrossed,
@@ -48,6 +52,7 @@ import {
   MapPin,
   Store,
   Filter,
+  RotateCcw,
 } from "lucide-react";
 
 interface SessionData {
@@ -233,34 +238,6 @@ const MULTI_UPGRADE_PLANS: UpgradePlanOption[] = [
   },
 ];
 
-function getMaxOutletsForPlan(
-  planType: string,
-  selectedPlanLabel: string,
-  outletMode?: string | null,
-): number | null {
-  const combined = `${planType || ""} ${selectedPlanLabel || ""}`.toLowerCase();
-
-  if (combined.includes("multi_lifetime") || combined.includes("37,199")) {
-    return null;
-  }
-  if (combined.includes("multi_yearly") || combined.includes("27,899")) {
-    return 15;
-  }
-  if (combined.includes("multi_6_months") || combined.includes("18,599")) {
-    return 8;
-  }
-  if (combined.includes("multi_3_months") || combined.includes("11,159")) {
-    return 5;
-  }
-  if (combined.includes("multi_1_month") || combined.includes("1,115")) {
-    return 2;
-  }
-  if (outletMode === "multiple") {
-    return 2;
-  }
-  return 1;
-}
-
 function formatOutletTitle(outlet: {
   name: string;
   city?: string;
@@ -320,6 +297,9 @@ export default function DashboardPage() {
   const [selectedArchivedOutletId, setSelectedArchivedOutletId] = useState<
     string | null
   >(null);
+  const [restoringOutletId, setRestoringOutletId] = useState<string | null>(
+    null,
+  );
 
   // Add Linked Outlet Modal (Malik-only)
   const [showAddOutletModal, setShowAddOutletModal] = useState(false);
@@ -391,6 +371,18 @@ export default function DashboardPage() {
   const [showInactivityModal, setShowInactivityModal] = useState(false);
   const [sessionReplaced, setSessionReplaced] = useState(false);
 
+  const multiCaps = getMultiOutletCapabilities(
+    subInfo.planType,
+    subInfo.selectedPlan,
+    session?.outletMode,
+  );
+
+  const openUpgradeForMultiFeature = (reason: string) => {
+    setUpgradeErrorMsg(reason);
+    setUpgradeModeTab("multiple");
+    setShowUpgradeModal(true);
+  };
+
   useEffect(() => {
     const today = new Date().toISOString().split("T")[0];
     setTodayIso(today);
@@ -459,12 +451,15 @@ export default function DashboardPage() {
 
     if (anyModalOpen) {
       document.body.style.overflow = "hidden";
+      document.documentElement.style.overflow = "hidden";
     } else {
       document.body.style.overflow = "";
+      document.documentElement.style.overflow = "";
     }
 
     return () => {
       document.body.style.overflow = "";
+      document.documentElement.style.overflow = "";
     };
   }, [
     showSalesModal,
@@ -638,6 +633,18 @@ export default function DashboardPage() {
       }
 
       setSubInfo({ status, planType, selectedPlan, daysLeft, isExpired });
+
+      const caps = getMultiOutletCapabilities(
+        planType,
+        selectedPlan,
+        restData.outlet_mode || session.outletMode,
+      );
+      if (!caps.canUseCustomDateRange) {
+        setMalikReportFilter((prev) => (prev === "custom" ? "today" : prev));
+      }
+      if (!caps.canInspectOutletCustomers) {
+        setSelectedOutletDropdown("all");
+      }
     }
 
     const archiveKey = getArchivedOutletsStorageKey(
@@ -747,22 +754,20 @@ export default function DashboardPage() {
   const maxAllowedOutlets = getMaxOutletsForPlan(
     subInfo.planType,
     subInfo.selectedPlan,
-    session?.outletMode,
+    session?.outletMode || "multiple",
   );
   const currentOutletCount = Math.max(1, ownerOutlets.length);
   const isAtOutletLimit =
     maxAllowedOutlets !== null && currentOutletCount >= maxAllowedOutlets;
 
   const handleOpenAddOutletModal = () => {
-    if (!session || !isMalikMode) return;
+    if (!session) return;
     if (isAtOutletLimit) {
-      setUpgradeErrorMsg(
-        `Your current plan (${subInfo.selectedPlan}) allows up to ${maxAllowedOutlets} outlet${
+      openUpgradeForMultiFeature(
+        `Your ${multiCaps.tierName} plan (${subInfo.selectedPlan}) allows up to ${maxAllowedOutlets} outlet${
           maxAllowedOutlets === 1 ? "" : "s"
         }. Upgrade to add more outlets.`,
       );
-      setUpgradeModeTab("multiple");
-      setShowUpgradeModal(true);
       return;
     }
 
@@ -777,7 +782,7 @@ export default function DashboardPage() {
 
   const handleCreateLinkedOutlet = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!session || !isMalikMode) return;
+    if (!session) return;
     setAddOutletError("");
 
     if (isAtOutletLimit) {
@@ -857,7 +862,7 @@ export default function DashboardPage() {
   };
 
   const handleConfirmRemoveOutlet = async () => {
-    if (!session || !outletToRemove || !isMalikMode) return;
+    if (!session || !outletToRemove) return;
     setRemovingOutletId(outletToRemove.id);
     setRemoveOutletError("");
 
@@ -898,24 +903,26 @@ export default function DashboardPage() {
       return;
     }
 
-    const archiveKey = getArchivedOutletsStorageKey(
-      session.ownerPhone,
-      session.restaurantId,
-    );
-    const nextArchived: ArchivedOutletRecord[] = [
-      {
-        outlet: targetOutlet,
-        deletedAt: new Date().toISOString(),
-        orders: (fullOutletOrders || []) as OrderRecord[],
-      },
-      ...archivedOutlets.filter((item) => item.outlet.id !== targetId),
-    ];
+    if (multiCaps.canViewDeletedArchive) {
+      const archiveKey = getArchivedOutletsStorageKey(
+        session.ownerPhone,
+        session.restaurantId,
+      );
+      const nextArchived: ArchivedOutletRecord[] = [
+        {
+          outlet: targetOutlet,
+          deletedAt: new Date().toISOString(),
+          orders: (fullOutletOrders || []) as OrderRecord[],
+        },
+        ...archivedOutlets.filter((item) => item.outlet.id !== targetId),
+      ];
 
-    setArchivedOutlets(nextArchived);
-    try {
-      localStorage.setItem(archiveKey, JSON.stringify(nextArchived));
-    } catch {
-      // Ignore storage error
+      setArchivedOutlets(nextArchived);
+      try {
+        localStorage.setItem(archiveKey, JSON.stringify(nextArchived));
+      } catch {
+        // Ignore storage error
+      }
     }
 
     setOutletToRemove(null);
@@ -932,7 +939,127 @@ export default function DashboardPage() {
     }
 
     setUpgradeSuccessBanner(
-      `Outlet "${targetTitle}" removed. Its sales & order history is saved under "Deleted Outlets".`,
+      multiCaps.canViewDeletedArchive
+        ? `Outlet "${targetTitle}" removed. Its sales & order history is saved under "Deleted Outlets".`
+        : `Outlet "${targetTitle}" removed. Upgrade to 6 Months+ plan to keep a Deleted Outlets archive.`,
+    );
+    setTimeout(() => setUpgradeSuccessBanner(null), 6000);
+    fetchDashboardData();
+  };
+
+  const handleRestoreOutlet = async (record: ArchivedOutletRecord) => {
+    if (!session) return;
+
+    if (!multiCaps.canRestoreDeletedOutlet) {
+      setShowDeletedOutletsModal(false);
+      openUpgradeForMultiFeature(
+        `Restoring deleted outlets is unlocked on the Yearly & Lifetime plans (current: ${multiCaps.tierName}).`,
+      );
+      return;
+    }
+
+    if (isAtOutletLimit) {
+      setShowDeletedOutletsModal(false);
+      openUpgradeForMultiFeature(
+        `Cannot restore "${formatOutletTitle(record.outlet)}" because your ${multiCaps.tierName} plan limit (${maxAllowedOutlets} outlets) is full. Upgrade first.`,
+      );
+      return;
+    }
+
+    setRestoringOutletId(record.outlet.id);
+    const cleanPhone = (session.ownerPhone || "").replace(/\D/g, "");
+    const brandName =
+      record.outlet.name ||
+      session.brandName ||
+      session.restaurantName.split(" — ")[0];
+
+    const { data: restoredRest, error: restErr } = await supabase
+      .from("restaurants")
+      .insert([
+        {
+          name: brandName,
+          city: record.outlet.city || session.city,
+          phone: cleanPhone || null,
+          owner_phone: cleanPhone || null,
+          total_tables: record.outlet.total_tables || 10,
+          owner_pin: record.outlet.owner_pin || "123456",
+          staff_pin: record.outlet.staff_pin || null,
+          outlet_mode: record.outlet.outlet_mode || "multiple",
+          outlet_label: record.outlet.outlet_label || null,
+          subscription_status: subInfo.status,
+          plan_type: subInfo.planType,
+          selected_plan: subInfo.selectedPlan,
+        },
+      ])
+      .select()
+      .single();
+
+    if (restErr || !restoredRest) {
+      setRestoringOutletId(null);
+      setShowDeletedOutletsModal(false);
+      openUpgradeForMultiFeature(
+        restErr?.message || "Failed to restore outlet.",
+      );
+      return;
+    }
+
+    for (const ord of record.orders || []) {
+      const { data: insertedOrd } = await supabase
+        .from("orders")
+        .insert([
+          {
+            restaurant_id: restoredRest.id,
+            table_number: ord.table_number,
+            status: ord.status || "completed",
+            total_amount: Number(ord.total_amount),
+            payment_method: ord.payment_method || "cash",
+            payment_status: ord.payment_status || "paid",
+            customer_name: ord.customer_name || null,
+            customer_phone: ord.customer_phone || null,
+            invoice_number: ord.invoice_number || null,
+            razorpay_payment_id: ord.razorpay_payment_id || null,
+            created_at: ord.created_at,
+          },
+        ])
+        .select()
+        .single();
+
+      if (
+        insertedOrd &&
+        Array.isArray(ord.order_items) &&
+        ord.order_items.length > 0
+      ) {
+        const itemsToInsert = ord.order_items.map((it) => ({
+          order_id: insertedOrd.id,
+          item_name: it.item_name,
+          quantity: Number(it.quantity),
+          price: Number(it.price),
+          notes: it.notes || null,
+        }));
+        await supabase.from("order_items").insert(itemsToInsert);
+      }
+    }
+
+    const nextArchived = archivedOutlets.filter(
+      (item) => item.outlet.id !== record.outlet.id,
+    );
+    setArchivedOutlets(nextArchived);
+    setSelectedArchivedOutletId(nextArchived[0]?.outlet.id || null);
+
+    const archiveKey = getArchivedOutletsStorageKey(
+      session.ownerPhone,
+      session.restaurantId,
+    );
+    try {
+      localStorage.setItem(archiveKey, JSON.stringify(nextArchived));
+    } catch {
+      // Ignore storage error
+    }
+
+    setRestoringOutletId(null);
+    setShowDeletedOutletsModal(false);
+    setUpgradeSuccessBanner(
+      `Outlet "${formatOutletTitle(record.outlet)}" restored to active branches!`,
     );
     setTimeout(() => setUpgradeSuccessBanner(null), 6000);
     fetchDashboardData();
@@ -1253,7 +1380,7 @@ export default function DashboardPage() {
         sevenDaysAgo.setHours(0, 0, 0, 0);
         return ordDate >= sevenDaysAgo;
       }
-      if (malikReportFilter === "custom") {
+      if (malikReportFilter === "custom" && multiCaps.canUseCustomDateRange) {
         if (malikFromDate) {
           const start = new Date(`${malikFromDate}T00:00:00`);
           if (ordDate < start) return false;
@@ -1295,24 +1422,24 @@ export default function DashboardPage() {
       };
     })
     .sort((a, b) => {
-      if (b.totalSale !== a.totalSale) return b.totalSale - a.totalSale;
+      if (multiCaps.tierRank >= 4 && b.totalSale !== a.totalSale) {
+        return b.totalSale - a.totalSale;
+      }
       return a.title.localeCompare(b.title);
     });
 
   const selectedOutletMeta =
-    selectedOutletDropdown !== "all"
+    selectedOutletDropdown !== "all" && multiCaps.canInspectOutletCustomers
       ? malikOutletReportCards.find((o) => o.id === selectedOutletDropdown) ||
         null
       : null;
 
-  const scopedMalikOrders =
-    selectedOutletDropdown === "all"
-      ? malikDateFilteredOrders
-      : malikDateFilteredOrders.filter(
-          (o) =>
-            (o.restaurant_id || session.restaurantId) ===
-            selectedOutletDropdown,
-        );
+  const scopedMalikOrders = selectedOutletMeta
+    ? malikDateFilteredOrders.filter(
+        (o) =>
+          (o.restaurant_id || session.restaurantId) === selectedOutletMeta.id,
+      )
+    : malikDateFilteredOrders;
 
   const malikCleanSearch = malikBillSearch.trim().toLowerCase();
   const visibleMalikOrders = scopedMalikOrders.filter((ord) => {
@@ -1477,20 +1604,20 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-slate-50 text-slate-900 pb-16">
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="bg-orange-600 text-white p-2 rounded-xl shadow-sm">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="bg-orange-600 text-white p-2 rounded-xl shadow-sm shrink-0">
               <UtensilsCrossed className="w-5 h-5" />
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-base sm:text-lg font-extrabold text-slate-900">
+                <h1 className="text-base sm:text-lg font-extrabold text-slate-900 truncate">
                   {isMalikMode
                     ? session.brandName ||
                       session.restaurantName.split(" — ")[0]
                     : session.restaurantName}
                 </h1>
                 <span
-                  className={`text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full flex items-center gap-1 border ${
+                  className={`text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full flex items-center gap-1 border shrink-0 ${
                     isMalikMode
                       ? "bg-slate-900 text-amber-300 border-slate-800"
                       : "bg-amber-100 text-amber-800 border-amber-200"
@@ -1498,13 +1625,13 @@ export default function DashboardPage() {
                 >
                   <ShieldCheck className="w-3 h-3" />{" "}
                   {isMalikMode
-                    ? "Malik Command"
+                    ? `Malik • ${multiCaps.tierName}`
                     : isMultiOutletMode
                       ? "Branch Manager"
                       : "Owner"}
                 </span>
               </div>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-500 truncate">
                 {isMalikMode
                   ? `${outletsForDisplay.length} Linked Outlet(s) • ${subInfo.selectedPlan}`
                   : `${session.city} • ${actualTablesCount} Tables • ${subInfo.selectedPlan}`}
@@ -1518,15 +1645,28 @@ export default function DashboardPage() {
                 <button
                   type="button"
                   onClick={() => {
+                    if (!multiCaps.canViewDeletedArchive) {
+                      openUpgradeForMultiFeature(
+                        `Deleted Outlets Archive is available from the 6 Months plan onwards (current: ${multiCaps.tierName}).`,
+                      );
+                      return;
+                    }
                     setSelectedArchivedOutletId(
                       archivedOutlets[0]?.outlet.id || null,
                     );
                     setShowDeletedOutletsModal(true);
                   }}
-                  className="bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition"
+                  className={`px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 border transition ${
+                    multiCaps.canViewDeletedArchive
+                      ? "bg-white hover:bg-slate-100 text-slate-800 border-slate-300"
+                      : "bg-slate-100 text-slate-400 border-dashed border-slate-300"
+                  }`}
                 >
-                  <Trash2 className="w-4 h-4 text-red-600" />
+                  <Trash2 className="w-4 h-4 text-red-600 shrink-0" />
                   <span>Deleted Outlets ({archivedOutlets.length})</span>
+                  {!multiCaps.canViewDeletedArchive && (
+                    <Lock className="w-3 h-3 shrink-0" />
+                  )}
                 </button>
 
                 <button
@@ -1538,7 +1678,7 @@ export default function DashboardPage() {
                   }}
                   className="bg-slate-900 hover:bg-slate-800 text-white px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition"
                 >
-                  <Crown className="w-4 h-4 text-amber-400" />
+                  <Crown className="w-4 h-4 text-amber-400 shrink-0" />
                   <span>Upgrade Plan</span>
                 </button>
 
@@ -1547,7 +1687,7 @@ export default function DashboardPage() {
                   onClick={handleOpenAddOutletModal}
                   className="bg-orange-600 hover:bg-orange-700 text-white px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-xs transition"
                 >
-                  <Plus className="w-4 h-4" />
+                  <Plus className="w-4 h-4 shrink-0" />
                   <span>Add Outlet</span>
                 </button>
               </>
@@ -1645,7 +1785,6 @@ export default function DashboardPage() {
                       { id: "today", label: "Today" },
                       { id: "7days", label: "Last 7 Days" },
                       { id: "all", label: "All Time" },
-                      { id: "custom", label: "Custom Date" },
                     ] as const
                   ).map((tab) => (
                     <button
@@ -1658,12 +1797,35 @@ export default function DashboardPage() {
                           : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                       }`}
                     >
-                      {tab.id === "custom" && (
-                        <Calendar className="w-3.5 h-3.5" />
-                      )}
                       <span>{tab.label}</span>
                     </button>
                   ))}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!multiCaps.canUseCustomDateRange) {
+                        openUpgradeForMultiFeature(
+                          `Custom Date Range is unlocked on 6 Months, Yearly & Lifetime plans (current: ${multiCaps.tierName}).`,
+                        );
+                        return;
+                      }
+                      setMalikReportFilter("custom");
+                    }}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 ${
+                      malikReportFilter === "custom"
+                        ? "bg-slate-900 text-white shadow-xs"
+                        : multiCaps.canUseCustomDateRange
+                          ? "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                          : "bg-slate-100/80 text-slate-400 border border-dashed border-slate-300"
+                    }`}
+                  >
+                    <Calendar className="w-3.5 h-3.5" />
+                    <span>Custom Date</span>
+                    {!multiCaps.canUseCustomDateRange && (
+                      <Lock className="w-3 h-3" />
+                    )}
+                  </button>
                 </div>
 
                 <div className="flex items-center gap-2 w-full lg:w-auto">
@@ -1672,10 +1834,20 @@ export default function DashboardPage() {
                     <select
                       value={selectedOutletDropdown}
                       onChange={(e) => {
-                        setSelectedOutletDropdown(e.target.value);
+                        const nextVal = e.target.value;
+                        if (
+                          nextVal !== "all" &&
+                          !multiCaps.canInspectOutletCustomers
+                        ) {
+                          openUpgradeForMultiFeature(
+                            `Per-outlet customer & order drilldown is unlocked from the 3 Months plan onwards (current: ${multiCaps.tierName}).`,
+                          );
+                          return;
+                        }
+                        setSelectedOutletDropdown(nextVal);
                         setMalikBillSearch("");
                       }}
-                      className="w-full pl-10 pr-4 py-2.5 bg-orange-50/60 hover:bg-orange-50 border-2 border-orange-300 focus:border-orange-500 rounded-xl text-xs font-extrabold text-slate-900 outline-none cursor-pointer transition"
+                      className="w-full pl-10 pr-4 py-2.5 bg-orange-50/60 hover:bg-orange-50 border-2 border-orange-300 focus:border-orange-500 rounded-xl text-xs font-extrabold text-slate-900 outline-none cursor-pointer transition truncate"
                     >
                       <option value="all">
                         All Outlets Combined ({outletsForDisplay.length}{" "}
@@ -1705,29 +1877,30 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {malikReportFilter === "custom" && (
-                <div className="flex items-center gap-2 flex-wrap pt-2 border-t border-slate-100">
-                  <span className="text-xs font-bold text-slate-500">
-                    Date Range:
-                  </span>
-                  <input
-                    type="date"
-                    max={malikToDate || todayIso}
-                    value={malikFromDate}
-                    onChange={(e) => setMalikFromDate(e.target.value)}
-                    className="px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 outline-none"
-                  />
-                  <span className="text-xs font-bold text-slate-400">to</span>
-                  <input
-                    type="date"
-                    min={malikFromDate}
-                    max={todayIso}
-                    value={malikToDate}
-                    onChange={(e) => setMalikToDate(e.target.value)}
-                    className="px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 outline-none"
-                  />
-                </div>
-              )}
+              {malikReportFilter === "custom" &&
+                multiCaps.canUseCustomDateRange && (
+                  <div className="flex items-center gap-2 flex-wrap pt-2 border-t border-slate-100">
+                    <span className="text-xs font-bold text-slate-500">
+                      Date Range:
+                    </span>
+                    <input
+                      type="date"
+                      max={malikToDate || todayIso}
+                      value={malikFromDate}
+                      onChange={(e) => setMalikFromDate(e.target.value)}
+                      className="px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 outline-none"
+                    />
+                    <span className="text-xs font-bold text-slate-400">to</span>
+                    <input
+                      type="date"
+                      min={malikFromDate}
+                      max={todayIso}
+                      value={malikToDate}
+                      onChange={(e) => setMalikToDate(e.target.value)}
+                      className="px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 outline-none"
+                    />
+                  </div>
+                )}
             </section>
 
             <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1812,16 +1985,16 @@ export default function DashboardPage() {
               </div>
             </section>
 
-            {selectedOutletMeta ? (
-              <section className="bg-white border border-slate-200 rounded-3xl p-5 sm:p-6 shadow-xs space-y-4">
+            {selectedOutletMeta && multiCaps.canInspectOutletCustomers ? (
+              <section className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-xs space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
-                  <div>
+                  <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <h2 className="text-base sm:text-lg font-extrabold text-slate-900">
+                      <h2 className="text-base sm:text-lg font-extrabold text-slate-900 break-words">
                         {selectedOutletMeta.title} — Detailed Sales &amp;
                         Customer Orders
                       </h2>
-                      <span className="text-[11px] font-bold bg-orange-50 text-orange-700 border border-orange-200 px-2.5 py-0.5 rounded-full">
+                      <span className="text-[11px] font-bold bg-orange-50 text-orange-700 border border-orange-200 px-2.5 py-0.5 rounded-full shrink-0">
                         {selectedOutletMeta.city}
                       </span>
                     </div>
@@ -1831,7 +2004,7 @@ export default function DashboardPage() {
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 flex-wrap shrink-0">
                     <button
                       type="button"
                       onClick={() => setShowOutletPins((prev) => !prev)}
@@ -1927,13 +2100,13 @@ export default function DashboardPage() {
                               </span>
 
                               <span className="font-extrabold text-slate-900 flex items-center gap-1">
-                                <User className="w-3.5 h-3.5 text-orange-600" />
+                                <User className="w-3.5 h-3.5 text-orange-600 shrink-0" />
                                 {ord.customer_name || "Walk-in Guest"}
                               </span>
 
                               {ord.customer_phone && (
                                 <span className="font-bold text-slate-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md flex items-center gap-1">
-                                  <Phone className="w-3 h-3 text-amber-700" />
+                                  <Phone className="w-3 h-3 text-amber-700 shrink-0" />
                                   {ord.customer_phone}
                                 </span>
                               )}
@@ -1975,7 +2148,7 @@ export default function DashboardPage() {
                             </div>
 
                             {ord.razorpay_payment_id && (
-                              <p className="text-[11px] font-mono text-emerald-700 font-bold">
+                              <p className="text-[11px] font-mono text-emerald-700 font-bold break-all">
                                 Payment / UTR Ref: {ord.razorpay_payment_id}
                               </p>
                             )}
@@ -2002,16 +2175,16 @@ export default function DashboardPage() {
                 )}
               </section>
             ) : (
-              <section className="bg-white border border-slate-200 rounded-3xl p-5 sm:p-6 shadow-xs space-y-4">
+              <section className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-xs space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h2 className="text-base sm:text-lg font-extrabold text-slate-900">
                       Outlet-Wise Sales Report &amp; Branches
                     </h2>
                     <p className="text-xs text-slate-500">
-                      Outlets with active sales appear first • Select any outlet
-                      from the dropdown or click a card for customer &amp; order
-                      details
+                      {multiCaps.canInspectOutletCustomers
+                        ? "Select any outlet from the dropdown or click a card for customer & order details"
+                        : `Current Tier: ${multiCaps.tierName} • Upgrade to 3 Months+ for per-outlet customer & order drilldown`}
                     </p>
                   </div>
 
@@ -2051,9 +2224,17 @@ export default function DashboardPage() {
                     return (
                       <div
                         key={out.id}
-                        onClick={() => setSelectedOutletDropdown(out.id)}
+                        onClick={() => {
+                          if (!multiCaps.canInspectOutletCustomers) {
+                            openUpgradeForMultiFeature(
+                              `Per-outlet customer & order drilldown is available from the 3 Months plan onwards (current: ${multiCaps.tierName}).`,
+                            );
+                            return;
+                          }
+                          setSelectedOutletDropdown(out.id);
+                        }}
                         className={`border-2 rounded-2xl p-4 flex flex-col justify-between gap-3 transition cursor-pointer ${
-                          hasSale
+                          hasSale && multiCaps.tierRank >= 4
                             ? "border-emerald-400 bg-emerald-50/40 hover:border-emerald-500 shadow-xs"
                             : "border-slate-200 hover:border-orange-300 bg-slate-50/60"
                         }`}
@@ -2062,11 +2243,11 @@ export default function DashboardPage() {
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
                               <div className="flex items-center gap-1.5 flex-wrap">
-                                <h3 className="font-extrabold text-sm text-slate-900 truncate">
+                                <h3 className="font-extrabold text-sm text-slate-900 break-words">
                                   {out.title}
                                 </h3>
-                                {hasSale && (
-                                  <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-600 text-white">
+                                {hasSale && multiCaps.tierRank >= 4 && (
+                                  <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-600 text-white shrink-0">
                                     Sale Active
                                   </span>
                                 )}
@@ -2098,7 +2279,7 @@ export default function DashboardPage() {
                           </div>
 
                           <div className="bg-white border border-slate-200 rounded-xl p-3 space-y-2">
-                            <div className="flex items-center justify-between">
+                            <div className="flex items-center justify-between gap-2">
                               <span className="text-xs font-bold text-slate-500">
                                 Total Sales ({out.billsCount} bills)
                               </span>
@@ -2135,7 +2316,7 @@ export default function DashboardPage() {
                           </div>
                         </div>
 
-                        <div className="flex items-center justify-between gap-1.5 text-[11px] font-mono pt-1">
+                        <div className="flex items-center justify-between gap-2 text-[11px] font-mono pt-1 flex-wrap">
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span className="bg-white border border-slate-200 text-slate-700 px-2.5 py-1 rounded-lg font-bold">
                               Branch PIN:{" "}
@@ -2149,7 +2330,9 @@ export default function DashboardPage() {
                             </span>
                           </div>
                           <span className="font-sans text-[11px] font-extrabold text-orange-600 shrink-0">
-                            Details &rarr;
+                            {multiCaps.canInspectOutletCustomers
+                              ? "Details →"
+                              : "3M+ Lock"}
                           </span>
                         </div>
                       </div>
@@ -2665,9 +2848,10 @@ export default function DashboardPage() {
         )}
       </main>
 
-      {/* Malik-Only Deleted Outlets Archive Modal */}
+      {/* Malik-Only Deleted Outlets Archive Modal (6 Months+ Archive, Yearly+ Restore) */}
       {isMalikMode &&
         showDeletedOutletsModal &&
+        multiCaps.canViewDeletedArchive &&
         (() => {
           const activeArchived =
             archivedOutlets.find(
@@ -2698,14 +2882,14 @@ export default function DashboardPage() {
           return (
             <div
               onClick={() => setShowDeletedOutletsModal(false)}
-              className="fixed inset-0 bg-black/65 backdrop-blur-xs flex items-center justify-center p-4 z-[1035]"
+              className="fixed inset-0 bg-black/65 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-[1035] overscroll-none touch-none"
             >
               <div
                 onClick={(e) => e.stopPropagation()}
-                className="bg-white rounded-3xl max-w-4xl w-full p-5 sm:p-6 shadow-2xl border border-slate-200 max-h-[88vh] flex flex-col overflow-hidden"
+                className="bg-white rounded-3xl max-w-4xl w-full p-4 sm:p-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto overscroll-contain touch-pan-y"
               >
-                <div className="flex items-center justify-between pb-3.5 border-b border-slate-200 shrink-0">
-                  <div>
+                <div className="flex items-start justify-between gap-2 pb-3.5 border-b border-slate-200">
+                  <div className="min-w-0">
                     <h3 className="text-base sm:text-lg font-extrabold text-slate-900">
                       Deleted Outlets Archive ({archivedOutlets.length})
                     </h3>
@@ -2717,7 +2901,7 @@ export default function DashboardPage() {
                   <button
                     type="button"
                     onClick={() => setShowDeletedOutletsModal(false)}
-                    className="p-2 rounded-full hover:bg-slate-100 text-slate-500"
+                    className="p-2 rounded-full hover:bg-slate-100 text-slate-500 shrink-0"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -2728,8 +2912,8 @@ export default function DashboardPage() {
                     No deleted outlets recorded yet.
                   </div>
                 ) : (
-                  <div className="flex-1 overflow-y-auto pt-4 grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
-                    <div className="md:col-span-4 space-y-2">
+                  <div className="pt-4 grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
+                    <div className="md:col-span-4 space-y-2 max-h-56 md:max-h-[62vh] overflow-y-auto pr-1">
                       {archivedOutlets.map((rec) => {
                         const isSelected =
                           activeArchived?.outlet.id === rec.outlet.id;
@@ -2756,7 +2940,7 @@ export default function DashboardPage() {
                                 : "border-slate-200 bg-slate-50/70 hover:bg-slate-100"
                             }`}
                           >
-                            <p className="text-xs font-extrabold text-slate-900 truncate">
+                            <p className="text-xs font-extrabold text-slate-900 break-words">
                               {formatOutletTitle(rec.outlet)}
                             </p>
                             <p className="text-[11px] text-slate-500 mt-0.5">
@@ -2779,10 +2963,10 @@ export default function DashboardPage() {
                     </div>
 
                     {activeArchived && (
-                      <div className="md:col-span-8 bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-4">
-                        <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-200">
-                          <div>
-                            <h4 className="text-sm sm:text-base font-extrabold text-slate-900">
+                      <div className="md:col-span-8 bg-slate-50 border border-slate-200 rounded-2xl p-3.5 sm:p-4 space-y-4 min-w-0">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-slate-200">
+                          <div className="min-w-0">
+                            <h4 className="text-sm sm:text-base font-extrabold text-slate-900 break-words">
                               {formatOutletTitle(activeArchived.outlet)}
                             </h4>
                             <p className="text-[11px] text-slate-500">
@@ -2798,12 +2982,40 @@ export default function DashboardPage() {
                               })}
                             </p>
                           </div>
-                          <span className="text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full bg-red-100 text-red-700">
-                            Deleted Outlet
-                          </span>
+
+                          <div className="flex items-center gap-2 flex-wrap shrink-0">
+                            <span className="text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full bg-red-100 text-red-700">
+                              Deleted Outlet
+                            </span>
+                            <button
+                              type="button"
+                              disabled={
+                                restoringOutletId === activeArchived.outlet.id
+                              }
+                              onClick={() => handleRestoreOutlet(activeArchived)}
+                              className={`text-xs font-extrabold px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition ${
+                                multiCaps.canRestoreDeletedOutlet
+                                  ? "bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white"
+                                  : "bg-slate-200 text-slate-600 hover:bg-slate-300"
+                              }`}
+                            >
+                              {multiCaps.canRestoreDeletedOutlet ? (
+                                <RotateCcw className="w-3.5 h-3.5" />
+                              ) : (
+                                <Lock className="w-3.5 h-3.5" />
+                              )}
+                              <span>
+                                {restoringOutletId === activeArchived.outlet.id
+                                  ? "Restoring..."
+                                  : multiCaps.canRestoreDeletedOutlet
+                                    ? "Restore Outlet"
+                                    : "Restore (Yearly+)"}
+                              </span>
+                            </button>
+                          </div>
                         </div>
 
-                        <div className="grid grid-cols-3 gap-2.5">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                           <div className="bg-white border border-slate-200 rounded-xl p-3">
                             <p className="text-[10px] font-bold text-slate-500">
                               Total Sales
@@ -2830,7 +3042,7 @@ export default function DashboardPage() {
                           </div>
                         </div>
 
-                        <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                        <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                           {archivedSourceOrders.length === 0 ? (
                             <p className="text-xs text-slate-400 text-center py-8 bg-white rounded-xl border border-slate-200">
                               No order records found for this deleted outlet.
@@ -2839,7 +3051,7 @@ export default function DashboardPage() {
                             archivedSourceOrders.map((ord) => (
                               <div
                                 key={ord.id}
-                                className="bg-white border border-slate-200 rounded-xl p-3 text-xs flex items-start justify-between gap-3"
+                                className="bg-white border border-slate-200 rounded-xl p-3 text-xs flex flex-col sm:flex-row sm:items-start justify-between gap-2.5"
                               >
                                 <div className="space-y-1 min-w-0 flex-1">
                                   <div className="flex flex-wrap items-center gap-1.5">
@@ -2859,7 +3071,7 @@ export default function DashboardPage() {
                                         `INV-${ord.id.slice(0, 6).toUpperCase()}`}
                                     </span>
                                   </div>
-                                  <p className="text-slate-600">
+                                  <p className="text-slate-600 break-words">
                                     {ord.order_items
                                       ?.map(
                                         (i) => `${i.quantity}× ${i.item_name}`,
@@ -2867,13 +3079,13 @@ export default function DashboardPage() {
                                       .join(", ")}
                                   </p>
                                   {ord.razorpay_payment_id && (
-                                    <p className="text-[10px] font-mono text-emerald-700 font-bold">
+                                    <p className="text-[10px] font-mono text-emerald-700 font-bold break-all">
                                       Ref: {ord.razorpay_payment_id}
                                     </p>
                                   )}
                                 </div>
 
-                                <div className="text-right shrink-0">
+                                <div className="flex sm:flex-col items-center sm:items-end justify-between gap-1 shrink-0">
                                   <p className="font-extrabold text-slate-900">
                                     ₹
                                     {Number(ord.total_amount).toLocaleString(
@@ -2899,8 +3111,8 @@ export default function DashboardPage() {
 
       {/* Malik-Only Add Outlet Modal */}
       {isMalikMode && showAddOutletModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-[1020]">
-          <div className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-[1020] overscroll-none touch-none">
+          <div className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto overscroll-contain touch-pan-y">
             <div className="flex items-center justify-between pb-3.5 border-b border-slate-200">
               <div>
                 <h3 className="text-base sm:text-lg font-extrabold text-slate-900 flex items-center gap-2">
@@ -3038,7 +3250,7 @@ export default function DashboardPage() {
 
       {/* Malik-Only Remove Outlet Confirmation Modal */}
       {isMalikMode && outletToRemove && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-[1025]">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-[1025] overscroll-none touch-none">
           <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-red-200 space-y-4 text-center">
             <div className="w-12 h-12 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center mx-auto">
               <Trash2 className="w-6 h-6" />
@@ -3050,9 +3262,10 @@ export default function DashboardPage() {
               </h3>
               <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
                 Are you sure you want to remove{" "}
-                <strong>{formatOutletTitle(outletToRemove)}</strong>? Its sales
-                and order history will remain accessible under{" "}
-                <strong>Deleted Outlets</strong>.
+                <strong>{formatOutletTitle(outletToRemove)}</strong>?
+                {multiCaps.canViewDeletedArchive
+                  ? " Its sales and order history will be saved under Deleted Outlets."
+                  : " Upgrade to 6 Months+ to archive deleted outlet sales."}
               </p>
             </div>
 
@@ -3090,8 +3303,8 @@ export default function DashboardPage() {
       )}
 
       {isOwner && showUpgradeModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-[1030]">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl max-h-[85vh] overflow-y-auto overscroll-contain border border-slate-200">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-[1030] overscroll-none touch-none">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl max-h-[85vh] overflow-y-auto overscroll-contain touch-pan-y border border-slate-200">
             <div className="flex items-center justify-between pb-4 border-b border-slate-200">
               <div>
                 <h3 className="text-base sm:text-lg font-extrabold text-slate-900 flex items-center gap-2">
@@ -3112,7 +3325,7 @@ export default function DashboardPage() {
             </div>
 
             {upgradeErrorMsg && (
-              <div className="mt-3 bg-red-50 border border-red-200 text-red-700 px-3.5 py-2.5 rounded-xl text-xs font-bold">
+              <div className="mt-3 bg-amber-50 border border-amber-300 text-amber-900 px-3.5 py-2.5 rounded-xl text-xs font-bold">
                 {upgradeErrorMsg}
               </div>
             )}
