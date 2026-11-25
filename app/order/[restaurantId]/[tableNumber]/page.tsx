@@ -31,6 +31,8 @@ interface RestaurantInfo {
   id: string;
   name: string;
   city: string;
+  outlet_mode?: 'single' | 'multiple' | string | null;
+  outlet_label?: string | null;
   upi_id?: string | null;
   bank_account_name?: string | null;
   razorpay_key_id?: string | null;
@@ -143,7 +145,9 @@ function CustomerOrderContent() {
     let restData: RestaurantInfo | null = null;
     const { data: fullRest, error: restErr } = await supabase
       .from('restaurants')
-      .select('id, name, city, upi_id, bank_account_name, razorpay_key_id')
+      .select(
+        'id, name, city, outlet_mode, outlet_label, upi_id, bank_account_name, razorpay_key_id'
+      )
       .eq('id', restaurantId)
       .single();
 
@@ -422,7 +426,10 @@ function CustomerOrderContent() {
         })),
       };
 
-      setTableOrders((prev) => [instantOrder, ...prev.filter((o) => o.id !== createdOrder.id)]);
+      setTableOrders((prev) => [
+        instantOrder,
+        ...prev.filter((o) => o.id !== createdOrder.id),
+      ]);
       setCart({});
       setShowCartModal(false);
       setOrderSuccessToast(true);
@@ -457,7 +464,9 @@ function CustomerOrderContent() {
       try {
         const loaded = await loadRazorpayScript();
         if (!loaded) {
-          setFormError('Unable to load payment gateway. Please check your connection.');
+          setFormError(
+            'Unable to load payment gateway. Please check your connection.'
+          );
           setPlacingOrder(false);
           return;
         }
@@ -485,7 +494,7 @@ function CustomerOrderContent() {
           key: orderData.keyId,
           amount: orderData.amount,
           currency: orderData.currency,
-          name: restaurant.name,
+          name: displayOutletTitle,
           description: `Table ${tableNumber} • ${customerName.trim()}`,
           order_id: orderData.orderId,
           prefill: {
@@ -496,7 +505,11 @@ function CustomerOrderContent() {
             color: '#ea580c',
           },
           handler: async function (response: { razorpay_payment_id: string }) {
-            await saveOrderToDatabase('paid', 'upi', response.razorpay_payment_id);
+            await saveOrderToDatabase(
+              'paid',
+              'upi',
+              response.razorpay_payment_id
+            );
           },
           modal: {
             ondismiss: function () {
@@ -506,7 +519,9 @@ function CustomerOrderContent() {
         };
 
         const RazorpayConstructor = (
-          window as unknown as { Razorpay: new (opts: unknown) => { open: () => void } }
+          window as unknown as {
+            Razorpay: new (opts: unknown) => { open: () => void };
+          }
         ).Razorpay;
         const rzp = new RazorpayConstructor(options);
         rzp.open();
@@ -545,19 +560,39 @@ function CustomerOrderContent() {
   if (!restaurant) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4 text-center">
-        <p className="text-slate-600 font-semibold">Invalid QR Code. Restaurant not found.</p>
+        <p className="text-slate-600 font-semibold">
+          Invalid QR Code. Restaurant not found.
+        </p>
       </div>
     );
   }
 
-  const categories = ['All', ...Array.from(new Set(menuItems.map((i) => i.category)))];
+  // Multi-outlet branch display title & location
+  const cleanOutletLabel = restaurant.outlet_label?.trim() || '';
+  const isMultiOutletBranch =
+    restaurant.outlet_mode === 'multiple' && cleanOutletLabel.length > 0;
+
+  const displayOutletTitle = isMultiOutletBranch
+    ? `${restaurant.name} — ${cleanOutletLabel}`
+    : restaurant.name;
+
+  const locationSubtitle = isMultiOutletBranch
+    ? `${cleanOutletLabel}, ${restaurant.city}`
+    : restaurant.city;
+
+  const categories = [
+    'All',
+    ...Array.from(new Set(menuItems.map((i) => i.category))),
+  ];
 
   const filteredItems = menuItems.filter((item) => {
     const matchesSearch =
       item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (item.description && item.description.toLowerCase().includes(searchQuery.toLowerCase()));
+      (item.description &&
+        item.description.toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesVeg = vegOnly ? item.is_veg : true;
-    const matchesCat = selectedCategory === 'All' ? true : item.category === selectedCategory;
+    const matchesCat =
+      selectedCategory === 'All' ? true : item.category === selectedCategory;
     return matchesSearch && matchesVeg && matchesCat;
   });
 
@@ -619,16 +654,17 @@ function CustomerOrderContent() {
       <header className="bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-30">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
           {/* Mobile (< lg): Non-clickable so QR/mobile users cannot tap restaurant name */}
-          <div className="flex lg:hidden items-center gap-2.5 text-left select-none cursor-default">
-            <div className="bg-gradient-to-br from-orange-500 to-orange-600 text-white p-2.5 rounded-xl shadow-sm">
+          <div className="flex lg:hidden items-center gap-2.5 text-left select-none cursor-default min-w-0 max-w-[70%]">
+            <div className="bg-gradient-to-br from-orange-500 to-orange-600 text-white p-2.5 rounded-xl shadow-sm shrink-0">
               <UtensilsCrossed className="w-5 h-5" />
             </div>
-            <div>
-              <h1 className="text-base sm:text-lg font-extrabold text-slate-900 leading-tight">
-                {restaurant.name}
+            <div className="min-w-0">
+              <h1 className="text-base sm:text-lg font-extrabold text-slate-900 leading-tight truncate">
+                {displayOutletTitle}
               </h1>
-              <p className="text-[11px] text-slate-500 flex items-center gap-1">
-                <MapPin className="w-3 h-3 text-slate-400" /> {restaurant.city}
+              <p className="text-[11px] text-slate-500 flex items-center gap-1 truncate">
+                <MapPin className="w-3 h-3 text-slate-400 shrink-0" />{' '}
+                <span className="truncate">{locationSubtitle}</span>
               </p>
             </div>
           </div>
@@ -636,17 +672,18 @@ function CustomerOrderContent() {
           {/* Desktop / Web (lg+): Clickable link to dashboard */}
           <Link
             href="/dashboard"
-            className="hidden lg:flex items-center gap-2.5 text-left group cursor-pointer"
+            className="hidden lg:flex items-center gap-2.5 text-left group cursor-pointer min-w-0 max-w-sm"
           >
-            <div className="bg-gradient-to-br from-orange-500 to-orange-600 text-white p-2.5 rounded-xl shadow-sm group-hover:scale-105 transition">
+            <div className="bg-gradient-to-br from-orange-500 to-orange-600 text-white p-2.5 rounded-xl shadow-sm group-hover:scale-105 transition shrink-0">
               <UtensilsCrossed className="w-5 h-5" />
             </div>
-            <div>
-              <h1 className="text-base sm:text-lg font-extrabold text-slate-900 leading-tight group-hover:text-orange-600 transition">
-                {restaurant.name}
+            <div className="min-w-0">
+              <h1 className="text-base sm:text-lg font-extrabold text-slate-900 leading-tight group-hover:text-orange-600 transition truncate">
+                {displayOutletTitle}
               </h1>
-              <p className="text-[11px] text-slate-500 flex items-center gap-1">
-                <MapPin className="w-3 h-3 text-slate-400" /> {restaurant.city}
+              <p className="text-[11px] text-slate-500 flex items-center gap-1 truncate">
+                <MapPin className="w-3 h-3 text-slate-400 shrink-0" />{' '}
+                <span className="truncate">{locationSubtitle}</span>
               </p>
             </div>
           </Link>
@@ -709,10 +746,11 @@ function CustomerOrderContent() {
           <section className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white rounded-2xl p-5 sm:p-6 shadow-md flex items-center justify-between gap-4">
             <div>
               <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-orange-400 bg-orange-500/10 border border-orange-500/20 px-2.5 py-0.5 rounded-full mb-2">
-                <Flame className="w-3 h-3" /> Freshly Prepared • Table {tableNumber}
+                <Flame className="w-3 h-3" /> Freshly Prepared • Table{' '}
+                {tableNumber}
               </span>
               <h2 className="text-lg sm:text-xl font-extrabold leading-snug">
-                Welcome to {restaurant.name}
+                Welcome to {displayOutletTitle}
               </h2>
               <p className="text-xs text-slate-300 mt-1">
                 {hasRazorpayOnlinePayment
@@ -747,7 +785,7 @@ function CustomerOrderContent() {
                 <BookOpen className="w-7 h-7" />
               </div>
               <h3 className="text-base font-extrabold text-slate-900">
-                {restaurant.name}&apos;s Menu Is Empty
+                {displayOutletTitle}&apos;s Menu Is Empty
               </h3>
               <p className="text-xs text-slate-500 mt-1.5 max-w-md mx-auto leading-relaxed">
                 {hasStaffSession
@@ -796,7 +834,9 @@ function CustomerOrderContent() {
                       <div className="flex items-center gap-2 mb-1">
                         <span
                           className={`w-3.5 h-3.5 border flex items-center justify-center shrink-0 ${
-                            item.is_veg ? 'border-emerald-600' : 'border-red-600'
+                            item.is_veg
+                              ? 'border-emerald-600'
+                              : 'border-red-600'
                           }`}
                         >
                           <span
@@ -810,8 +850,12 @@ function CustomerOrderContent() {
                         </span>
                       </div>
 
-                      <h3 className="font-bold text-slate-900 text-base truncate">{item.name}</h3>
-                      <p className="font-extrabold text-orange-600 text-sm mt-0.5">₹{item.price}</p>
+                      <h3 className="font-bold text-slate-900 text-base truncate">
+                        {item.name}
+                      </h3>
+                      <p className="font-extrabold text-orange-600 text-sm mt-0.5">
+                        ₹{item.price}
+                      </p>
                       {item.description && (
                         <p className="text-xs text-slate-500 mt-1 line-clamp-2 leading-relaxed">
                           {item.description}
@@ -832,7 +876,9 @@ function CustomerOrderContent() {
                           >
                             <Minus className="w-4 h-4" />
                           </button>
-                          <span className="px-2.5 font-extrabold text-sm">{inCart.quantity}</span>
+                          <span className="px-2.5 font-extrabold text-sm">
+                            {inCart.quantity}
+                          </span>
                           <button
                             onClick={() => addToCart(item)}
                             className="p-2 hover:bg-orange-700 transition"
@@ -888,11 +934,14 @@ function CustomerOrderContent() {
                           {ord.customer_name && (
                             <p className="text-[11px] font-extrabold text-slate-800 mb-0.5">
                               {ord.customer_name} •{' '}
-                              {ord.invoice_number || getShortBillNumber(ord.id)}
+                              {ord.invoice_number ||
+                                getShortBillNumber(ord.id)}
                             </p>
                           )}
                           <p>
-                            {ord.order_items?.map((i) => `${i.quantity}× ${i.item_name}`).join(', ')}
+                            {ord.order_items
+                              ?.map((i) => `${i.quantity}× ${i.item_name}`)
+                              .join(', ')}
                           </p>
                           <div className="flex items-center gap-2 mt-1">
                             <p className="font-extrabold text-slate-900 text-sm">
@@ -938,7 +987,9 @@ function CustomerOrderContent() {
                       <div className="grid grid-cols-3 gap-1.5 pt-1">
                         <div className="space-y-1">
                           <div className="h-1.5 rounded-full bg-emerald-500"></div>
-                          <p className="text-[10px] font-bold text-slate-600">1. Sent</p>
+                          <p className="text-[10px] font-bold text-slate-600">
+                            1. Sent
+                          </p>
                         </div>
                         <div className="space-y-1">
                           <div
@@ -988,15 +1039,20 @@ function CustomerOrderContent() {
           <section className="hidden lg:block bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <h3 className="font-extrabold text-slate-900 text-base flex items-center gap-2">
-                <ShoppingBag className="w-4 h-4 text-orange-600" /> Table {tableNumber} Cart
+                <ShoppingBag className="w-4 h-4 text-orange-600" /> Table{' '}
+                {tableNumber} Cart
               </h3>
-              <span className="text-xs font-bold text-slate-500">{totalCartItems} item(s)</span>
+              <span className="text-xs font-bold text-slate-500">
+                {totalCartItems} item(s)
+              </span>
             </div>
 
             {cartEntries.length === 0 ? (
               <div className="py-10 text-center">
                 <ShoppingBag className="w-9 h-9 text-slate-200 mx-auto mb-2" />
-                <p className="text-xs font-semibold text-slate-500">Your cart is empty</p>
+                <p className="text-xs font-semibold text-slate-500">
+                  Your cart is empty
+                </p>
                 <p className="text-[11px] text-slate-400 mt-0.5">
                   Tap + ADD on dishes to add items
                 </p>
@@ -1005,12 +1061,18 @@ function CustomerOrderContent() {
               <div className="space-y-3 pt-3">
                 <div className="max-h-56 overflow-y-auto space-y-2.5 pr-1">
                   {cartEntries.map(({ menuItem, quantity, notes }) => (
-                    <div key={menuItem.id} className="bg-slate-50 p-3 rounded-xl space-y-2">
+                    <div
+                      key={menuItem.id}
+                      className="bg-slate-50 p-3 rounded-xl space-y-2"
+                    >
                       <div className="flex items-center justify-between gap-2">
                         <div>
-                          <p className="font-bold text-slate-900 text-xs">{menuItem.name}</p>
+                          <p className="font-bold text-slate-900 text-xs">
+                            {menuItem.name}
+                          </p>
                           <p className="text-[11px] font-semibold text-slate-500">
-                            ₹{menuItem.price} × {quantity} = ₹{menuItem.price * quantity}
+                            ₹{menuItem.price} × {quantity} = ₹
+                            {menuItem.price * quantity}
                           </p>
                         </div>
 
@@ -1021,7 +1083,9 @@ function CustomerOrderContent() {
                           >
                             <Minus className="w-3 h-3" />
                           </button>
-                          <span className="px-2 font-bold text-xs">{quantity}</span>
+                          <span className="px-2 font-bold text-xs">
+                            {quantity}
+                          </span>
                           <button
                             onClick={() => addToCart(menuItem)}
                             className="p-1 text-slate-700 hover:bg-slate-100"
@@ -1034,7 +1098,9 @@ function CustomerOrderContent() {
                       <input
                         type="text"
                         value={notes}
-                        onChange={(e) => updateItemNote(menuItem.id, e.target.value)}
+                        onChange={(e) =>
+                          updateItemNote(menuItem.id, e.target.value)
+                        }
                         placeholder="Chef note (e.g. Less spicy)..."
                         className="w-full px-2.5 py-1 border border-slate-200 rounded-lg text-[11px] outline-none focus:border-orange-500 bg-white"
                       />
@@ -1044,7 +1110,7 @@ function CustomerOrderContent() {
 
                 <div className="bg-orange-50/70 border border-orange-200 p-3 rounded-xl space-y-2">
                   <p className="text-[11px] font-extrabold text-slate-800">
-                    Your Details (For Bill & Invoice) *
+                    Your Details (For Bill &amp; Invoice) *
                   </p>
                   <div className="relative">
                     <User className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
@@ -1075,21 +1141,26 @@ function CustomerOrderContent() {
                   </div>
                   {formError && (
                     <p className="text-[11px] font-bold text-red-600 flex items-center gap-1">
-                      <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {formError}
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />{' '}
+                      {formError}
                     </p>
                   )}
                 </div>
 
                 {!hasRazorpayOnlinePayment && (
                   <p className="text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
-                    Order will be placed directly and payment will be made at the{' '}
-                    <strong>counter / reception</strong>.
+                    Order will be placed directly and payment will be made at
+                    the <strong>counter / reception</strong>.
                   </p>
                 )}
 
                 <div className="pt-2 border-t border-slate-200 space-y-2">
                   <div className="flex items-center justify-between font-extrabold text-slate-900 text-sm">
-                    <span>{hasRazorpayOnlinePayment ? 'Total Payable' : 'Order Total'}</span>
+                    <span>
+                      {hasRazorpayOnlinePayment
+                        ? 'Total Payable'
+                        : 'Order Total'}
+                    </span>
                     <span>₹{totalCartPrice}</span>
                   </div>
 
@@ -1118,7 +1189,7 @@ function CustomerOrderContent() {
                       disabled={placingOrder}
                       className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2 rounded-xl text-xs transition disabled:opacity-50"
                     >
-                      Place Order & Pay at Counter
+                      Place Order &amp; Pay at Counter
                     </button>
                   )}
 
@@ -1157,7 +1228,9 @@ function CustomerOrderContent() {
             </div>
 
             <span className="font-extrabold text-sm flex items-center gap-1">
-              {hasRazorpayOnlinePayment ? 'Proceed to Pay →' : 'Review & Place Order →'}
+              {hasRazorpayOnlinePayment
+                ? 'Proceed to Pay →'
+                : 'Review & Place Order →'}
             </span>
           </button>
         </div>
@@ -1226,12 +1299,18 @@ function CustomerOrderContent() {
               </div>
 
               {cartEntries.map(({ menuItem, quantity, notes }) => (
-                <div key={menuItem.id} className="bg-slate-50 p-3.5 rounded-2xl space-y-2.5">
+                <div
+                  key={menuItem.id}
+                  className="bg-slate-50 p-3.5 rounded-2xl space-y-2.5"
+                >
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="font-bold text-slate-900 text-sm">{menuItem.name}</p>
+                      <p className="font-bold text-slate-900 text-sm">
+                        {menuItem.name}
+                      </p>
                       <p className="text-xs font-semibold text-slate-500">
-                        ₹{menuItem.price} × {quantity} = ₹{menuItem.price * quantity}
+                        ₹{menuItem.price} × {quantity} = ₹
+                        {menuItem.price * quantity}
                       </p>
                     </div>
 
@@ -1242,7 +1321,9 @@ function CustomerOrderContent() {
                       >
                         <Minus className="w-3.5 h-3.5" />
                       </button>
-                      <span className="px-2.5 font-bold text-xs">{quantity}</span>
+                      <span className="px-2.5 font-bold text-xs">
+                        {quantity}
+                      </span>
                       <button
                         onClick={() => addToCart(menuItem)}
                         className="p-1.5 text-slate-700 hover:bg-slate-100"
@@ -1275,7 +1356,9 @@ function CustomerOrderContent() {
               )}
 
               <div className="flex items-center justify-between text-base font-extrabold text-slate-900">
-                <span>{hasRazorpayOnlinePayment ? 'Total Payable' : 'Order Total'}</span>
+                <span>
+                  {hasRazorpayOnlinePayment ? 'Total Payable' : 'Order Total'}
+                </span>
                 <span>₹{totalCartPrice}</span>
               </div>
 
@@ -1304,7 +1387,7 @@ function CustomerOrderContent() {
                   disabled={placingOrder}
                   className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl text-xs transition disabled:opacity-50"
                 >
-                  Place Order & Pay at Counter
+                  Place Order &amp; Pay at Counter
                 </button>
               )}
 
@@ -1343,10 +1426,14 @@ function CustomerOrderContent() {
               <div className="w-11 h-11 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto mb-2">
                 <CheckCircle2 className="w-6 h-6" />
               </div>
-              <h3 className="text-lg font-extrabold text-slate-900">{restaurant.name}</h3>
-              <p className="text-xs text-slate-500">{restaurant.city}</p>
+              <h3 className="text-lg font-extrabold text-slate-900">
+                {displayOutletTitle}
+              </h3>
+              <p className="text-xs text-slate-500">{locationSubtitle}</p>
               <span className="inline-block mt-2 text-[10px] font-extrabold uppercase tracking-wider px-3 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
-                {receiptOrder.payment_status === 'paid' ? 'PAID TAX INVOICE ✓' : 'ORDER RECEIPT'}
+                {receiptOrder.payment_status === 'paid'
+                  ? 'PAID TAX INVOICE ✓'
+                  : 'ORDER RECEIPT'}
               </span>
             </div>
 
@@ -1374,12 +1461,16 @@ function CustomerOrderContent() {
               )}
               <div className="flex justify-between">
                 <span className="text-slate-500">Table:</span>
-                <span className="font-bold text-slate-900">Table {tableNumber}</span>
+                <span className="font-bold text-slate-900">
+                  Table {tableNumber}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Customer:</span>
                 <span className="font-bold text-slate-900">
-                  {receiptOrder.customer_name || customerName || 'Walk-in Guest'}
+                  {receiptOrder.customer_name ||
+                    customerName ||
+                    'Walk-in Guest'}
                 </span>
               </div>
               {(receiptOrder.customer_phone || customerPhone) && (
@@ -1391,7 +1482,7 @@ function CustomerOrderContent() {
                 </div>
               )}
               <div className="flex justify-between">
-                <span className="text-slate-500">Date & Time:</span>
+                <span className="text-slate-500">Date &amp; Time:</span>
                 <span className="font-semibold text-slate-700">
                   {new Date(receiptOrder.created_at).toLocaleString('en-IN', {
                     day: '2-digit',
@@ -1410,22 +1501,31 @@ function CustomerOrderContent() {
                 <span>Amount</span>
               </div>
               {receiptOrder.order_items?.map((item) => (
-                <div key={item.id} className="flex justify-between text-xs text-slate-800">
+                <div
+                  key={item.id}
+                  className="flex justify-between text-xs text-slate-800"
+                >
                   <span>
                     <strong>{item.quantity}×</strong> {item.item_name}
                   </span>
-                  <span className="font-bold">₹{item.price * item.quantity}</span>
+                  <span className="font-bold">
+                    ₹{item.price * item.quantity}
+                  </span>
                 </div>
               ))}
             </div>
 
             <div className="flex items-center justify-between text-base font-extrabold text-slate-900">
               <span>
-                {receiptOrder.payment_status === 'paid' ? 'Grand Total Paid' : 'Grand Total'}
+                {receiptOrder.payment_status === 'paid'
+                  ? 'Grand Total Paid'
+                  : 'Grand Total'}
               </span>
               <span
                 className={
-                  receiptOrder.payment_status === 'paid' ? 'text-emerald-700' : 'text-slate-900'
+                  receiptOrder.payment_status === 'paid'
+                    ? 'text-emerald-700'
+                    : 'text-slate-900'
                 }
               >
                 ₹{receiptOrder.total_amount}
@@ -1434,8 +1534,8 @@ function CustomerOrderContent() {
 
             <p className="text-[11px] text-center text-slate-400">
               {receiptOrder.payment_status === 'paid'
-                ? `Thank you for dining at ${restaurant.name}! Save or screenshot this receipt for your reference.`
-                : `Thank you for dining at ${restaurant.name}! Please settle your bill at the counter / reception.`}
+                ? `Thank you for dining at ${displayOutletTitle}! Save or screenshot this receipt for your reference.`
+                : `Thank you for dining at ${displayOutletTitle}! Please settle your bill at the counter / reception.`}
             </p>
 
             <div className="no-print grid grid-cols-2 gap-2.5 pt-2">
