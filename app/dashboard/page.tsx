@@ -1124,6 +1124,130 @@ export default function DashboardPage() {
     router.push("/");
   };
 
+  const printTableReceipt = (params: {
+    tableNum: number;
+    method: "cash" | "upi";
+    totalAmount: number;
+    items: MergedBillItem[];
+    guestName?: string | null;
+    guestPhone?: string | null;
+    invoiceNumber?: string | null;
+  }) => {
+    if (typeof window === "undefined" || !session) return;
+
+    const {
+      tableNum,
+      method,
+      totalAmount,
+      items,
+      guestName,
+      guestPhone,
+      invoiceNumber,
+    } = params;
+
+    const printedAt = new Date().toLocaleString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    const itemRowsHtml = items
+      .map(
+        (it) => `
+          <tr>
+            <td style="padding:4px 0;vertical-align:top;">${it.quantity}&times; ${it.item_name}</td>
+            <td style="padding:4px 0;text-align:right;font-weight:700;white-space:nowrap;">&#8377;${(it.price * it.quantity).toLocaleString("en-IN")}</td>
+          </tr>
+        `,
+      )
+      .join("");
+
+    const receiptHtml = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Bill - Table ${tableNum}</title>
+          <style>
+            @page { margin: 8mm; }
+            body {
+              font-family: Arial, Helvetica, sans-serif;
+              color: #0f172a;
+              max-width: 320px;
+              margin: 0 auto;
+              padding: 12px;
+              font-size: 12px;
+            }
+            .center { text-align: center; }
+            .title { font-size: 16px; font-weight: 800; margin: 0; }
+            .muted { color: #64748b; font-size: 11px; margin-top: 2px; }
+            .hr { border-top: 1px dashed #94a3b8; margin: 10px 0; }
+            table { width: 100%; border-collapse: collapse; }
+            .total-row td {
+              border-top: 1px solid #0f172a;
+              padding-top: 8px;
+              font-size: 14px;
+              font-weight: 800;
+            }
+            .badge {
+              display: inline-block;
+              margin-top: 8px;
+              padding: 3px 8px;
+              border-radius: 6px;
+              font-size: 11px;
+              font-weight: 700;
+              background: #f1f5f9;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="center">
+            <p class="title">${session.restaurantName}</p>
+            ${session.city ? `<p class="muted">${session.city}</p>` : ""}
+            <p class="muted">Table ${tableNum} &bull; ${printedAt}</p>
+            ${invoiceNumber ? `<p class="muted">Invoice: ${invoiceNumber}</p>` : ""}
+            ${
+              guestName || guestPhone
+                ? `<p class="muted">Guest: ${guestName || "Walk-in Guest"}${
+                    guestPhone ? ` (${guestPhone})` : ""
+                  }</p>`
+                : ""
+            }
+          </div>
+          <div class="hr"></div>
+          <table>
+            <tbody>
+              ${itemRowsHtml}
+              <tr class="total-row">
+                <td>Total Bill</td>
+                <td style="text-align:right;">&#8377;${totalAmount.toLocaleString("en-IN")}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="center">
+            <span class="badge">Paid via ${method.toUpperCase()}</span>
+            <p class="muted" style="margin-top:10px;">Thank you for visiting!</p>
+          </div>
+        </body>
+      </html>
+    `;
+
+    const printWin = window.open("", "_blank", "width=380,height=560");
+    if (printWin) {
+      printWin.document.open();
+      printWin.document.write(receiptHtml);
+      printWin.document.close();
+      printWin.focus();
+      setTimeout(() => {
+        printWin.print();
+      }, 250);
+    } else {
+      window.print();
+    }
+  };
+
   const handleSettleTable = async (
     tableNum: number,
     method: "cash" | "upi",
@@ -1131,9 +1255,37 @@ export default function DashboardPage() {
     if (!session?.restaurantId || session.role !== "owner") return;
     setSettling(true);
 
-    const activeIds = orders
-      .filter((o) => o.table_number === tableNum && o.status !== "completed")
-      .map((o) => o.id);
+    const tableOrders = orders.filter(
+      (o) => o.table_number === tableNum && o.status !== "completed",
+    );
+    const activeIds = tableOrders.map((o) => o.id);
+
+    const mergedItems: MergedBillItem[] = Object.values(
+      tableOrders.reduce<Record<string, MergedBillItem>>((acc, ord) => {
+        (ord.order_items || []).forEach((item) => {
+          const key = `${(item.item_name || "").trim().toLowerCase()}_${Number(item.price)}`;
+          if (!acc[key]) {
+            acc[key] = {
+              item_name: item.item_name,
+              price: Number(item.price),
+              quantity: 0,
+              notes: [],
+            };
+          }
+          acc[key].quantity += Number(item.quantity);
+          if (item.notes && !acc[key].notes.includes(item.notes)) {
+            acc[key].notes.push(item.notes);
+          }
+        });
+        return acc;
+      }, {}),
+    );
+
+    const settledTotal = tableOrders.reduce(
+      (sum, o) => sum + Number(o.total_amount),
+      0,
+    );
+    const firstOrder = tableOrders[0];
 
     if (activeIds.length > 0) {
       await supabase
@@ -1145,6 +1297,16 @@ export default function DashboardPage() {
         })
         .in("id", activeIds);
     }
+
+    printTableReceipt({
+      tableNum,
+      method,
+      totalAmount: settledTotal,
+      items: mergedItems,
+      guestName: firstOrder?.customer_name,
+      guestPhone: firstOrder?.customer_phone,
+      invoiceNumber: firstOrder?.invoice_number,
+    });
 
     setSettling(false);
     setSelectedTableModal(null);
