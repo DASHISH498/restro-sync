@@ -4,7 +4,12 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { claimSingleRoleSession } from '@/lib/roleSessionGuard';
-import { getMaxOutletsForPlan } from '@/lib/planFeatures';
+import {
+  getMaxOutletsForPlan,
+  getCalendarExpiryDate,
+  isTrialExpiredRecord,
+  TRIAL_DURATION_DAYS,
+} from '@/lib/planFeatures';
 import {
   UtensilsCrossed,
   Search,
@@ -36,9 +41,14 @@ interface Restaurant {
   total_tables: number;
   owner_pin: string;
   staff_pin?: string | null;
+  phone?: string | null;
   owner_phone?: string | null;
   outlet_mode?: 'single' | 'multiple' | null;
   outlet_label?: string | null;
+  subscription_status?: string | null;
+  plan_type?: string | null;
+  selected_plan?: string | null;
+  trial_ends_at?: string | null;
 }
 
 type ResetTargetRole = 'owner' | 'staff';
@@ -52,7 +62,6 @@ interface PricingPlan {
   price: string;
   perMonth?: string;
   amount: number;
-  durationDays: number;
   maxOutlets: number | null;
   badge: string | null;
   popular: boolean;
@@ -70,7 +79,6 @@ const SINGLE_OUTLET_PLANS: PricingPlan[] = [
     price: '₹599',
     perMonth: '₹599 / month',
     amount: 599,
-    durationDays: 30,
     maxOutlets: 1,
     badge: null,
     popular: false,
@@ -88,7 +96,6 @@ const SINGLE_OUTLET_PLANS: PricingPlan[] = [
     price: '₹1,699',
     perMonth: '₹566 / month',
     amount: 1699,
-    durationDays: 90,
     maxOutlets: 1,
     badge: 'Save ₹98',
     popular: false,
@@ -106,7 +113,6 @@ const SINGLE_OUTLET_PLANS: PricingPlan[] = [
     price: '₹3,299',
     perMonth: '₹550 / month',
     amount: 3299,
-    durationDays: 180,
     maxOutlets: 1,
     badge: 'Save ₹295',
     popular: false,
@@ -124,7 +130,6 @@ const SINGLE_OUTLET_PLANS: PricingPlan[] = [
     price: '₹5,499',
     perMonth: '₹458 / month',
     amount: 5499,
-    durationDays: 365,
     maxOutlets: 1,
     badge: 'Save ₹1,689',
     popular: true,
@@ -142,7 +147,6 @@ const SINGLE_OUTLET_PLANS: PricingPlan[] = [
     price: '₹19,999',
     perMonth: 'Pay once, use forever',
     amount: 19999,
-    durationDays: 36500,
     maxOutlets: 1,
     badge: 'Zero Renewal',
     popular: false,
@@ -163,7 +167,6 @@ const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
     price: '₹1,115',
     perMonth: '₹1,115 / month',
     amount: 1115,
-    durationDays: 30,
     maxOutlets: 2,
     badge: 'Up to 2 Outlets',
     popular: false,
@@ -181,7 +184,6 @@ const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
     price: '₹11,159',
     perMonth: '₹3,720 / month',
     amount: 11159,
-    durationDays: 90,
     maxOutlets: 5,
     badge: 'Up to 5 Outlets',
     popular: false,
@@ -199,7 +201,6 @@ const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
     price: '₹18,599',
     perMonth: '₹3,100 / month',
     amount: 18599,
-    durationDays: 180,
     maxOutlets: 8,
     badge: 'Up to 8 Outlets',
     popular: false,
@@ -217,7 +218,6 @@ const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
     price: '₹27,899',
     perMonth: '₹2,325 / month',
     amount: 27899,
-    durationDays: 365,
     maxOutlets: 15,
     badge: 'Up to 15 Outlets',
     popular: true,
@@ -235,7 +235,6 @@ const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
     price: '₹37,199',
     perMonth: 'Pay once, use forever',
     amount: 37199,
-    durationDays: 36500,
     maxOutlets: null,
     badge: 'Unlimited Outlets',
     popular: false,
@@ -279,7 +278,6 @@ export default function HomePage() {
     planId: string;
     planLabel: string;
     outletMode: OutletTabMode;
-    durationDays: number;
     maxOutlets: number | null;
     paymentId?: string;
   } | null>(null);
@@ -317,10 +315,10 @@ export default function HomePage() {
 
   // Register Restaurant Modal States
   const [showRegisterModal, setShowRegisterModal] = useState(false);
-  const [selectedPlanId, setSelectedPlanId] = useState<string>('yearly');
-  const [selectedPlanLabel, setSelectedPlanLabel] = useState<string>('Yearly (₹5,499)');
-  const [selectedPlanDays, setSelectedPlanDays] = useState<number>(365);
-  const [selectedPlanAmount, setSelectedPlanAmount] = useState<number>(5499);
+  const [isTrialFlow, setIsTrialFlow] = useState(true);
+  const [selectedPlanId, setSelectedPlanId] = useState<string>('1_month');
+  const [selectedPlanLabel, setSelectedPlanLabel] = useState<string>('7-Day Trial • 1 Month');
+  const [selectedPlanAmount, setSelectedPlanAmount] = useState<number>(599);
   const [outletMode, setOutletMode] = useState<OutletTabMode>('single');
   const [outletLabel, setOutletLabel] = useState('');
   const [regName, setRegName] = useState('');
@@ -329,6 +327,7 @@ export default function HomePage() {
   const [regTables, setRegTables] = useState<number>(10);
   const [regOwnerPin, setRegOwnerPin] = useState('');
   const [regStaffPin, setRegStaffPin] = useState('');
+  const [regMalikPassword, setRegMalikPassword] = useState('');
   const [registering, setRegistering] = useState(false);
   const [regError, setRegError] = useState('');
 
@@ -363,7 +362,7 @@ export default function HomePage() {
       const { data, error } = await supabase
         .from('restaurants')
         .select(
-          'id, name, city, total_tables, owner_pin, staff_pin, owner_phone, outlet_mode, outlet_label'
+          'id, name, city, total_tables, owner_pin, staff_pin, phone, owner_phone, outlet_mode, outlet_label, subscription_status, plan_type, selected_plan, trial_ends_at'
         )
         .order('created_at', { ascending: false });
 
@@ -383,6 +382,51 @@ export default function HomePage() {
 
     fetchRestaurants();
   }, []);
+
+  const checkTrialEligibilityForPhone = async (
+    phoneDigits: string
+  ): Promise<{ allowed: boolean; message?: string }> => {
+    const cleanPhone = phoneDigits.replace(/\D/g, '');
+    if (cleanPhone.length !== 10) return { allowed: true };
+
+    const [{ data: byOwner }, { data: byPhone }] = await Promise.all([
+      supabase
+        .from('restaurants')
+        .select('id, subscription_status, selected_plan')
+        .eq('owner_phone', cleanPhone),
+      supabase
+        .from('restaurants')
+        .select('id, subscription_status, selected_plan')
+        .eq('phone', cleanPhone),
+    ]);
+
+    const dbRecords = [
+      ...(Array.isArray(byOwner) ? byOwner : []),
+      ...(Array.isArray(byPhone) ? byPhone : []),
+    ];
+
+    const localRecords = restaurants.filter((r) => {
+      const p1 = (r.owner_phone || '').replace(/\D/g, '');
+      const p2 = (r.phone || '').replace(/\D/g, '');
+      return p1 === cleanPhone || p2 === cleanPhone;
+    });
+
+    const combined = [...dbRecords, ...localRecords];
+    const hasUsedTrial = combined.some((rec) => {
+      const status = (rec.subscription_status || '').toLowerCase();
+      const planText = (rec.selected_plan || '').toLowerCase();
+      return status === 'free_trial' || planText.includes('trial');
+    });
+
+    if (hasUsedTrial || combined.length > 0) {
+      return {
+        allowed: false,
+        message: `Mobile number ${cleanPhone} has already used its 7-day free trial. Please choose a paid plan to register.`,
+      };
+    }
+
+    return { allowed: true };
+  };
 
   const checkOutletLimitBeforeProceed = async (
     phoneDigits: string,
@@ -420,6 +464,24 @@ export default function HomePage() {
       return false;
     }
 
+    return true;
+  };
+
+  const checkLoginTrialNotExpired = async (rest: Restaurant): Promise<boolean> => {
+    const { data: freshRest } = await supabase
+      .from('restaurants')
+      .select('id, subscription_status, trial_ends_at')
+      .eq('id', rest.id)
+      .single();
+
+    const targetRecord = freshRest || rest;
+    if (isTrialExpiredRecord(targetRecord)) {
+      setErrorMsg(
+        'Your 7-day free trial has ended (8th day). Please select a paid plan from Plans & Pricing to continue.'
+      );
+      setVerifying(false);
+      return false;
+    }
     return true;
   };
 
@@ -485,6 +547,9 @@ export default function HomePage() {
     setVerifying(true);
     setErrorMsg('');
 
+    const allowedByTrial = await checkLoginTrialNotExpired(selectedRestaurant);
+    if (!allowedByTrial) return;
+
     if (!savedMaster) {
       localStorage.setItem(MASTER_PASS_STORAGE_KEY, cleanPass);
     }
@@ -518,6 +583,9 @@ export default function HomePage() {
 
     setVerifying(true);
     setErrorMsg('');
+
+    const allowedByTrial = await checkLoginTrialNotExpired(selectedRestaurant);
+    if (!allowedByTrial) return;
 
     const isOwner = activePin === selectedRestaurant.owner_pin;
     const isStaff =
@@ -693,7 +761,6 @@ export default function HomePage() {
             planId: plan.id,
             planLabel: label,
             outletMode: mode,
-            durationDays: plan.durationDays,
             maxOutlets: plan.maxOutlets,
             paymentId: response?.razorpay_payment_id,
           };
@@ -748,9 +815,9 @@ export default function HomePage() {
           }) payment verified! Complete registration to launch your outlet.`
         );
 
+        setIsTrialFlow(false);
         setSelectedPlanId(plan.id);
         setSelectedPlanLabel(label);
-        setSelectedPlanDays(plan.durationDays);
         setSelectedPlanAmount(plan.amount);
         setOutletMode(mode);
         setOutletLabel('');
@@ -759,6 +826,11 @@ export default function HomePage() {
         setRegTables(10);
         setRegOwnerPin('');
         setRegStaffPin('');
+        setRegMalikPassword(
+          typeof window !== 'undefined'
+            ? localStorage.getItem(MASTER_PASS_STORAGE_KEY) || ''
+            : ''
+        );
         setRegError('');
         setShowRegisterModal(true);
       },
@@ -766,15 +838,15 @@ export default function HomePage() {
   };
 
   const handleOpenRegisterModal = (
-    planName = 'Yearly (₹5,499)',
+    planName = '7-Day Trial • 1 Month',
     mode: OutletTabMode = 'single',
-    planId = 'yearly',
-    durationDays = 365,
-    amount = 5499
+    planId = '1_month',
+    amount = 599,
+    isTrial = true
   ) => {
+    setIsTrialFlow(isTrial);
     setSelectedPlanId(planId);
     setSelectedPlanLabel(planName);
-    setSelectedPlanDays(durationDays);
     setSelectedPlanAmount(amount);
     setOutletMode(mode);
     setOutletLabel('');
@@ -784,6 +856,11 @@ export default function HomePage() {
     setRegTables(10);
     setRegOwnerPin('');
     setRegStaffPin('');
+    setRegMalikPassword(
+      typeof window !== 'undefined'
+        ? localStorage.getItem(MASTER_PASS_STORAGE_KEY) || ''
+        : ''
+    );
     setRegError('');
     setShowRegisterModal(true);
   };
@@ -796,13 +873,10 @@ export default function HomePage() {
     setRegistering(true);
 
     const finalTables = regTables > 0 ? regTables : 10;
-    const expiryDate = new Date();
-    expiryDate.setDate(
-      expiryDate.getDate() +
-        (isPaidForThisPlan && verifiedPlanCheckout
-          ? verifiedPlanCheckout.durationDays
-          : selectedPlanDays || 14)
-    );
+    const now = new Date();
+    const expiryDate = isPaidForThisPlan
+      ? getCalendarExpiryDate(selectedPlanId, selectedPlanLabel, now)
+      : new Date(now.getTime() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000);
 
     const basePayload = {
       name: regName.trim(),
@@ -864,6 +938,10 @@ export default function HomePage() {
     await claimSingleRoleSession(data.id, 'owner');
 
     if (savedOutletMode === 'multiple') {
+      const cleanMaster = regMalikPassword.trim();
+      if (cleanMaster.length >= 4) {
+        localStorage.setItem(MASTER_PASS_STORAGE_KEY, cleanMaster);
+      }
       localStorage.setItem(MALIK_VAULT_UNLOCKED_KEY, '1');
     } else {
       localStorage.removeItem(MALIK_VAULT_UNLOCKED_KEY);
@@ -899,6 +977,7 @@ export default function HomePage() {
 
     const cleanPhone = regPhone.replace(/\D/g, '');
     const cleanOutletLabel = outletLabel.trim();
+    const cleanMasterPass = regMalikPassword.trim();
 
     if (!regName.trim() || !regCity.trim()) {
       setRegError('Restaurant name and city are required.');
@@ -906,6 +985,10 @@ export default function HomePage() {
     }
     if (outletMode === 'multiple' && !cleanOutletLabel) {
       setRegError('Please enter the Outlet / Location Name for multiple outlets.');
+      return;
+    }
+    if (outletMode === 'multiple' && cleanMasterPass.length < 4) {
+      setRegError('Please set a Malik Master Password (minimum 4 characters).');
       return;
     }
     if (cleanPhone.length !== 10) {
@@ -921,7 +1004,30 @@ export default function HomePage() {
       return;
     }
 
+    const isPaidForThisPlan = Boolean(
+      verifiedPlanCheckout &&
+        verifiedPlanCheckout.planLabel === selectedPlanLabel &&
+        verifiedPlanCheckout.outletMode === outletMode
+    );
+
+    const isTrialAttempt =
+      !isPaidForThisPlan &&
+      (isTrialFlow || selectedPlanLabel.toLowerCase().includes('trial'));
+
     setRegistering(true);
+
+    if (isTrialAttempt) {
+      const trialCheck = await checkTrialEligibilityForPhone(cleanPhone);
+      if (!trialCheck.allowed) {
+        setRegistering(false);
+        setRegError(
+          trialCheck.message ||
+            'This mobile number has already used its 7-day free trial.'
+        );
+        return;
+      }
+    }
+
     const allowed = await checkOutletLimitBeforeProceed(
       cleanPhone,
       outletMode,
@@ -940,24 +1046,15 @@ export default function HomePage() {
       return;
     }
 
-    const isPaidForThisPlan = Boolean(
-      verifiedPlanCheckout &&
-        verifiedPlanCheckout.planLabel === selectedPlanLabel &&
-        verifiedPlanCheckout.outletMode === outletMode
-    );
+    const shouldPayNow = !isTrialAttempt && !isPaidForThisPlan && selectedPlanAmount > 0;
 
-    const shouldPayNow =
-      selectedPlanLabel.includes('Pay ') ||
-      (outletMode === 'multiple' && !isPaidForThisPlan && !selectedPlanLabel.startsWith('Trial'));
-
-    if (shouldPayNow && !isPaidForThisPlan && selectedPlanAmount > 0) {
+    if (shouldPayNow) {
       const planObj: PricingPlan = {
         id: selectedPlanId,
         duration: selectedPlanLabel.split(' (')[0],
         subtitle: '',
         price: `₹${selectedPlanAmount.toLocaleString('en-IN')}`,
         amount: selectedPlanAmount,
-        durationDays: selectedPlanDays,
         maxOutlets: getPlanMaxOutlets(selectedPlanId, selectedPlanLabel, outletMode),
         badge: null,
         popular: false,
@@ -1017,7 +1114,7 @@ export default function HomePage() {
 
             <button
               type="button"
-              onClick={() => handleOpenRegisterModal('Yearly (₹5,499)', 'single')}
+              onClick={() => handleOpenRegisterModal('7-Day Trial', 'single', '1_month', 599, true)}
               className="bg-orange-600 hover:bg-orange-700 text-white px-3.5 sm:px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 shadow-sm transition whitespace-nowrap shrink-0"
             >
               <Plus className="w-4 h-4 shrink-0" />
@@ -1030,7 +1127,7 @@ export default function HomePage() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-10 sm:pt-12 pb-20">
         <div className="text-center max-w-2xl mx-auto">
           <span className="inline-block bg-orange-100 text-orange-700 text-xs font-bold px-3.5 py-1 rounded-full mb-4">
-            14-Day Free Trial • No Hardware Needed
+            7-Day Free Trial (1 Per Mobile) • No Hardware Needed
           </span>
 
           <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-slate-900 leading-tight">
@@ -1101,10 +1198,10 @@ export default function HomePage() {
             <div className="mt-4">
               <button
                 type="button"
-                onClick={() => handleOpenRegisterModal('Yearly (₹5,499)', 'single')}
+                onClick={() => handleOpenRegisterModal('7-Day Trial', 'single', '1_month', 599, true)}
                 className="text-xs font-bold text-orange-600 hover:underline"
               >
-                New restaurant? Register for free here &rarr;
+                New restaurant? Start 7-day free trial here &rarr;
               </button>
             </div>
           </div>
@@ -1166,8 +1263,8 @@ export default function HomePage() {
                 Choose the Best Plan for Your Restaurant
               </h2>
               <p className="text-xs sm:text-sm text-slate-500 mt-1.5">
-                Every plan includes a <strong>14-Day Free Trial</strong> or instant activation via
-                Razorpay.
+                Includes a <strong>7-Day Free Trial</strong> (one trial per mobile number) or
+                calendar-based paid activation via Razorpay.
               </p>
             </div>
 
@@ -1313,11 +1410,11 @@ export default function HomePage() {
                       type="button"
                       onClick={() =>
                         handleOpenRegisterModal(
-                          `Trial • ${plan.duration} (${plan.price})`,
+                          `7-Day Trial • ${plan.duration} (${plan.price})`,
                           pricingTab,
                           plan.id,
-                          plan.durationDays,
-                          plan.amount
+                          plan.amount,
+                          true
                         )
                       }
                       className={`w-full py-1.5 rounded-xl text-[11px] font-bold transition ${
@@ -1326,7 +1423,7 @@ export default function HomePage() {
                           : 'text-slate-500 hover:text-slate-900'
                       }`}
                     >
-                      Start 14-Day Free Trial
+                      Start 7-Day Free Trial
                     </button>
                   </div>
                 </div>
@@ -1359,11 +1456,15 @@ export default function HomePage() {
                 {verifiedPlanCheckout?.planLabel === selectedPlanLabel &&
                 verifiedPlanCheckout?.outletMode === outletMode
                   ? `Paid & Active • ${selectedPlanLabel}`
+                  : isTrialFlow
+                  ? '7-Day Free Trial'
                   : selectedPlanLabel}
               </span>
               <h3 className="text-xl font-extrabold text-slate-900">Register Restaurant</h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Fill in your details to launch your POS &amp; QR Menu right away.
+                {isTrialFlow
+                  ? '7-day free trial (1 per mobile). 8th day requires payment to login.'
+                  : 'Paid plan starts today for its full calendar period.'}
               </p>
             </div>
 
@@ -1423,22 +1524,46 @@ export default function HomePage() {
               </div>
 
               {outletMode === 'multiple' && (
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Outlet / Location Name *
-                  </label>
-                  <div className="relative">
-                    <Store className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      required
-                      value={outletLabel}
-                      onChange={(e) => setOutletLabel(e.target.value)}
-                      placeholder="e.g. Location A (Vaishali Nagar)"
-                      className="w-full pl-10 pr-3.5 py-2.5 border border-orange-300 focus:border-orange-500 rounded-xl text-sm outline-none transition"
-                    />
+                <>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      1st Outlet / Location Name *
+                    </label>
+                    <div className="relative">
+                      <Store className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        required
+                        value={outletLabel}
+                        onChange={(e) => setOutletLabel(e.target.value)}
+                        placeholder="e.g. Location A (Vaishali Nagar)"
+                        className="w-full pl-10 pr-3.5 py-2.5 border border-orange-300 focus:border-orange-500 rounded-xl text-sm outline-none transition"
+                      />
+                    </div>
                   </div>
-                </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Set Malik Master Password (Min 4 Chars) *
+                    </label>
+                    <div className="relative">
+                      <ShieldCheck className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="password"
+                        required
+                        minLength={4}
+                        autoComplete="new-password"
+                        value={regMalikPassword}
+                        onChange={(e) => {
+                          setRegMalikPassword(e.target.value);
+                          setRegError('');
+                        }}
+                        placeholder="Set master password for all outlets"
+                        className="w-full pl-10 pr-3.5 py-2.5 border border-orange-300 focus:border-orange-500 rounded-xl text-sm font-semibold outline-none transition"
+                      />
+                    </div>
+                  </div>
+                </>
               )}
 
               <div>
@@ -1796,9 +1921,20 @@ export default function HomePage() {
                 />
 
                 {errorMsg && (
-                  <p className="text-xs font-bold text-red-600 bg-red-50 py-2 px-3 rounded-xl">
-                    {errorMsg}
-                  </p>
+                  <div className="text-xs font-bold text-red-600 bg-red-50 py-2.5 px-3 rounded-xl space-y-2">
+                    <p>{errorMsg}</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleClosePinModal();
+                        setPricingTab('multiple');
+                        document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' });
+                      }}
+                      className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-2 rounded-xl text-xs transition"
+                    >
+                      Pay / Upgrade Plan Now →
+                    </button>
+                  </div>
                 )}
 
                 <button
@@ -1846,9 +1982,20 @@ export default function HomePage() {
                 />
 
                 {errorMsg && (
-                  <p className="text-xs font-bold text-red-600 bg-red-50 py-2 px-3 rounded-xl">
-                    {errorMsg}
-                  </p>
+                  <div className="text-xs font-bold text-red-600 bg-red-50 py-2.5 px-3 rounded-xl space-y-2">
+                    <p>{errorMsg}</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleClosePinModal();
+                        setPricingTab(isSelectedMultiOutlet ? 'multiple' : 'single');
+                        document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' });
+                      }}
+                      className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-2 rounded-xl text-xs transition"
+                    >
+                      Pay / Upgrade Plan Now →
+                    </button>
+                  </div>
                 )}
 
                 <button

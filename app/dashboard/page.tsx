@@ -12,6 +12,9 @@ import {
 import {
   getMultiOutletCapabilities,
   getMaxOutletsForPlan,
+  getCalendarExpiryDate,
+  isTrialExpiredRecord,
+  TRIAL_DURATION_DAYS,
 } from "@/lib/planFeatures";
 import SessionReplacedDialog from "@/components/SessionReplacedDialog";
 import {
@@ -134,7 +137,6 @@ interface UpgradePlanOption {
   name: string;
   price: string;
   amount: number;
-  durationDays: number;
   maxOutlets: number | null;
   tag: string;
 }
@@ -148,43 +150,38 @@ const SINGLE_UPGRADE_PLANS: UpgradePlanOption[] = [
     name: "1 Month Plan",
     price: "₹599",
     amount: 599,
-    durationDays: 30,
     maxOutlets: 1,
-    tag: "Monthly",
+    tag: "Calendar Month",
   },
   {
     id: "3_months",
     name: "3 Months Plan",
     price: "₹1,699",
     amount: 1699,
-    durationDays: 90,
     maxOutlets: 1,
-    tag: "Quarterly",
+    tag: "3 Calendar Months",
   },
   {
     id: "6_months",
     name: "6 Months Plan",
     price: "₹3,299",
     amount: 3299,
-    durationDays: 180,
     maxOutlets: 1,
-    tag: "Half-Yearly",
+    tag: "6 Calendar Months",
   },
   {
     id: "yearly",
     name: "Yearly Plan (12 Months)",
     price: "₹5,499",
     amount: 5499,
-    durationDays: 365,
     maxOutlets: 1,
-    tag: "Most Popular",
+    tag: "1 Calendar Year",
   },
   {
     id: "lifetime",
     name: "Lifetime License",
     price: "₹19,999",
     amount: 19999,
-    durationDays: 36500,
     maxOutlets: 1,
     tag: "One-Time Pay",
   },
@@ -196,43 +193,38 @@ const MULTI_UPGRADE_PLANS: UpgradePlanOption[] = [
     name: "1 Month Plan",
     price: "₹1,115",
     amount: 1115,
-    durationDays: 30,
     maxOutlets: 2,
-    tag: "Up to 2 Outlets",
+    tag: "Up to 2 Outlets • 1 Mo",
   },
   {
     id: "multi_3_months",
     name: "3 Months Plan",
     price: "₹11,159",
     amount: 11159,
-    durationDays: 90,
     maxOutlets: 5,
-    tag: "Up to 5 Outlets",
+    tag: "Up to 5 Outlets • 3 Mo",
   },
   {
     id: "multi_6_months",
     name: "6 Months Plan",
     price: "₹18,599",
     amount: 18599,
-    durationDays: 180,
     maxOutlets: 8,
-    tag: "Up to 8 Outlets",
+    tag: "Up to 8 Outlets • 6 Mo",
   },
   {
     id: "multi_yearly",
     name: "Yearly Plan (12 Months)",
     price: "₹27,899",
     amount: 27899,
-    durationDays: 365,
     maxOutlets: 15,
-    tag: "Up to 15 Outlets",
+    tag: "Up to 15 Outlets • 1 Yr",
   },
   {
     id: "multi_lifetime",
     name: "Lifetime License",
     price: "₹37,199",
     amount: 37199,
-    durationDays: 36500,
     maxOutlets: null,
     tag: "Unlimited Outlets",
   },
@@ -266,9 +258,9 @@ export default function DashboardPage() {
   const [actualTablesCount, setActualTablesCount] = useState<number>(5);
   const [subInfo, setSubInfo] = useState<SubscriptionInfo>({
     status: "free_trial",
-    planType: "yearly",
-    selectedPlan: "Yearly (₹5,499)",
-    daysLeft: 14,
+    planType: "1_month",
+    selectedPlan: "7-Day Trial",
+    daysLeft: TRIAL_DURATION_DAYS,
     isExpired: false,
   });
 
@@ -619,20 +611,33 @@ export default function DashboardPage() {
       setIsPaymentConfigured(hasUpi || hasRzp);
 
       const status = restData.subscription_status || "free_trial";
-      const planType = restData.plan_type || "yearly";
-      const selectedPlan = restData.selected_plan || "Yearly (₹5,499)";
-      let daysLeft = 14;
+      const planType = restData.plan_type || "1_month";
+      const selectedPlan = restData.selected_plan || "7-Day Trial";
+      let daysLeft = TRIAL_DURATION_DAYS;
       let isExpired = false;
 
       if (restData.trial_ends_at) {
         const diffMs = new Date(restData.trial_ends_at).getTime() - Date.now();
         daysLeft = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
-        if (status === "free_trial" && diffMs <= 0) {
+        if (isTrialExpiredRecord(restData)) {
           isExpired = true;
         }
       }
 
       setSubInfo({ status, planType, selectedPlan, daysLeft, isExpired });
+
+      if (isExpired && session.role === "owner") {
+        setUpgradeErrorMsg(
+          "Your 7-day free trial has ended (8th day). Please complete payment below to continue.",
+        );
+        setUpgradeModeTab(
+          restData.outlet_mode === "multiple" ||
+            localStorage.getItem(MALIK_VAULT_UNLOCKED_KEY) === "1"
+            ? "multiple"
+            : "single",
+        );
+        setShowUpgradeModal(true);
+      }
 
       const caps = getMultiOutletCapabilities(
         planType,
@@ -1221,8 +1226,10 @@ export default function DashboardPage() {
           color: "#ea580c",
         },
         handler: async function () {
-          const newExpiry = new Date(
-            Date.now() + plan.durationDays * 24 * 60 * 60 * 1000,
+          const newExpiry = getCalendarExpiryDate(
+            plan.id,
+            plan.name,
+            new Date(),
           ).toISOString();
 
           const subPayload = {
@@ -1250,11 +1257,13 @@ export default function DashboardPage() {
 
           setUpgradingPlanId(null);
           setUpgradeSuccessBanner(
-            `${plan.name} (${plan.price}) activated! Limit: ${
-              plan.maxOutlets === null
-                ? "Unlimited outlets"
-                : `Up to ${plan.maxOutlets} outlet${plan.maxOutlets === 1 ? "" : "s"}`
-            }.`,
+            `${plan.name} (${plan.price}) activated! Valid until ${new Date(
+              newExpiry,
+            ).toLocaleDateString("en-IN", {
+              day: "2-digit",
+              month: "short",
+              year: "numeric",
+            })}.`,
           );
           fetchDashboardData();
           setTimeout(() => setUpgradeSuccessBanner(null), 7000);
@@ -1772,6 +1781,63 @@ export default function DashboardPage() {
             <CheckCircle2 className="w-5 h-5 shrink-0" />
             <span>{upgradeSuccessBanner}</span>
           </div>
+        )}
+
+        {isOwner && subInfo.status !== "active" && (
+          <section
+            className={`rounded-2xl p-4 border flex flex-wrap items-center justify-between gap-3 shadow-sm ${
+              subInfo.isExpired
+                ? "bg-red-50 border-red-300 text-red-900"
+                : "bg-gradient-to-r from-slate-900 to-slate-800 border-slate-700 text-white"
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <div
+                className={`p-2.5 rounded-xl ${
+                  subInfo.isExpired
+                    ? "bg-red-100 text-red-600"
+                    : "bg-amber-400/20 text-amber-300"
+                }`}
+              >
+                {subInfo.isExpired ? (
+                  <AlertTriangle className="w-5 h-5" />
+                ) : (
+                  <Crown className="w-5 h-5" />
+                )}
+              </div>
+              <div>
+                <p className="text-xs sm:text-sm font-extrabold">
+                  {subInfo.isExpired
+                    ? "Your 7-Day Free Trial Has Ended!"
+                    : `7-Day Free Trial Active • ${subInfo.daysLeft} Day${
+                        subInfo.daysLeft === 1 ? "" : "s"
+                      } Left`}
+                </p>
+                <p
+                  className={`text-[11px] mt-0.5 ${
+                    subInfo.isExpired ? "text-red-700" : "text-slate-300"
+                  }`}
+                >
+                  {subInfo.isExpired
+                    ? "8th day reached — complete payment to unlock your account."
+                    : `Plan: ${subInfo.selectedPlan} • Pay anytime for full calendar duration.`}
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setUpgradeErrorMsg(null);
+                setUpgradeModeTab(isMalikMode ? "multiple" : "single");
+                setShowUpgradeModal(true);
+              }}
+              className="bg-orange-600 hover:bg-orange-700 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center gap-1.5"
+            >
+              <Crown className="w-3.5 h-3.5" />
+              <span>Upgrade / Activate Plan</span>
+            </button>
+          </section>
         )}
 
         {/* ==================== MALIK COMMAND VIEW ==================== */}
@@ -2345,62 +2411,6 @@ export default function DashboardPage() {
         ) : (
           /* ==================== BRANCH MANAGER / SINGLE OUTLET VIEW ==================== */
           <>
-            {isOwner && !isMultiOutletMode && subInfo.status !== "active" && (
-              <section
-                className={`rounded-2xl p-4 border flex flex-wrap items-center justify-between gap-3 shadow-sm ${
-                  subInfo.isExpired
-                    ? "bg-red-50 border-red-300 text-red-900"
-                    : "bg-gradient-to-r from-slate-900 to-slate-800 border-slate-700 text-white"
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <div
-                    className={`p-2.5 rounded-xl ${
-                      subInfo.isExpired
-                        ? "bg-red-100 text-red-600"
-                        : "bg-amber-400/20 text-amber-300"
-                    }`}
-                  >
-                    {subInfo.isExpired ? (
-                      <AlertTriangle className="w-5 h-5" />
-                    ) : (
-                      <Crown className="w-5 h-5" />
-                    )}
-                  </div>
-                  <div>
-                    <p className="text-xs sm:text-sm font-extrabold">
-                      {subInfo.isExpired
-                        ? "Your 14-Day Free Trial Has Ended!"
-                        : `Free Trial Active • ${subInfo.daysLeft} Day${
-                            subInfo.daysLeft === 1 ? "" : "s"
-                          } Left`}
-                    </p>
-                    <p
-                      className={`text-[11px] mt-0.5 ${
-                        subInfo.isExpired ? "text-red-700" : "text-slate-300"
-                      }`}
-                    >
-                      Selected Plan: <strong>{subInfo.selectedPlan}</strong> •
-                      Complete online payment to activate your plan immediately.
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setUpgradeErrorMsg(null);
-                    setUpgradeModeTab("single");
-                    setShowUpgradeModal(true);
-                  }}
-                  className="bg-orange-600 hover:bg-orange-700 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center gap-1.5"
-                >
-                  <Crown className="w-3.5 h-3.5" />
-                  <span>Upgrade / Activate Plan</span>
-                </button>
-              </section>
-            )}
-
             {isOwner && !isPaymentConfigured && (
               <section className="bg-amber-50 border border-amber-300 text-amber-950 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-sm">
                 <div className="flex items-center gap-3">
@@ -3312,16 +3322,18 @@ export default function DashboardPage() {
                   RestroSync Plan
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Your plan activates immediately upon completing payment
+                  Starts today for its full calendar duration upon payment
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowUpgradeModal(false)}
-                className="p-2 rounded-full hover:bg-slate-100 text-slate-500"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              {!subInfo.isExpired && (
+                <button
+                  type="button"
+                  onClick={() => setShowUpgradeModal(false)}
+                  className="p-2 rounded-full hover:bg-slate-100 text-slate-500"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              )}
             </div>
 
             {upgradeErrorMsg && (

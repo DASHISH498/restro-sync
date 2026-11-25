@@ -11,6 +11,71 @@ export interface MultiOutletCapabilities {
   canRestoreDeletedOutlet: boolean; // Unlocked from Yearly+
 }
 
+export const TRIAL_DURATION_DAYS = 7;
+
+export function getCalendarExpiryDate(
+  planId?: string | null,
+  selectedPlanLabel?: string | null,
+  fromDate: Date = new Date()
+): Date {
+  const combined = `${planId || ''} ${selectedPlanLabel || ''}`.toLowerCase();
+  const expiry = new Date(fromDate.getTime());
+
+  if (combined.includes('lifetime') || combined.includes('37,199') || combined.includes('19,999')) {
+    expiry.setFullYear(expiry.getFullYear() + 100);
+    return expiry;
+  }
+
+  if (combined.includes('yearly') || combined.includes('27,899') || combined.includes('5,499')) {
+    expiry.setFullYear(expiry.getFullYear() + 1);
+    return expiry;
+  }
+
+  if (
+    combined.includes('6_month') ||
+    combined.includes('6 month') ||
+    combined.includes('18,599') ||
+    combined.includes('3,299')
+  ) {
+    expiry.setMonth(expiry.getMonth() + 6);
+    return expiry;
+  }
+
+  if (
+    combined.includes('3_month') ||
+    combined.includes('3 month') ||
+    combined.includes('11,159') ||
+    combined.includes('1,699')
+  ) {
+    expiry.setMonth(expiry.getMonth() + 3);
+    return expiry;
+  }
+
+  if (
+    combined.includes('1_month') ||
+    combined.includes('1 month') ||
+    combined.includes('1,115') ||
+    combined.includes('599')
+  ) {
+    expiry.setMonth(expiry.getMonth() + 1);
+    return expiry;
+  }
+
+  expiry.setMonth(expiry.getMonth() + 1);
+  return expiry;
+}
+
+export function isTrialExpiredRecord(record?: {
+  subscription_status?: string | null;
+  trial_ends_at?: string | null;
+} | null): boolean {
+  if (!record) return false;
+  const status = (record.subscription_status || '').toLowerCase();
+  if (status === 'active') return false;
+  if (!record.trial_ends_at) return false;
+  return new Date(record.trial_ends_at).getTime() <= Date.now();
+}
+
 export function getMultiOutletTierRank(
   planType?: string | null,
   selectedPlanLabel?: string | null,
