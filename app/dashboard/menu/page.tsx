@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import MenuPhotoImporter from "@/components/MenuPhotoImporter";
 import {
   ArrowLeft,
   Plus,
@@ -277,7 +278,7 @@ export default function MenuManagerPage() {
             </Link>
             <div>
               <h1 className="text-lg font-bold text-slate-900">
-                Menu & Prices Manager
+                Menu &amp; Prices Manager
               </h1>
               <p className="text-xs text-slate-500">
                 {session.restaurantName} • {items.length} Total Dishes
@@ -288,167 +289,175 @@ export default function MenuManagerPage() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 pt-6 grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-        {/* Left Column: Add New Dish Form (Owner + Desktop Web Only Sticky) */}
-        <section
-          className={`bg-white border border-slate-200 rounded-2xl p-5 h-fit shadow-sm ${
-            isOwnerWeb ? "lg:sticky lg:top-21" : ""
-          }`}
-        >
-          <h2 className="text-base font-extrabold text-slate-900 mb-4 flex items-center gap-2">
-            <Plus className="w-4 h-4 text-orange-600" /> Add New Dish
-          </h2>
+        {/* Left Column: Add New Dish Form + Auto-Add Menu from Photo */}
+        <div className="space-y-5">
+          <section
+            className={`bg-white border border-slate-200 rounded-2xl p-5 h-fit shadow-sm ${
+              isOwnerWeb ? "lg:sticky lg:top-21" : ""
+            }`}
+          >
+            <h2 className="text-base font-extrabold text-slate-900 mb-4 flex items-center gap-2">
+              <Plus className="w-4 h-4 text-orange-600" /> Add New Dish
+            </h2>
 
-          <form onSubmit={handleAddDish} className="space-y-3.5">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Dish Name *
-              </label>
-              <input
-                type="text"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g., Paneer Tikka Masala"
-                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-orange-500"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <form onSubmit={handleAddDish} className="space-y-3.5">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Price (₹) *
+                  Dish Name *
                 </label>
                 <input
-                  type="number"
+                  type="text"
                   required
-                  min="1"
-                  value={price}
-                  onChange={(e) => setPrice(e.target.value)}
-                  placeholder="180"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g., Paneer Tikka Masala"
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-orange-500"
                 />
               </div>
 
-              <div>
-                <div className="flex items-center justify-between">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Category
+                    Price (₹) *
                   </label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowCategoryInput((prev) => !prev);
-                      setNewCategoryName("");
-                    }}
-                    title="Add Category"
-                    className="shrink-0 text-orange-700 text-xs font-bold flex items-center gap-1 transition mb-1"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Add Category</span>
-                  </button>
+                  <input
+                    type="number"
+                    required
+                    min="1"
+                    value={price}
+                    onChange={(e) => setPrice(e.target.value)}
+                    placeholder="180"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-orange-500"
+                  />
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <select
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value)}
-                    className="w-full min-w-0 px-3 py-2 border border-slate-300 bg-white rounded-xl text-sm outline-none focus:border-orange-500"
-                  >
-                    {availableCategories.map((cat) => (
-                      <option key={cat} value={cat}>
-                        {cat}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Short Description (Optional)
-              </label>
-              <input
-                type="text"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="e.g., Served with green chutney & onions"
-                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-orange-500"
-              />
-            </div>
-
-            {/* Veg / Non-Veg Selector */}
-            <div className="grid grid-cols-2 gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => setIsVeg(true)}
-                className={`py-2 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition ${
-                  isVeg
-                    ? "bg-emerald-50 border-emerald-600 text-emerald-700"
-                    : "bg-white border-slate-200 text-slate-600"
-                }`}
-              >
-                <span className="w-3 h-3 border border-emerald-600 flex items-center justify-center">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
-                </span>
-                Pure Veg
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIsVeg(false)}
-                className={`py-2 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition ${
-                  !isVeg
-                    ? "bg-red-50 border-red-600 text-red-700"
-                    : "bg-white border-slate-200 text-slate-600"
-                }`}
-              >
-                <span className="w-3 h-3 border border-red-600 flex items-center justify-center">
-                  <span className="w-1.5 h-1.5 rounded-full bg-red-600"></span>
-                </span>
-                Non-Veg
-              </button>
-            </div>
-
-            <button
-              type="submit"
-              disabled={adding}
-              className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-2.5 rounded-xl text-sm shadow-sm transition disabled:opacity-50"
-            >
-              {adding ? "Adding Dish..." : "+ Add to Menu"}
-            </button>
-            {showCategoryInput && (
-                  <div className="mt-2 flex items-center gap-1.5">
-                    <input
-                      type="text"
-                      autoFocus
-                      value={newCategoryName}
-                      onChange={(e) => setNewCategoryName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          handleCreateCategory();
-                        } else if (e.key === "Escape") {
-                          setShowCategoryInput(false);
-                          setNewCategoryName("");
-                        }
-                      }}
-                      placeholder="Category name & press Enter..."
-                      className="w-full px-3 py-1.5 border border-orange-400 bg-orange-50/40 rounded-xl text-xs outline-none focus:border-orange-600"
-                    />
+                <div>
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Category
+                    </label>
                     <button
                       type="button"
-                      onClick={handleCreateCategory}
-                      title="Save Category"
-                      className="p-1.5 rounded-xs bg-orange-600 hover:bg-orange-700 text-white transition shrink-0"
+                      onClick={() => {
+                        setShowCategoryInput((prev) => !prev);
+                        setNewCategoryName("");
+                      }}
+                      title="Add Category"
+                      className="shrink-0 text-orange-700 text-xs font-bold flex items-center gap-1 transition mb-1"
                     >
-                      <Check className="w-3.5 h-3.5" />
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Add Category</span>
                     </button>
                   </div>
-                )}
-          </form>
-        </section>
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={category}
+                      onChange={(e) => setCategory(e.target.value)}
+                      className="w-full min-w-0 px-3 py-2 border border-slate-300 bg-white rounded-xl text-sm outline-none focus:border-orange-500"
+                    >
+                      {availableCategories.map((cat) => (
+                        <option key={cat} value={cat}>
+                          {cat}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
 
-        {/* Right Column: Search Bar (Owner + Desktop Web Only Sticky) + Existing Menu Items List */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Short Description (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="e.g., Served with green chutney & onions"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-orange-500"
+                />
+              </div>
+
+              {/* Veg / Non-Veg Selector */}
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setIsVeg(true)}
+                  className={`py-2 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition ${
+                    isVeg
+                      ? "bg-emerald-50 border-emerald-600 text-emerald-700"
+                      : "bg-white border-slate-200 text-slate-600"
+                  }`}
+                >
+                  <span className="w-3 h-3 border border-emerald-600 flex items-center justify-center">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+                  </span>
+                  Pure Veg
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsVeg(false)}
+                  className={`py-2 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition ${
+                    !isVeg
+                      ? "bg-red-50 border-red-600 text-red-700"
+                      : "bg-white border-slate-200 text-slate-600"
+                  }`}
+                >
+                  <span className="w-3 h-3 border border-red-600 flex items-center justify-center">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-600"></span>
+                  </span>
+                  Non-Veg
+                </button>
+              </div>
+
+              <button
+                type="submit"
+                disabled={adding}
+                className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-2.5 rounded-xl text-sm shadow-sm transition disabled:opacity-50"
+              >
+                {adding ? "Adding Dish..." : "+ Add to Menu"}
+              </button>
+
+              {showCategoryInput && (
+                <div className="mt-2 flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    autoFocus
+                    value={newCategoryName}
+                    onChange={(e) => setNewCategoryName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleCreateCategory();
+                      } else if (e.key === "Escape") {
+                        setShowCategoryInput(false);
+                        setNewCategoryName("");
+                      }
+                    }}
+                    placeholder="Category name & press Enter..."
+                    className="w-full px-3 py-1.5 border border-orange-400 bg-orange-50/40 rounded-xl text-xs outline-none focus:border-orange-600"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCreateCategory}
+                    title="Save Category"
+                    className="p-1.5 rounded-xs bg-orange-600 hover:bg-orange-700 text-white transition shrink-0"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+            </form>
+          </section>
+
+          <MenuPhotoImporter
+            restaurantId={session.restaurantId}
+            onImported={() => fetchMenu(session.restaurantId)}
+          />
+        </div>
+
+        {/* Right Column: Search Bar + Existing Menu Items List */}
         <section className="lg:col-span-2 space-y-2">
           <div
             className={
