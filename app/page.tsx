@@ -694,19 +694,32 @@ export default function HomePage() {
     const digitsOnly = rawInput.replace(/\D/g, '');
     const lowerInput = rawInput.toLowerCase();
 
+    const findMatchingRestaurant = (list: Restaurant[]) => {
+      // 1. Exact phone or email match
+      const exactContactMatch = list.find((r) => {
+        const p1 = (r.owner_phone || '').replace(/\D/g, '');
+        const p2 = (r.phone || '').replace(/\D/g, '');
+        const emailVal = (r.email || '').trim().toLowerCase();
+        if (digitsOnly.length === 10 && (p1 === digitsOnly || p2 === digitsOnly)) {
+          return true;
+        }
+        if (emailVal && emailVal === lowerInput) {
+          return true;
+        }
+        return false;
+      });
+      if (exactContactMatch) return exactContactMatch;
+
+      // 2. Fallback match by restaurant name when email wasn't stored in DB yet
+      return list.find((r) => {
+        const restName = (r.name || '').trim().toLowerCase();
+        const fullDisplay = formatRestaurantDisplayName(r).toLowerCase();
+        return restName === lowerInput || fullDisplay === lowerInput;
+      });
+    };
+
     let listToSearch = restaurants;
-    let matched = listToSearch.find((r) => {
-      const p1 = (r.owner_phone || '').replace(/\D/g, '');
-      const p2 = (r.phone || '').replace(/\D/g, '');
-      const emailVal = (r.email || '').trim().toLowerCase();
-      if (digitsOnly.length === 10 && (p1 === digitsOnly || p2 === digitsOnly)) {
-        return true;
-      }
-      if (emailVal && emailVal === lowerInput) {
-        return true;
-      }
-      return false;
-    });
+    let matched = findMatchingRestaurant(listToSearch);
 
     if (!matched) {
       const { data: latestList } = await supabase
@@ -719,18 +732,19 @@ export default function HomePage() {
       if (Array.isArray(latestList)) {
         listToSearch = latestList as Restaurant[];
         setRestaurants(listToSearch);
-        matched = listToSearch.find((r) => {
-          const p1 = (r.owner_phone || '').replace(/\D/g, '');
-          const p2 = (r.phone || '').replace(/\D/g, '');
-          const emailVal = (r.email || '').trim().toLowerCase();
-          if (digitsOnly.length === 10 && (p1 === digitsOnly || p2 === digitsOnly)) {
-            return true;
-          }
-          if (emailVal && emailVal === lowerInput) {
-            return true;
-          }
-          return false;
-        });
+        matched = findMatchingRestaurant(listToSearch);
+      } else {
+        const { data: fallbackList } = await supabase
+          .from('restaurants')
+          .select(
+            'id, name, city, total_tables, owner_pin, staff_pin, phone, owner_phone, outlet_mode, outlet_label, subscription_status, plan_type, selected_plan, trial_ends_at'
+          )
+          .order('created_at', { ascending: false });
+        if (Array.isArray(fallbackList)) {
+          listToSearch = fallbackList as Restaurant[];
+          setRestaurants(listToSearch);
+          matched = findMatchingRestaurant(listToSearch);
+        }
       }
     }
 
