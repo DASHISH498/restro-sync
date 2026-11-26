@@ -271,16 +271,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
 
   const [pricingTab, setPricingTab] = useState<OutletTabMode>('single');
-  const [payingPlanId, setPayingPlanId] = useState<string | null>(null);
-  const [planBannerMsg, setPlanBannerMsg] = useState<string | null>(null);
   const [planErrorMsg, setPlanErrorMsg] = useState<string | null>(null);
-  const [verifiedPlanCheckout, setVerifiedPlanCheckout] = useState<{
-    planId: string;
-    planLabel: string;
-    outletMode: OutletTabMode;
-    maxOutlets: number | null;
-    paymentId?: string;
-  } | null>(null);
 
   const [limitDialog, setLimitDialog] = useState<{
     open: boolean;
@@ -715,16 +706,26 @@ export default function HomePage() {
     plan: PricingPlan;
     mode: OutletTabMode;
     phone?: string;
-    onSuccess: (paymentId?: string) => void;
+    restaurantName?: string;
+    onSuccess: (paymentId?: string) => Promise<void> | void;
     onFinally: () => void;
+    onErrorMessage: (msg: string) => void;
   }) => {
-    const { plan, mode, phone, onSuccess, onFinally } = params;
+    const {
+      plan,
+      mode,
+      phone,
+      restaurantName,
+      onSuccess,
+      onFinally,
+      onErrorMessage,
+    } = params;
     const label = `${plan.duration} (${plan.price})`;
 
     try {
       const loaded = await loadRazorpayScript();
       if (!loaded) {
-        setPlanErrorMsg('Unable to load Razorpay gateway. Please check your connection.');
+        onErrorMessage('Unable to load Razorpay gateway. Please check your connection.');
         onFinally();
         return;
       }
@@ -737,13 +738,14 @@ export default function HomePage() {
           planId: plan.id,
           planName: plan.duration,
           outletMode: mode,
+          restaurantName: restaurantName || undefined,
           ownerPhone: phone || undefined,
         }),
       });
 
       const orderData = await res.json();
       if (!res.ok || !orderData.orderId) {
-        setPlanErrorMsg(orderData.error || 'Unable to initiate subscription payment.');
+        onErrorMessage(orderData.error || 'Failed to create subscription order');
         onFinally();
         return;
       }
@@ -760,19 +762,12 @@ export default function HomePage() {
         theme: {
           color: '#ea580c',
         },
-        handler: function (response: { razorpay_payment_id?: string }) {
-          const verified = {
-            planId: plan.id,
-            planLabel: label,
-            outletMode: mode,
-            maxOutlets: plan.maxOutlets,
-            paymentId: response?.razorpay_payment_id,
-          };
-
-          setVerifiedPlanCheckout(verified);
-          localStorage.setItem('restro_selected_plan', JSON.stringify(verified));
-          onFinally();
-          onSuccess(response?.razorpay_payment_id);
+        handler: async function (response: { razorpay_payment_id?: string }) {
+          try {
+            await onSuccess(response?.razorpay_payment_id);
+          } finally {
+            onFinally();
+          }
         },
         modal: {
           ondismiss: function () {
@@ -787,60 +782,16 @@ export default function HomePage() {
       const rzp = new RazorpayConstructor(options);
       rzp.open();
     } catch {
-      setPlanErrorMsg('Something went wrong while opening Razorpay.');
+      onErrorMessage('Something went wrong while opening Razorpay.');
       onFinally();
     }
   };
 
-  const handlePayAndSelectPlan = async (plan: PricingPlan, mode: OutletTabMode) => {
+  // Step 1: Clicking a paid plan opens the Registration Dialog first (payment happens after form submit)
+  const handleSelectPlanOpenRegistration = (plan: PricingPlan, mode: OutletTabMode) => {
     setPlanErrorMsg(null);
-    setPlanBannerMsg(null);
-    setPayingPlanId(plan.id);
-
     const label = `${plan.duration} (${plan.price})`;
-    const cleanPhone = regPhone.replace(/\D/g, '');
-    if (cleanPhone.length === 10) {
-      const allowed = await checkOutletLimitBeforeProceed(cleanPhone, mode, plan.id, label);
-      if (!allowed) {
-        setPayingPlanId(null);
-        return;
-      }
-    }
-
-    await initiateRazorpayCheckout({
-      plan,
-      mode,
-      phone: cleanPhone.length === 10 ? cleanPhone : undefined,
-      onFinally: () => setPayingPlanId(null),
-      onSuccess: () => {
-        setPlanBannerMsg(
-          `${label} (${
-            mode === 'multiple' ? 'Multiple Outlets' : 'Single Outlet'
-          }) payment verified! Complete registration to launch your outlet.`
-        );
-
-        setIsTrialFlow(false);
-        setSelectedPlanId(plan.id);
-        setSelectedPlanLabel(label);
-        setSelectedPlanAmount(plan.amount);
-        setOutletMode(mode);
-        if (mode === 'single') {
-          setOutletLabel('');
-        }
-        setRegName('');
-        setRegCity('');
-        setRegTables(10);
-        setRegOwnerPin('');
-        setRegStaffPin('');
-        setRegMalikPassword(
-          typeof window !== 'undefined'
-            ? localStorage.getItem(MASTER_PASS_STORAGE_KEY) || ''
-            : ''
-        );
-        setRegError('');
-        setShowRegisterModal(true);
-      },
-    });
+    handleOpenRegisterModal(label, mode, plan.id, plan.amount, false);
   };
 
   const handleOpenRegisterModal = (
@@ -875,7 +826,7 @@ export default function HomePage() {
     cleanPhone: string,
     cleanOutletLabel: string,
     isPaidForThisPlan: boolean
-  ) => {
+  ): Promise<boolean> => {
     setRegistering(true);
 
     const finalTables = regTables > 0 ? regTables : 10;
@@ -938,7 +889,7 @@ export default function HomePage() {
 
     if (error || !data) {
       setRegError(error?.message || 'Registration failed. Please try again.');
-      return;
+      return false;
     }
 
     await claimSingleRoleSession(data.id, 'owner');
@@ -975,10 +926,13 @@ export default function HomePage() {
     );
 
     router.replace('/dashboard');
+    return true;
   };
 
+  // Step 2: Inside Registration Dialog -> validate form -> pay via Razorpay (if paid plan) -> save DB -> open /dashboard
   const handleRegisterRestaurant = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (registering) return;
     setRegError('');
 
     const cleanPhone = regPhone.replace(/\D/g, '');
@@ -1010,19 +964,12 @@ export default function HomePage() {
       return;
     }
 
-    const isPaidForThisPlan = Boolean(
-      verifiedPlanCheckout &&
-        verifiedPlanCheckout.planLabel === selectedPlanLabel &&
-        verifiedPlanCheckout.outletMode === outletMode
-    );
-
-    const isTrialAttempt =
-      !isPaidForThisPlan &&
-      (isTrialFlow || selectedPlanLabel.toLowerCase().includes('trial'));
+    const isPaidPlan =
+      !isTrialFlow && !selectedPlanLabel.toLowerCase().includes('trial');
 
     setRegistering(true);
 
-    if (isTrialAttempt) {
+    if (!isPaidPlan) {
       const trialCheck = await checkTrialEligibilityForPhone(cleanPhone);
       if (!trialCheck.allowed) {
         setRegistering(false);
@@ -1040,9 +987,9 @@ export default function HomePage() {
       selectedPlanId,
       selectedPlanLabel
     );
-    setRegistering(false);
 
     if (!allowed) {
+      setRegistering(false);
       const maxOut = getPlanMaxOutlets(selectedPlanId, selectedPlanLabel, outletMode);
       setRegError(
         `Outlet limit reached for ${cleanPhone}! This plan allows up to ${maxOut} outlet${
@@ -1052,9 +999,7 @@ export default function HomePage() {
       return;
     }
 
-    const shouldPayNow = !isTrialAttempt && !isPaidForThisPlan && selectedPlanAmount > 0;
-
-    if (shouldPayNow) {
+    if (isPaidPlan && selectedPlanAmount > 0) {
       const planObj: PricingPlan = {
         id: selectedPlanId,
         duration: selectedPlanLabel.split(' (')[0],
@@ -1067,12 +1012,13 @@ export default function HomePage() {
         features: [],
       };
 
-      setRegistering(true);
       await initiateRazorpayCheckout({
         plan: planObj,
         mode: outletMode,
         phone: cleanPhone,
+        restaurantName: regName.trim(),
         onFinally: () => setRegistering(false),
+        onErrorMessage: (msg) => setRegError(msg),
         onSuccess: async () => {
           await completeRestaurantInsertion(cleanPhone, cleanOutletLabel, true);
         },
@@ -1080,7 +1026,7 @@ export default function HomePage() {
       return;
     }
 
-    await completeRestaurantInsertion(cleanPhone, cleanOutletLabel, isPaidForThisPlan);
+    await completeRestaurantInsertion(cleanPhone, cleanOutletLabel, false);
   };
 
   const filteredRestaurants = restaurants.filter((r) => {
@@ -1229,7 +1175,7 @@ export default function HomePage() {
                 <QrCode className="w-5 h-5" />
               </div>
               <h3 className="font-extrabold text-slate-900 text-base">
-                1. Auto Table QR &amp; Cart
+1. Auto Table QR &amp; Cart
               </h3>
               <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
                 Dedicated QR code for every table. Customers scan and order directly without
@@ -1242,7 +1188,7 @@ export default function HomePage() {
                 <ChefHat className="w-5 h-5" />
               </div>
               <h3 className="font-extrabold text-slate-900 text-base">
-                2. Live Kitchen Display (KDS)
+2. Live Kitchen Display (KDS)
               </h3>
               <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
                 Get instant alerts and live KOT tickets on the kitchen screen as soon as an order
@@ -1255,7 +1201,7 @@ export default function HomePage() {
                 <Receipt className="w-5 h-5" />
               </div>
               <h3 className="font-extrabold text-slate-900 text-base">
-                3. Easy Menu &amp; Billing
+3. Easy Menu &amp; Billing
               </h3>
               <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
                 Real-time dish availability toggle, Cash/UPI settlement, and daily sales tracking.
@@ -1274,8 +1220,8 @@ export default function HomePage() {
                 Choose the Best Plan for Your Restaurant
               </h2>
               <p className="text-xs sm:text-sm text-slate-500 mt-1.5">
-                Includes a <strong>7-Day Free Trial</strong> (one trial per mobile number) or
-                calendar-based paid activation via Razorpay.
+                Select a plan to open registration, fill details, complete payment, and launch your
+                dashboard.
               </p>
             </div>
 
@@ -1313,13 +1259,6 @@ export default function HomePage() {
               </button>
             </div>
           </div>
-
-          {planBannerMsg && (
-            <div className="mb-6 bg-emerald-600 text-white px-4 py-3 rounded-2xl text-xs sm:text-sm font-extrabold shadow-sm flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
-              <span>{planBannerMsg}</span>
-            </div>
-          )}
 
           {planErrorMsg && (
             <div className="mb-6 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl text-xs sm:text-sm font-bold">
@@ -1402,9 +1341,8 @@ export default function HomePage() {
                   <div className="mt-6 space-y-2">
                     <button
                       type="button"
-                      disabled={payingPlanId === plan.id}
-                      onClick={() => handlePayAndSelectPlan(plan, pricingTab)}
-                      className={`w-full py-2.5 rounded-2xl text-xs font-extrabold transition disabled:opacity-50 ${
+                      onClick={() => handleSelectPlanOpenRegistration(plan, pricingTab)}
+                      className={`w-full py-2.5 rounded-2xl text-xs font-extrabold transition ${
                         plan.popular
                           ? 'bg-orange-600 hover:bg-orange-700 text-white shadow-md'
                           : isLifetime
@@ -1412,9 +1350,7 @@ export default function HomePage() {
                           : 'bg-slate-900 hover:bg-slate-800 text-white'
                       }`}
                     >
-                      {payingPlanId === plan.id
-                        ? 'Checking & Opening...'
-                        : `Pay ${plan.price} & Register →`}
+                      Select {plan.price} &amp; Register →
                     </button>
 
                     <button
@@ -1446,7 +1382,7 @@ export default function HomePage() {
 
       {showRegisterModal && (
         <div
-          onClick={() => setShowRegisterModal(false)}
+          onClick={() => !registering && setShowRegisterModal(false)}
           className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 overscroll-contain"
         >
           <div
@@ -1455,27 +1391,23 @@ export default function HomePage() {
           >
             <button
               type="button"
+              disabled={registering}
               onClick={() => setShowRegisterModal(false)}
-              className="absolute right-4 top-4 p-2 rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition"
+              className="absolute right-4 top-4 p-2 rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 disabled:opacity-40 transition"
             >
               <X className="w-5 h-5" />
             </button>
 
             <div className="text-center mb-5 pr-6">
-              <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full mb-2">
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-orange-700 bg-orange-50 border border-orange-200 px-3 py-1 rounded-full mb-2">
                 <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />{' '}
-                {verifiedPlanCheckout?.planLabel === selectedPlanLabel &&
-                verifiedPlanCheckout?.outletMode === outletMode
-                  ? `Paid & Active • ${selectedPlanLabel}`
-                  : isTrialFlow
-                  ? '7-Day Free Trial'
-                  : selectedPlanLabel}
+                {isTrialFlow ? '7-Day Free Trial' : selectedPlanLabel}
               </span>
               <h3 className="text-xl font-extrabold text-slate-900">Register Restaurant</h3>
               <p className="text-xs text-slate-500 mt-0.5">
                 {isTrialFlow
                   ? '7-day free trial (1 per mobile). 8th day requires payment to login.'
-                  : 'Paid plan starts today for its full calendar period.'}
+                  : 'Fill your details below, complete payment, and open your dashboard.'}
               </p>
             </div>
 
@@ -1487,7 +1419,7 @@ export default function HomePage() {
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    disabled={isSingleLocked}
+                    disabled={isSingleLocked || registering}
                     onClick={() => {
                       if (isSingleLocked) return;
                       setOutletMode('single');
@@ -1508,7 +1440,7 @@ export default function HomePage() {
                   </button>
                   <button
                     type="button"
-                    disabled={isMultipleLocked}
+                    disabled={isMultipleLocked || registering}
                     onClick={() => {
                       if (isMultipleLocked) return;
                       setOutletMode('multiple');
@@ -1689,6 +1621,21 @@ export default function HomePage() {
                 </div>
               </div>
 
+              {isPaidPlanSelected && (
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 flex items-center justify-between text-xs">
+                  <div>
+                    <p className="font-bold text-slate-700">Selected Plan</p>
+                    <p className="text-[11px] text-slate-500">
+                      {outletMode === 'multiple' ? 'Multiple Outlets' : 'Single Outlet'} •{' '}
+                      {selectedPlanLabel}
+                    </p>
+                  </div>
+                  <span className="text-base font-extrabold text-orange-600">
+                    ₹{selectedPlanAmount.toLocaleString('en-IN')}
+                  </span>
+                </div>
+              )}
+
               {regError && (
                 <p className="text-xs font-bold text-red-600 bg-red-50 py-2 px-3 rounded-xl text-center">
                   {regError}
@@ -1701,8 +1648,12 @@ export default function HomePage() {
                 className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-orange-300 text-white font-extrabold py-3.5 rounded-2xl text-sm shadow-md transition"
               >
                 {registering
-                  ? 'Checking Limit & Processing...'
-                  : 'Create Restaurant & Launch POS →'}
+                  ? isPaidPlanSelected
+                    ? 'Processing Payment & Setup...'
+                    : 'Creating Restaurant...'
+                  : isPaidPlanSelected
+                  ? `Pay ₹${selectedPlanAmount.toLocaleString('en-IN')} & Open Dashboard →`
+                  : 'Start Free Trial & Open Dashboard →'}
               </button>
             </form>
           </div>
@@ -1712,11 +1663,11 @@ export default function HomePage() {
       {limitDialog.open && (
         <div
           onClick={() => setLimitDialog((prev) => ({ ...prev, open: false }))}
-          className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-center justify-center p-4 z-[60] overscroll-none touch-none"
+          className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-center justify-center p-4 z-[60] overscroll-contain"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-red-200 text-center space-y-4 max-h-[90vh] overflow-y-auto overscroll-contain touch-pan-y"
+            className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-red-200 text-center space-y-4 max-h-[90vh] overflow-y-auto overscroll-contain"
           >
             <div className="w-12 h-12 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center mx-auto">
               <AlertTriangle className="w-6 h-6" />
@@ -1763,11 +1714,11 @@ export default function HomePage() {
       {selectedRestaurant && (
         <div
           onClick={handleClosePinModal}
-          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 overscroll-none touch-none"
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 overscroll-contain"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-white rounded-3xl max-w-sm w-full p-5 sm:p-7 shadow-2xl relative text-center max-h-[92vh] overflow-y-auto overscroll-contain touch-pan-y"
+            className="bg-white rounded-3xl max-w-sm w-full p-5 sm:p-7 shadow-2xl relative text-center max-h-[92vh] overflow-y-auto overscroll-contain"
           >
             <button
               type="button"
