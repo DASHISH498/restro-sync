@@ -86,45 +86,17 @@ function getShortBillNumber(orderId: string): string {
   return `BILL-${orderId.slice(0, 6).toUpperCase()}`;
 }
 
-function hasActiveStaffOrManagerSession(): boolean {
-  if (typeof window === 'undefined') return false;
+function shouldShowStaffKotButton(searchParams: URLSearchParams | null): boolean {
+  const isQrCustomerParam =
+    searchParams?.get('qr') === '1' ||
+    searchParams?.get('source') === 'qr' ||
+    searchParams?.get('mode') === 'customer';
 
-  const candidateKeys = [
-    'restro_staff_session',
-    'restro_session',
-    'staff_session',
-    'manager_session',
-    'restro_user',
-    'restro_auth',
-  ];
-
-  for (const key of candidateKeys) {
-    const raw =
-      window.sessionStorage.getItem(key) || window.localStorage.getItem(key);
-    if (!raw || raw === 'null' || raw === 'undefined' || raw === 'false') {
-      continue;
-    }
-
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') {
-        const role = String(
-          parsed.role || parsed.user_role || parsed.type || ''
-        ).toLowerCase();
-        const blockedRoles = ['customer', 'guest', 'qr_customer'];
-        if (role && blockedRoles.includes(role)) {
-          continue;
-        }
-        return true;
-      }
-    } catch {
-      if (raw.trim().length > 0) {
-        return true;
-      }
-    }
+  if (isQrCustomerParam) {
+    return false;
   }
 
-  return false;
+  return true;
 }
 
 function CustomerOrderContent() {
@@ -137,6 +109,7 @@ function CustomerOrderContent() {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasStaffSession, setHasStaffSession] = useState(false);
+  const [showStaffKot, setShowStaffKot] = useState(true);
 
   // Filter States
   const [searchQuery, setSearchQuery] = useState('');
@@ -161,11 +134,12 @@ function CustomerOrderContent() {
   const [tableOrders, setTableOrders] = useState<ActiveOrder[]>([]);
 
   useEffect(() => {
-    const queryStaffMode =
-      searchParams?.get('staff') === '1' ||
-      searchParams?.get('mode') === 'staff';
+    const saved = localStorage.getItem('restro_session');
+    if (saved) {
+      setHasStaffSession(true);
+    }
 
-    setHasStaffSession(queryStaffMode || hasActiveStaffOrManagerSession());
+    setShowStaffKot(shouldShowStaffKotButton(searchParams));
 
     const savedCust = sessionStorage.getItem('restro_customer_info');
     if (savedCust) {
@@ -584,7 +558,7 @@ function CustomerOrderContent() {
   };
 
   const handleDirectStaffOrder = async () => {
-    if (!hasStaffSession) return;
+    if (!showStaffKot) return;
     setFormError(null);
     setPlacingOrder(true);
     await saveOrderToDatabase('unpaid', 'unpaid');
@@ -1231,7 +1205,7 @@ function CustomerOrderContent() {
                     </button>
                   )}
 
-                  {hasStaffSession && (
+                  {showStaffKot && (
                     <button
                       onClick={handleDirectStaffOrder}
                       disabled={placingOrder}
@@ -1429,7 +1403,7 @@ function CustomerOrderContent() {
                 </button>
               )}
 
-              {hasStaffSession && (
+              {showStaffKot && (
                 <button
                   onClick={handleDirectStaffOrder}
                   disabled={placingOrder}
