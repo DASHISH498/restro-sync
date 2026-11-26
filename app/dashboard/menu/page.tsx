@@ -4,7 +4,6 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import MenuPhotoImporter from "@/components/MenuPhotoImporter";
 import {
   ArrowLeft,
   Plus,
@@ -450,11 +449,6 @@ export default function MenuManagerPage() {
               )}
             </form>
           </section>
-
-          <MenuPhotoImporter
-            restaurantId={session.restaurantId}
-            onImported={() => fetchMenu(session.restaurantId)}
-          />
         </div>
 
         {/* Right Column: Search Bar + Existing Menu Items List */}
