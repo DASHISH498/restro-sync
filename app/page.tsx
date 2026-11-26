@@ -12,14 +12,12 @@ import {
 } from '@/lib/planFeatures';
 import {
   UtensilsCrossed,
-  Search,
   Lock,
   X,
   ArrowRight,
   QrCode,
   ChefHat,
   Receipt,
-  Plus,
   Building2,
   Phone,
   KeyRound,
@@ -32,6 +30,16 @@ import {
   AlertTriangle,
   Crown,
   ShieldCheck,
+  LogIn,
+  UserPlus,
+  Mail,
+  Monitor,
+  Laptop,
+  Coffee,
+  Flame,
+  Wine,
+  Layers,
+  ChevronDown,
 } from 'lucide-react';
 
 interface Restaurant {
@@ -43,6 +51,8 @@ interface Restaurant {
   staff_pin?: string | null;
   phone?: string | null;
   owner_phone?: string | null;
+  email?: string | null;
+  login_password?: string | null;
   outlet_mode?: 'single' | 'multiple' | null;
   outlet_label?: string | null;
   subscription_status?: string | null;
@@ -68,8 +78,74 @@ interface PricingPlan {
   features: string[];
 }
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
+}
+
 const MASTER_PASS_STORAGE_KEY = 'restro_master_sales_password';
 const MALIK_VAULT_UNLOCKED_KEY = 'restro_malik_vault_unlocked';
+const ACCOUNT_PASSWORDS_STORAGE_KEY = 'restro_account_passwords_map';
+
+const FAQ_ITEMS = [
+  {
+    q: 'How does the 7-day free trial work?',
+    a: 'Each 10-digit mobile number gets one 7-day free trial so you can test QR ordering, live KDS, and billing before choosing a paid plan.',
+  },
+  {
+    q: 'How do owners and kitchen staff sign in?',
+    a: 'Owners can sign in using their registered Email or Mobile Number and Password/PIN, while kitchen/branch staff can use their assigned 6-digit PIN.',
+  },
+  {
+    q: 'Can I manage multiple outlets under one account?',
+    a: 'Yes, switch to the Multiple Outlets tab in Plans & Pricing to link outlets under your owner number and view combined or branch-wise sales.',
+  },
+  {
+    q: 'What happens if I purchase a Lifetime plan?',
+    a: 'Your restaurant gets one-time lifetime access without recurring renewal prompts or upgrade nudges for that tier.',
+  },
+];
+
+function isLifetimePlanRecord(rest: Restaurant | null): boolean {
+  if (!rest) return false;
+  const planType = (rest.plan_type || '').toLowerCase();
+  const selectedPlan = (rest.selected_plan || '').toLowerCase();
+  const subStatus = (rest.subscription_status || '').toLowerCase();
+  return (
+    planType.includes('lifetime') ||
+    selectedPlan.includes('lifetime') ||
+    subStatus === 'lifetime'
+  );
+}
+
+function readLocalPasswordMap(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(ACCOUNT_PASSWORDS_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveLocalPasswordForRestaurant(
+  restaurantId: string,
+  email: string,
+  phone: string,
+  password: string
+) {
+  if (typeof window === 'undefined' || !password) return;
+  const current = readLocalPasswordMap();
+  current[`id:${restaurantId}`] = password;
+  if (email.trim()) {
+    current[`email:${email.trim().toLowerCase()}`] = password;
+  }
+  const cleanPhone = phone.replace(/\D/g, '');
+  if (cleanPhone.length === 10) {
+    current[`phone:${cleanPhone}`] = password;
+  }
+  localStorage.setItem(ACCOUNT_PASSWORDS_STORAGE_KEY, JSON.stringify(current));
+}
 
 const SINGLE_OUTLET_PLANS: PricingPlan[] = [
   {
@@ -267,11 +343,12 @@ export default function HomePage() {
   const router = useRouter();
 
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [loading, setLoading] = useState(true);
-
   const [pricingTab, setPricingTab] = useState<OutletTabMode>('single');
   const [planErrorMsg, setPlanErrorMsg] = useState<string | null>(null);
+  const [appDownloadNotice, setAppDownloadNotice] = useState<string | null>(null);
+  const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
+  const [deferredInstallPrompt, setDeferredInstallPrompt] =
+    useState<BeforeInstallPromptEvent | null>(null);
 
   const [limitDialog, setLimitDialog] = useState<{
     open: boolean;
@@ -287,7 +364,13 @@ export default function HomePage() {
     planLabel: '1 Month (₹1,115)',
   });
 
-  // Login Modal States
+  // Login Modal States (Email or Mobile + Password/PIN directly inside)
+  const [showLoginLookupModal, setShowLoginLookupModal] = useState(false);
+  const [loginLookupId, setLoginLookupId] = useState('');
+  const [loginAccountPassword, setLoginAccountPassword] = useState('');
+  const [loginLookupError, setLoginLookupError] = useState('');
+  const [loggingInDirect, setLoggingInDirect] = useState(false);
+
   const [selectedRestaurant, setSelectedRestaurant] = useState<Restaurant | null>(null);
   const [loginStep, setLoginStep] = useState<LoginStep>('branch_pin');
   const [malikMasterPass, setMalikMasterPass] = useState('');
@@ -304,7 +387,7 @@ export default function HomePage() {
   const [resettingPin, setResettingPin] = useState(false);
   const [resetSuccessMsg, setResetSuccessMsg] = useState('');
 
-  // Register Restaurant Modal States
+  // Register (Sign Up) Restaurant Modal States
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [isTrialFlow, setIsTrialFlow] = useState(true);
   const [selectedPlanId, setSelectedPlanId] = useState<string>('1_month');
@@ -315,6 +398,9 @@ export default function HomePage() {
   const [regName, setRegName] = useState('');
   const [regCity, setRegCity] = useState('');
   const [regPhone, setRegPhone] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [regConfirmPassword, setRegConfirmPassword] = useState('');
   const [regTables, setRegTables] = useState<number>(10);
   const [regOwnerPin, setRegOwnerPin] = useState('');
   const [regStaffPin, setRegStaffPin] = useState('');
@@ -322,9 +408,42 @@ export default function HomePage() {
   const [registering, setRegistering] = useState(false);
   const [regError, setRegError] = useState('');
 
+  // PWA install prompt listener
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredInstallPrompt(e as BeforeInstallPromptEvent);
+    };
+
+    const handleAppInstalled = () => {
+      setDeferredInstallPrompt(null);
+      setAppDownloadNotice('RestroSync installed on your system!');
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  // Auto-hide download status notice after 3 seconds
+  useEffect(() => {
+    if (!appDownloadNotice) return;
+    const timer = setTimeout(() => {
+      setAppDownloadNotice(null);
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [appDownloadNotice]);
+
   useEffect(() => {
     const anyModalOpen =
-      showRegisterModal || limitDialog.open || selectedRestaurant !== null;
+      showRegisterModal ||
+      showLoginLookupModal ||
+      limitDialog.open ||
+      selectedRestaurant !== null;
 
     if (anyModalOpen) {
       document.body.style.overflow = 'hidden';
@@ -338,10 +457,11 @@ export default function HomePage() {
       document.body.style.overflow = '';
       document.documentElement.style.overflow = '';
     };
-  }, [showRegisterModal, limitDialog.open, selectedRestaurant]);
+  }, [showRegisterModal, showLoginLookupModal, limitDialog.open, selectedRestaurant]);
 
   useEffect(() => {
     setSelectedRestaurant(null);
+    setShowLoginLookupModal(false);
     setPin('');
     setVerifying(false);
     setErrorMsg('');
@@ -353,7 +473,7 @@ export default function HomePage() {
       const { data, error } = await supabase
         .from('restaurants')
         .select(
-          'id, name, city, total_tables, owner_pin, staff_pin, phone, owner_phone, outlet_mode, outlet_label, subscription_status, plan_type, selected_plan, trial_ends_at'
+          'id, name, city, total_tables, owner_pin, staff_pin, phone, owner_phone, email, login_password, outlet_mode, outlet_label, subscription_status, plan_type, selected_plan, trial_ends_at'
         )
         .order('created_at', { ascending: false });
 
@@ -368,11 +488,37 @@ export default function HomePage() {
           setRestaurants(fallbackData as Restaurant[]);
         }
       }
-      setLoading(false);
     };
 
     fetchRestaurants();
   }, []);
+
+  const handleDesktopAppDownload = async (platform: 'windows' | 'mac') => {
+    const platformLabel = platform === 'windows' ? 'Windows' : 'Mac';
+
+    if (deferredInstallPrompt) {
+      try {
+        await deferredInstallPrompt.prompt();
+        const choice = await deferredInstallPrompt.userChoice;
+        setDeferredInstallPrompt(null);
+
+        if (choice.outcome === 'accepted') {
+          setAppDownloadNotice(`Installing RestroSync for ${platformLabel}...`);
+        } else {
+          setAppDownloadNotice(`${platformLabel} app installation cancelled.`);
+        }
+        return;
+      } catch {
+        // Fallback notice below
+      }
+    }
+
+    setAppDownloadNotice(
+      platform === 'windows'
+        ? 'Open in Chrome/Edge and click Install in the address bar (or menu → Install RestroSync).'
+        : 'Open in Chrome/Safari and choose Install / Add to Dock from the browser menu.'
+    );
+  };
 
   const checkTrialEligibilityForPhone = async (
     phoneDigits: string
@@ -458,42 +604,208 @@ export default function HomePage() {
     return true;
   };
 
-  const checkLoginTrialNotExpired = async (rest: Restaurant): Promise<boolean> => {
+  const checkLoginTrialNotExpired = async (
+    rest: Restaurant,
+    setErrFn: (msg: string) => void
+  ): Promise<boolean> => {
+    if (isLifetimePlanRecord(rest)) return true;
+
     const { data: freshRest } = await supabase
       .from('restaurants')
-      .select('id, subscription_status, trial_ends_at')
+      .select('id, subscription_status, plan_type, selected_plan, trial_ends_at')
       .eq('id', rest.id)
       .single();
 
-    const targetRecord = freshRest || rest;
+    const targetRecord = (freshRest as Restaurant) || rest;
+    if (isLifetimePlanRecord(targetRecord)) return true;
+
     if (isTrialExpiredRecord(targetRecord)) {
-      setErrorMsg(
+      setErrFn(
         'Your 7-day free trial has ended (8th day). Please select a paid plan from Plans & Pricing to continue.'
       );
-      setVerifying(false);
       return false;
     }
     return true;
   };
 
-  const handleOpenPinModal = (rest: Restaurant) => {
+  const completeSessionAndNavigate = async (
+    rest: Restaurant,
+    role: 'owner' | 'staff',
+    unlockMalikVault = false
+  ) => {
+    if (unlockMalikVault) {
+      localStorage.setItem(MALIK_VAULT_UNLOCKED_KEY, '1');
+    } else {
+      localStorage.removeItem(MALIK_VAULT_UNLOCKED_KEY);
+    }
+
+    await claimSingleRoleSession(rest.id, role);
+
+    const displayName = formatRestaurantDisplayName(rest);
+    localStorage.setItem(
+      'restro_session',
+      JSON.stringify({
+        restaurantId: rest.id,
+        restaurantName: displayName,
+        brandName: rest.name,
+        outletLabel: rest.outlet_label || null,
+        outletMode: rest.outlet_mode || 'single',
+        ownerPhone: rest.owner_phone || null,
+        city: rest.city,
+        totalTables: rest.total_tables,
+        role,
+      })
+    );
+
+    if (role === 'owner') {
+      router.replace('/dashboard');
+    } else {
+      router.push(`/kitchen/${rest.id}`);
+    }
+  };
+
+  const handleOpenLoginModal = () => {
+    setLoginLookupId('');
+    setLoginAccountPassword('');
+    setLoginLookupError('');
+    setLoggingInDirect(false);
+    setShowLoginLookupModal(true);
+  };
+
+  const handleLoginLookupSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (loggingInDirect) return;
+
+    const rawInput = loginLookupId.trim();
+    const enteredSecret = loginAccountPassword.trim();
+
+    if (!rawInput) {
+      setLoginLookupError('Enter your registered Email or 10-digit Mobile Number.');
+      return;
+    }
+    if (!enteredSecret) {
+      setLoginLookupError('Enter your Password or 6-digit PIN.');
+      return;
+    }
+
+    setLoggingInDirect(true);
+    setLoginLookupError('');
+
+    const digitsOnly = rawInput.replace(/\D/g, '');
+    const lowerInput = rawInput.toLowerCase();
+
+    let listToSearch = restaurants;
+    let matched = listToSearch.find((r) => {
+      const p1 = (r.owner_phone || '').replace(/\D/g, '');
+      const p2 = (r.phone || '').replace(/\D/g, '');
+      const emailVal = (r.email || '').trim().toLowerCase();
+      if (digitsOnly.length === 10 && (p1 === digitsOnly || p2 === digitsOnly)) {
+        return true;
+      }
+      if (emailVal && emailVal === lowerInput) {
+        return true;
+      }
+      return false;
+    });
+
+    if (!matched) {
+      const { data: latestList } = await supabase
+        .from('restaurants')
+        .select(
+          'id, name, city, total_tables, owner_pin, staff_pin, phone, owner_phone, email, login_password, outlet_mode, outlet_label, subscription_status, plan_type, selected_plan, trial_ends_at'
+        )
+        .order('created_at', { ascending: false });
+
+      if (Array.isArray(latestList)) {
+        listToSearch = latestList as Restaurant[];
+        setRestaurants(listToSearch);
+        matched = listToSearch.find((r) => {
+          const p1 = (r.owner_phone || '').replace(/\D/g, '');
+          const p2 = (r.phone || '').replace(/\D/g, '');
+          const emailVal = (r.email || '').trim().toLowerCase();
+          if (digitsOnly.length === 10 && (p1 === digitsOnly || p2 === digitsOnly)) {
+            return true;
+          }
+          if (emailVal && emailVal === lowerInput) {
+            return true;
+          }
+          return false;
+        });
+      }
+    }
+
+    if (!matched) {
+      setLoggingInDirect(false);
+      setLoginLookupError(
+        'No account found with this Email or Mobile Number. Please Sign Up first.'
+      );
+      return;
+    }
+
+    const allowedByTrial = await checkLoginTrialNotExpired(matched, (msg) => {
+      setLoginLookupError(msg);
+      setLoggingInDirect(false);
+    });
+    if (!allowedByTrial) return;
+
+    const passMap = readLocalPasswordMap();
+    const cleanPhoneMatch = (matched.owner_phone || matched.phone || '').replace(
+      /\D/g,
+      ''
+    );
+    const cleanEmailMatch = (matched.email || '').trim().toLowerCase();
+
+    const storedAccountPassword =
+      matched.login_password ||
+      passMap[`id:${matched.id}`] ||
+      (cleanEmailMatch ? passMap[`email:${cleanEmailMatch}`] : undefined) ||
+      (cleanPhoneMatch ? passMap[`phone:${cleanPhoneMatch}`] : undefined);
+
     const savedMaster =
       typeof window !== 'undefined'
         ? localStorage.getItem(MASTER_PASS_STORAGE_KEY)
         : null;
 
-    setSelectedRestaurant(rest);
-    setLoginStep(rest.outlet_mode === 'multiple' ? 'choose_role' : 'branch_pin');
-    setIsSettingMalikPass(!savedMaster);
-    setMalikMasterPass('');
-    setPin('');
-    setErrorMsg('');
-    setVerifying(false);
-    setIsForgotMode(false);
-    setResetTargetRole('owner');
-    setRecoveryPhone('');
-    setNewPin('');
-    setResetSuccessMsg('');
+    if (storedAccountPassword && enteredSecret === storedAccountPassword) {
+      if (cleanEmailMatch) {
+        saveLocalPasswordForRestaurant(
+          matched.id,
+          cleanEmailMatch,
+          cleanPhoneMatch,
+          enteredSecret
+        );
+      }
+      await completeSessionAndNavigate(
+        matched,
+        'owner',
+        matched.outlet_mode === 'multiple'
+      );
+      return;
+    }
+
+    if (
+      matched.outlet_mode === 'multiple' &&
+      savedMaster &&
+      enteredSecret === savedMaster
+    ) {
+      await completeSessionAndNavigate(matched, 'owner', true);
+      return;
+    }
+
+    if (enteredSecret === matched.owner_pin) {
+      await completeSessionAndNavigate(matched, 'owner', false);
+      return;
+    }
+
+    if (matched.staff_pin && enteredSecret === matched.staff_pin) {
+      await completeSessionAndNavigate(matched, 'staff', false);
+      return;
+    }
+
+    setLoggingInDirect(false);
+    setLoginLookupError(
+      'Incorrect Email/Mobile or Password/PIN. Please check and try again.'
+    );
   };
 
   const handleClosePinModal = () => {
@@ -538,33 +850,17 @@ export default function HomePage() {
     setVerifying(true);
     setErrorMsg('');
 
-    const allowedByTrial = await checkLoginTrialNotExpired(selectedRestaurant);
+    const allowedByTrial = await checkLoginTrialNotExpired(selectedRestaurant, (msg) => {
+      setErrorMsg(msg);
+      setVerifying(false);
+    });
     if (!allowedByTrial) return;
 
     if (!savedMaster) {
       localStorage.setItem(MASTER_PASS_STORAGE_KEY, cleanPass);
     }
 
-    localStorage.setItem(MALIK_VAULT_UNLOCKED_KEY, '1');
-    await claimSingleRoleSession(selectedRestaurant.id, 'owner');
-
-    const displayName = formatRestaurantDisplayName(selectedRestaurant);
-    localStorage.setItem(
-      'restro_session',
-      JSON.stringify({
-        restaurantId: selectedRestaurant.id,
-        restaurantName: displayName,
-        brandName: selectedRestaurant.name,
-        outletLabel: selectedRestaurant.outlet_label || null,
-        outletMode: 'multiple',
-        ownerPhone: selectedRestaurant.owner_phone || null,
-        city: selectedRestaurant.city,
-        totalTables: selectedRestaurant.total_tables,
-        role: 'owner',
-      })
-    );
-
-    router.replace('/dashboard');
+    await completeSessionAndNavigate(selectedRestaurant, 'owner', true);
   };
 
   const handlePinLogin = async (e?: React.FormEvent, enteredPin?: string) => {
@@ -575,7 +871,10 @@ export default function HomePage() {
     setVerifying(true);
     setErrorMsg('');
 
-    const allowedByTrial = await checkLoginTrialNotExpired(selectedRestaurant);
+    const allowedByTrial = await checkLoginTrialNotExpired(selectedRestaurant, (msg) => {
+      setErrorMsg(msg);
+      setVerifying(false);
+    });
     if (!allowedByTrial) return;
 
     const isOwner = activePin === selectedRestaurant.owner_pin;
@@ -584,30 +883,7 @@ export default function HomePage() {
 
     if (isOwner || isStaff) {
       const role: 'owner' | 'staff' = isOwner ? 'owner' : 'staff';
-      localStorage.removeItem(MALIK_VAULT_UNLOCKED_KEY);
-      await claimSingleRoleSession(selectedRestaurant.id, role);
-
-      const displayName = formatRestaurantDisplayName(selectedRestaurant);
-
-      localStorage.setItem(
-        'restro_session',
-        JSON.stringify({
-          restaurantId: selectedRestaurant.id,
-          restaurantName: displayName,
-          brandName: selectedRestaurant.name,
-          outletLabel: selectedRestaurant.outlet_label || null,
-          outletMode: selectedRestaurant.outlet_mode || 'single',
-          ownerPhone: selectedRestaurant.owner_phone || null,
-          city: selectedRestaurant.city,
-          totalTables: selectedRestaurant.total_tables,
-          role,
-        })
-      );
-      if (role === 'owner') {
-        router.replace('/dashboard');
-      } else {
-        router.push(`/kitchen/${selectedRestaurant.id}`);
-      }
+      await completeSessionAndNavigate(selectedRestaurant, role, false);
     } else {
       setErrorMsg('Incorrect PIN! Please enter a valid 6-digit PIN.');
       setPin('');
@@ -643,7 +919,9 @@ export default function HomePage() {
     }
 
     if (!selectedRestaurant.owner_phone) {
-      setErrorMsg('No mobile number is linked with this restaurant. Please contact support.');
+      setErrorMsg(
+        'No mobile number is linked with this restaurant. Please contact support.'
+      );
       return;
     }
 
@@ -678,7 +956,9 @@ export default function HomePage() {
       prev.map((r) => (r.id === updatedRest.id ? updatedRest : r))
     );
 
-    setResetSuccessMsg(`${roleLabel} PIN has been reset! Please sign in with your new PIN.`);
+    setResetSuccessMsg(
+      `${roleLabel} PIN has been reset! Please sign in with your new PIN.`
+    );
     setTimeout(() => {
       setIsForgotMode(false);
       setPin('');
@@ -787,7 +1067,6 @@ export default function HomePage() {
     }
   };
 
-  // Step 1: Clicking a paid plan opens the Registration Dialog first (payment happens after form submit)
   const handleSelectPlanOpenRegistration = (plan: PricingPlan, mode: OutletTabMode) => {
     setPlanErrorMsg(null);
     const label = `${plan.duration} (${plan.price})`;
@@ -810,6 +1089,9 @@ export default function HomePage() {
     setRegName('');
     setRegCity('');
     setRegPhone('');
+    setRegEmail('');
+    setRegPassword('');
+    setRegConfirmPassword('');
     setRegTables(10);
     setRegOwnerPin('');
     setRegStaffPin('');
@@ -824,6 +1106,8 @@ export default function HomePage() {
 
   const completeRestaurantInsertion = async (
     cleanPhone: string,
+    cleanEmail: string,
+    cleanPassword: string,
     cleanOutletLabel: string,
     isPaidForThisPlan: boolean
   ): Promise<boolean> => {
@@ -853,15 +1137,17 @@ export default function HomePage() {
     let savedOutletLabel: string | null =
       outletMode === 'multiple' ? cleanOutletLabel : null;
 
+    const fullPayload = {
+      ...basePayload,
+      email: cleanEmail || null,
+      login_password: cleanPassword || null,
+      outlet_mode: outletMode,
+      outlet_label: savedOutletLabel,
+    };
+
     let insertResult = await supabase
       .from('restaurants')
-      .insert([
-        {
-          ...basePayload,
-          outlet_mode: outletMode,
-          outlet_label: savedOutletLabel,
-        },
-      ])
+      .insert([fullPayload])
       .select()
       .single();
 
@@ -870,6 +1156,8 @@ export default function HomePage() {
       const isMissingColumnError =
         errText.includes('outlet_mode') ||
         errText.includes('outlet_label') ||
+        errText.includes('email') ||
+        errText.includes('login_password') ||
         errText.includes('column') ||
         errText.includes('schema cache');
 
@@ -892,6 +1180,10 @@ export default function HomePage() {
       return false;
     }
 
+    if (cleanPassword) {
+      saveLocalPasswordForRestaurant(data.id, cleanEmail, cleanPhone, cleanPassword);
+    }
+
     await claimSingleRoleSession(data.id, 'owner');
 
     if (savedOutletMode === 'multiple') {
@@ -906,6 +1198,8 @@ export default function HomePage() {
 
     const createdRest: Restaurant = {
       ...(data as Restaurant),
+      email: cleanEmail || null,
+      login_password: cleanPassword || null,
       outlet_mode: savedOutletMode,
       outlet_label: savedOutletLabel,
     };
@@ -929,13 +1223,15 @@ export default function HomePage() {
     return true;
   };
 
-  // Step 2: Inside Registration Dialog -> validate form -> pay via Razorpay (if paid plan) -> save DB -> open /dashboard
   const handleRegisterRestaurant = async (e: React.FormEvent) => {
     e.preventDefault();
     if (registering) return;
     setRegError('');
 
     const cleanPhone = regPhone.replace(/\D/g, '');
+    const cleanEmail = regEmail.trim().toLowerCase();
+    const cleanPassword = regPassword.trim();
+    const cleanConfirmPassword = regConfirmPassword.trim();
     const cleanOutletLabel = outletLabel.trim();
     const cleanMasterPass = regMalikPassword.trim();
 
@@ -951,8 +1247,24 @@ export default function HomePage() {
       setRegError('Please set a Malik Master Password (minimum 4 characters).');
       return;
     }
-    if (cleanPhone.length !== 10) {
+    if (cleanPhone.length !== 10 && !cleanEmail) {
+      setRegError('Please enter a valid 10-digit Mobile Number or Email Address.');
+      return;
+    }
+    if (cleanPhone && cleanPhone.length !== 10) {
       setRegError('Please enter a valid 10-digit Owner Mobile Number.');
+      return;
+    }
+    if (cleanEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      setRegError('Please enter a valid email address.');
+      return;
+    }
+    if (cleanPassword.length < 4) {
+      setRegError('Please set an account password (minimum 4 characters) for login.');
+      return;
+    }
+    if (cleanPassword !== cleanConfirmPassword) {
+      setRegError('Password and Confirm Password do not match.');
       return;
     }
     if (regOwnerPin.length !== 6) {
@@ -969,7 +1281,7 @@ export default function HomePage() {
 
     setRegistering(true);
 
-    if (!isPaidPlan) {
+    if (!isPaidPlan && cleanPhone.length === 10) {
       const trialCheck = await checkTrialEligibilityForPhone(cleanPhone);
       if (!trialCheck.allowed) {
         setRegistering(false);
@@ -1015,33 +1327,37 @@ export default function HomePage() {
       await initiateRazorpayCheckout({
         plan: planObj,
         mode: outletMode,
-        phone: cleanPhone,
+        phone: cleanPhone || undefined,
         restaurantName: regName.trim(),
         onFinally: () => setRegistering(false),
         onErrorMessage: (msg) => setRegError(msg),
         onSuccess: async () => {
-          await completeRestaurantInsertion(cleanPhone, cleanOutletLabel, true);
+          await completeRestaurantInsertion(
+            cleanPhone,
+            cleanEmail,
+            cleanPassword,
+            cleanOutletLabel,
+            true
+          );
         },
       });
       return;
     }
 
-    await completeRestaurantInsertion(cleanPhone, cleanOutletLabel, false);
-  };
-
-  const filteredRestaurants = restaurants.filter((r) => {
-    const q = searchQuery.toLowerCase();
-    return (
-      r.name.toLowerCase().includes(q) ||
-      r.city.toLowerCase().includes(q) ||
-      (r.outlet_label && r.outlet_label.toLowerCase().includes(q))
+    await completeRestaurantInsertion(
+      cleanPhone,
+      cleanEmail,
+      cleanPassword,
+      cleanOutletLabel,
+      false
     );
-  });
+  };
 
   const activeResetLabel = resetTargetRole === 'owner' ? 'Branch' : 'Staff';
   const displayedPlans =
     pricingTab === 'single' ? SINGLE_OUTLET_PLANS : MULTIPLE_OUTLET_PLANS;
   const isSelectedMultiOutlet = selectedRestaurant?.outlet_mode === 'multiple';
+  const isSelectedLifetimePlan = isLifetimePlanRecord(selectedRestaurant);
 
   const isPaidPlanSelected =
     !isTrialFlow && !selectedPlanLabel.toLowerCase().includes('trial');
@@ -1049,8 +1365,9 @@ export default function HomePage() {
   const isMultipleLocked = isPaidPlanSelected && outletMode === 'single';
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-30">
+    <div className="min-h-screen bg-gradient-to-b from-orange-50/45 via-slate-50 to-slate-100/80 text-slate-900 flex flex-col">
+      {/* Header */}
+      <header className="bg-white/95 backdrop-blur-md border-b border-slate-200/80 sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 sm:py-4 flex items-center justify-between gap-2.5">
           <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
             <div className="bg-orange-600 text-white p-2 rounded-xl shadow-sm">
@@ -1061,121 +1378,107 @@ export default function HomePage() {
             </span>
           </div>
 
-          <div className="flex items-center gap-3 sm:gap-4 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             <a
               href="#pricing"
-              className="hidden sm:inline-block text-xs font-extrabold text-slate-600 hover:text-orange-600 transition whitespace-nowrap"
+              className="hidden md:inline-block text-xs font-extrabold text-slate-600 hover:text-orange-600 transition whitespace-nowrap mr-1"
             >
               Plans &amp; Pricing
             </a>
 
             <button
               type="button"
-              onClick={() => handleOpenRegisterModal('7-Day Trial', 'single', '1_month', 599, true)}
+              onClick={handleOpenLoginModal}
+              className="bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 px-3.5 sm:px-4 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold flex items-center gap-1.5 transition whitespace-nowrap shrink-0"
+            >
+              <LogIn className="w-4 h-4 text-orange-600 shrink-0" />
+              <span>Login</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                handleOpenRegisterModal('7-Day Trial', 'single', '1_month', 599, true)
+              }
               className="bg-orange-600 hover:bg-orange-700 text-white px-3.5 sm:px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 shadow-sm transition whitespace-nowrap shrink-0"
             >
-              <Plus className="w-4 h-4 shrink-0" />
-              <span>Register Restaurant</span>
+              <UserPlus className="w-4 h-4 shrink-0" />
+              <span>Sign Up</span>
             </button>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-10 sm:pt-12 pb-20">
-        <div className="text-center max-w-2xl mx-auto">
-          <span className="inline-block bg-orange-100 text-orange-700 text-xs font-bold px-3.5 py-1 rounded-full mb-4">
-            7-Day Free Trial (1 Per Mobile) • No Hardware Needed
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 pt-12 sm:pt-16 pb-20">
+        {/* Hero Section with Windows & Mac App Install Buttons */}
+        <div className="text-center max-w-3xl mx-auto">
+          <span className="inline-flex items-center gap-1.5 bg-orange-100/90 text-orange-700 border border-orange-200/80 text-xs font-bold px-3.5 py-1 rounded-full mb-5">
+            <Sparkles className="w-3.5 h-3.5" />
+            7-Day Free Trial (1 Per Mobile) • Private Account Login
           </span>
 
-          <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-slate-900 leading-tight">
+          <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-slate-900 leading-[1.15]">
             From Table Straight to Kitchen —{' '}
             <span className="text-orange-600">Smart Restaurant POS &amp; KDS</span>
           </h1>
 
-          <p className="text-sm sm:text-base text-slate-500 mt-4 leading-relaxed">
-            Search your restaurant name or location, enter your 6-digit PIN, and manage Table
-            Orders, QR Menus, and Live Kitchen Display in real time.
+          <p className="text-sm sm:text-base text-slate-600 mt-4 max-w-2xl mx-auto leading-relaxed">
+            Sign in with your Email or Mobile Number &amp; Password/PIN, or sign up in minutes to
+            manage Table Orders, QR Menus, and Live Kitchen Display in real time.
           </p>
 
-          <div className="mt-8 max-w-lg mx-auto">
-            <div className="relative">
-              <Search className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                autoComplete="off"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search restaurant name, location, or city..."
-                className="w-full pl-12 pr-4 py-3.5 bg-white border-2 border-slate-200 focus:border-orange-500 rounded-2xl text-sm sm:text-base font-medium shadow-sm outline-none transition"
-              />
-            </div>
+          <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
+            <button
+              type="button"
+              onClick={() => handleDesktopAppDownload('windows')}
+              className="w-full sm:w-auto bg-slate-900 hover:bg-slate-800 text-white px-6 py-3.5 rounded-2xl text-xs sm:text-sm font-extrabold flex items-center justify-center gap-2.5 shadow-md transition"
+            >
+              <Monitor className="w-4 h-4 text-orange-400 shrink-0" />
+              <span>Download App for Windows</span>
+            </button>
 
-            {searchQuery.trim().length > 0 && (
-              <div className="mt-3 bg-white border border-slate-200 rounded-2xl shadow-lg overflow-hidden text-left">
-                {loading ? (
-                  <p className="p-4 text-xs text-slate-500 text-center">Searching...</p>
-                ) : filteredRestaurants.length === 0 ? (
-                  <p className="p-4 text-xs text-slate-500 text-center">
-                    No restaurant found. Register a new one!
-                  </p>
-                ) : (
-                  <div className="divide-y divide-slate-100 max-h-72 overflow-y-auto">
-                    {filteredRestaurants.map((rest) => (
-                      <button
-                        key={rest.id}
-                        type="button"
-                        onClick={() => handleOpenPinModal(rest)}
-                        className="w-full px-3.5 py-3 sm:p-4 hover:bg-orange-50/70 flex items-center justify-between gap-3 transition text-left"
-                      >
-                        <div className="flex items-center gap-3 min-w-0 flex-1">
-                          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center shrink-0">
-                            <Building2 className="w-4 h-4 sm:w-5 sm:h-5" />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="font-bold text-slate-900 text-xs sm:text-sm leading-snug break-words">
-                              {formatRestaurantDisplayName(rest)}
-                            </p>
-                            <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 truncate">
-                              {rest.city} • {rest.total_tables} Tables
-                            </p>
-                          </div>
-                        </div>
+            <button
+              type="button"
+              onClick={() => handleDesktopAppDownload('mac')}
+              className="w-full sm:w-auto bg-white hover:bg-orange-50/50 text-slate-900 border-2 border-slate-200 hover:border-orange-500 px-6 py-3.5 rounded-2xl text-xs sm:text-sm font-extrabold flex items-center justify-center gap-2.5 shadow-sm transition"
+            >
+              <Laptop className="w-4 h-4 text-orange-600 shrink-0" />
+              <span>Download App for Mac</span>
+            </button>
+          </div>
 
-                        <span className="text-xs font-extrabold text-orange-600 flex items-center gap-1 whitespace-nowrap shrink-0">
-                          <span>Select &amp; Login</span>
-                          <ArrowRight className="w-3.5 h-3.5 shrink-0" />
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="mt-4">
+          {appDownloadNotice && (
+            <div className="mt-4 inline-flex items-center gap-2 bg-orange-50 border border-orange-200 text-orange-800 text-xs font-bold px-4 py-2 rounded-xl">
+              <span>{appDownloadNotice}</span>
               <button
                 type="button"
-                onClick={() => handleOpenRegisterModal('7-Day Trial', 'single', '1_month', 599, true)}
-                className="text-xs font-bold text-orange-600 hover:underline"
+                onClick={() => setAppDownloadNotice(null)}
+                className="text-orange-600 hover:text-orange-900 font-extrabold ml-1"
               >
-                New restaurant? Start 7-day free trial here &rarr;
+                ×
               </button>
             </div>
-          </div>
+          )}
         </div>
 
+        {/* Core Features */}
         <section className="mt-20 max-w-6xl mx-auto">
-          <h2 className="text-center text-xl sm:text-2xl font-extrabold text-slate-900 mb-8">
-            Everything in One Portal
-          </h2>
+          <div className="text-center max-w-xl mx-auto mb-8">
+            <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900">
+              Everything in One Portal
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-500 mt-1">
+              Designed for speed across dine-in tables, kitchen counters, and owner billing.
+            </p>
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+            <div className="bg-white p-6 rounded-2xl border border-slate-200/90 shadow-sm hover:border-orange-200 hover:shadow-md transition">
               <div className="w-11 h-11 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center mb-4">
                 <QrCode className="w-5 h-5" />
               </div>
               <h3 className="font-extrabold text-slate-900 text-base">
-1. Auto Table QR &amp; Cart
+                1. Auto Table QR &amp; Cart
               </h3>
               <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
                 Dedicated QR code for every table. Customers scan and order directly without
@@ -1183,12 +1486,12 @@ export default function HomePage() {
               </p>
             </div>
 
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+            <div className="bg-white p-6 rounded-2xl border border-slate-200/90 shadow-sm hover:border-emerald-200 hover:shadow-md transition">
               <div className="w-11 h-11 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center mb-4">
                 <ChefHat className="w-5 h-5" />
               </div>
               <h3 className="font-extrabold text-slate-900 text-base">
-2. Live Kitchen Display (KDS)
+                2. Live Kitchen Display (KDS)
               </h3>
               <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
                 Get instant alerts and live KOT tickets on the kitchen screen as soon as an order
@@ -1196,12 +1499,12 @@ export default function HomePage() {
               </p>
             </div>
 
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+            <div className="bg-white p-6 rounded-2xl border border-slate-200/90 shadow-sm hover:border-blue-200 hover:shadow-md transition">
               <div className="w-11 h-11 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center mb-4">
                 <Receipt className="w-5 h-5" />
               </div>
               <h3 className="font-extrabold text-slate-900 text-base">
-3. Easy Menu &amp; Billing
+                3. Easy Menu &amp; Billing
               </h3>
               <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
                 Real-time dish availability toggle, Cash/UPI settlement, and daily sales tracking.
@@ -1210,6 +1513,60 @@ export default function HomePage() {
           </div>
         </section>
 
+        {/* How It Works */}
+        <section className="mt-20 max-w-6xl mx-auto">
+          <div className="text-center max-w-2xl mx-auto mb-8">
+            <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900">
+              Go Live in 3 Simple Steps
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-500 mt-1">
+              No complex hardware installation—start taking orders the same day.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-white p-6 rounded-2xl border border-slate-200/90 shadow-sm hover:border-orange-200 transition">
+              <span className="inline-block text-[11px] font-extrabold uppercase tracking-wider text-orange-600 bg-orange-50 px-2.5 py-0.5 rounded-full">
+                Step 01
+              </span>
+              <h3 className="font-extrabold text-slate-900 text-base mt-3">
+                Register &amp; Configure Tables
+              </h3>
+              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                Create your restaurant account, set your login credentials &amp; PINs, and enter
+                your table count.
+              </p>
+            </div>
+
+            <div className="bg-white p-6 rounded-2xl border border-slate-200/90 shadow-sm hover:border-orange-200 transition">
+              <span className="inline-block text-[11px] font-extrabold uppercase tracking-wider text-orange-600 bg-orange-50 px-2.5 py-0.5 rounded-full">
+                Step 02
+              </span>
+              <h3 className="font-extrabold text-slate-900 text-base mt-3">
+                Share QR &amp; Open Kitchen Screen
+              </h3>
+              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                Guests scan table QRs to browse and place orders while kitchen staff track KOTs
+                live.
+              </p>
+            </div>
+
+            <div className="bg-white p-6 rounded-2xl border border-slate-200/90 shadow-sm hover:border-orange-200 transition">
+              <span className="inline-block text-[11px] font-extrabold uppercase tracking-wider text-orange-600 bg-orange-50 px-2.5 py-0.5 rounded-full">
+                Step 03
+              </span>
+              <h3 className="font-extrabold text-slate-900 text-base mt-3">
+                Settle Bills &amp; Track Sales
+              </h3>
+              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                Manage Cash/UPI payments, search invoices or UTRs, and monitor daily or multi-outlet
+                sales.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* Pricing Section */}
         <section id="pricing" className="mt-24 scroll-mt-24">
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
             <div>
@@ -1350,7 +1707,7 @@ export default function HomePage() {
                           : 'bg-slate-900 hover:bg-slate-800 text-white'
                       }`}
                     >
-                      Select {plan.price} &amp; Register →
+                      Select {plan.price} &amp; Sign Up →
                     </button>
 
                     <button
@@ -1378,8 +1735,254 @@ export default function HomePage() {
             })}
           </div>
         </section>
+
+        {/* Built For Every Food Business */}
+        <section className="mt-24 max-w-6xl mx-auto">
+          <div className="text-center max-w-xl mx-auto mb-8">
+            <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900">
+              Built for Every Food Business
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-500 mt-1">
+              Adaptable workflows for solo outlets, busy kitchens, and multi-branch brands.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-sm hover:border-amber-200 transition">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center mb-3">
+                <Coffee className="w-5 h-5" />
+              </div>
+              <h3 className="font-extrabold text-slate-900 text-sm">Cafes &amp; Bakeries</h3>
+              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                Fast table QR ordering, quick stock toggles, and smooth counter billing.
+              </p>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-sm hover:border-orange-200 transition">
+              <div className="w-10 h-10 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center mb-3">
+                <Flame className="w-5 h-5" />
+              </div>
+              <h3 className="font-extrabold text-slate-900 text-sm">QSR &amp; Fast Food</h3>
+              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                Rapid kitchen ticket flow during peak rush hours without missed orders.
+              </p>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-sm hover:border-purple-200 transition">
+              <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-600 flex items-center justify-center mb-3">
+                <Wine className="w-5 h-5" />
+              </div>
+              <h3 className="font-extrabold text-slate-900 text-sm">Dine-In Restaurants</h3>
+              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                Organized table-wise order tracking, digital receipts, and payment splits.
+              </p>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-sm hover:border-emerald-200 transition">
+              <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center mb-3">
+                <Layers className="w-5 h-5" />
+              </div>
+              <h3 className="font-extrabold text-slate-900 text-sm">Multi-Outlet Brands</h3>
+              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                Centralized owner oversight across branches with individual branch &amp; staff PINs.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* FAQ Section */}
+        <section className="mt-24 max-w-3xl mx-auto">
+          <div className="text-center mb-6">
+            <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900">
+              Frequently Asked Questions
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-500 mt-1">
+              Quick answers about trials, account access, and outlet plans.
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            {FAQ_ITEMS.map((item, idx) => {
+              const isOpen = openFaqIndex === idx;
+              return (
+                <div
+                  key={item.q}
+                  className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setOpenFaqIndex(isOpen ? null : idx)}
+                    className="w-full px-5 py-4 text-left flex items-center justify-between gap-3 hover:bg-slate-50/60 transition"
+                  >
+                    <span className="font-extrabold text-xs sm:text-sm text-slate-900">
+                      {item.q}
+                    </span>
+                    <ChevronDown
+                      className={`w-4 h-4 text-slate-500 shrink-0 transition-transform ${
+                        isOpen ? 'rotate-180 text-orange-600' : ''
+                      }`}
+                    />
+                  </button>
+                  {isOpen && (
+                    <div className="px-5 pb-4 text-xs text-slate-600 leading-relaxed border-t border-slate-100 pt-3">
+                      {item.a}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
       </main>
 
+      {/* Footer */}
+      <footer className="bg-white border-t border-slate-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="bg-orange-600 text-white p-1.5 rounded-lg">
+                <UtensilsCrossed className="w-4 h-4" />
+              </div>
+              <span className="text-base font-extrabold tracking-tight text-slate-900">
+                Restro<span className="text-orange-600">Sync</span>
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 mt-2">
+              Smart Restaurant POS, QR Table Ordering &amp; Live Kitchen Display.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-4 text-xs font-bold text-slate-600">
+            <a href="#pricing" className="hover:text-orange-600 transition">
+              Plans &amp; Pricing
+            </a>
+            <button
+              type="button"
+              onClick={handleOpenLoginModal}
+              className="hover:text-orange-600 transition"
+            >
+              Login
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                handleOpenRegisterModal('7-Day Trial', 'single', '1_month', 599, true)
+              }
+              className="hover:text-orange-600 transition"
+            >
+              Sign Up
+            </button>
+          </div>
+        </div>
+      </footer>
+
+      {/* Account Login Modal (Email or Mobile Number + Password/PIN Directly Below) */}
+      {showLoginLookupModal && (
+        <div
+          onClick={() => !loggingInDirect && setShowLoginLookupModal(false)}
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 overscroll-contain"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-3xl max-w-sm w-full p-5 sm:p-7 shadow-2xl relative text-center max-h-[92vh] overflow-y-auto overscroll-contain"
+          >
+            <button
+              type="button"
+              disabled={loggingInDirect}
+              onClick={() => setShowLoginLookupModal(false)}
+              className="absolute right-4 top-4 p-2 rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 disabled:opacity-40 transition"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="w-12 h-12 rounded-2xl bg-orange-100 text-orange-600 flex items-center justify-center mx-auto mb-3">
+              <LogIn className="w-6 h-6" />
+            </div>
+
+            <h3 className="text-lg font-extrabold text-slate-900">Account Login</h3>
+            <p className="text-xs text-slate-500 mt-1">
+              Enter your registered Email or Mobile Number and Password/PIN to sign in.
+            </p>
+
+            <form
+              onSubmit={handleLoginLookupSubmit}
+              autoComplete="off"
+              className="mt-5 space-y-3.5 text-left"
+            >
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Email or Mobile Number *
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    autoFocus
+                    required
+                    value={loginLookupId}
+                    onChange={(e) => {
+                      setLoginLookupId(e.target.value);
+                      setLoginLookupError('');
+                    }}
+                    placeholder="e.g. owner@restro.com or 98XXXXXXXX"
+                    className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Password / PIN *
+                </label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="password"
+                    required
+                    autoComplete="current-password"
+                    value={loginAccountPassword}
+                    onChange={(e) => {
+                      setLoginAccountPassword(e.target.value);
+                      setLoginLookupError('');
+                    }}
+                    placeholder="Enter your password or PIN"
+                    className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
+                  />
+                </div>
+              </div>
+
+              {loginLookupError && (
+                <p className="text-xs font-bold text-red-600 bg-red-50 py-2 px-3 rounded-xl text-center">
+                  {loginLookupError}
+                </p>
+              )}
+
+              <button
+                type="submit"
+                disabled={loggingInDirect}
+                className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-orange-300 text-white font-extrabold py-3.5 rounded-2xl text-sm shadow-md transition"
+              >
+                {loggingInDirect ? 'Signing In...' : 'Login to Dashboard →'}
+              </button>
+
+              <div className="text-center pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowLoginLookupModal(false);
+                    handleOpenRegisterModal('7-Day Trial', 'single', '1_month', 599, true);
+                  }}
+                  className="text-xs font-bold text-slate-500 hover:text-orange-600 transition"
+                >
+                  New here? Sign Up for Free Trial &rarr;
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Sign Up / Register Modal with Complete Details, Sticky Footer & Hidden Scrollbar */}
       {showRegisterModal && (
         <div
           onClick={() => !registering && setShowRegisterModal(false)}
@@ -1404,11 +2007,11 @@ export default function HomePage() {
                 {isTrialFlow ? '7-Day Free Trial' : selectedPlanLabel}
               </span>
               <h3 className="text-lg sm:text-xl font-extrabold text-slate-900">
-                Register Restaurant
+                Create Restaurant Account
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
                 {isTrialFlow
-                  ? '7-day free trial (1 per mobile). 8th day requires payment to login.'
+                  ? '7-day free trial (1 per mobile). Login anytime with Email or Mobile.'
                   : 'Fill your details below, complete payment, and open your dashboard.'}
               </p>
             </div>
@@ -1506,7 +2109,7 @@ export default function HomePage() {
 
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Set Malik Master Password (Min 4 Chars) *
+                        Malik Master Password (Min 4 Chars) *
                       </label>
                       <div className="relative">
                         <ShieldCheck className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -1520,7 +2123,7 @@ export default function HomePage() {
                             setRegMalikPassword(e.target.value);
                             setRegError('');
                           }}
-                          placeholder="Set master password for all outlets"
+                          placeholder="Master password for all outlets"
                           className="w-full pl-10 pr-3.5 py-2.5 border border-orange-300 focus:border-orange-500 rounded-xl text-sm font-semibold outline-none transition"
                         />
                       </div>
@@ -1528,104 +2131,184 @@ export default function HomePage() {
                   </>
                 )}
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    City *
-                  </label>
-                  <div className="relative">
-                    <MapPin className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      required
-                      value={regCity}
-                      onChange={(e) => setRegCity(e.target.value)}
-                      placeholder="e.g. Jaipur"
-                      className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Owner Mobile Number (For Forgot PIN &amp; Combined Sales) *
-                  </label>
-                  <div className="relative">
-                    <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="tel"
-                      inputMode="numeric"
-                      maxLength={10}
-                      required
-                      value={regPhone}
-                      onChange={(e) => {
-                        setRegPhone(e.target.value.replace(/\D/g, '').slice(0, 10));
-                        setRegError('');
-                      }}
-                      placeholder="10-digit mobile number"
-                      className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Number of Tables *
-                  </label>
-                  <div className="relative">
-                    <Hash className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="number"
-                      min={1}
-                      max={100}
-                      required
-                      value={regTables || ''}
-                      onChange={(e) => setRegTables(parseInt(e.target.value, 10) || 0)}
-                      className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
-                    />
-                  </div>
-                </div>
-
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Branch PIN (6-Digit) *
+                      City *
                     </label>
                     <div className="relative">
-                      <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <MapPin className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                       <input
-                        type="password"
-                        inputMode="numeric"
-                        maxLength={6}
+                        type="text"
                         required
-                        autoComplete="new-password"
-                        value={regOwnerPin}
-                        onChange={(e) =>
-                          setRegOwnerPin(e.target.value.replace(/\D/g, '').slice(0, 6))
-                        }
-                        placeholder="••••••"
-                        className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm font-bold tracking-widest outline-none transition"
+                        value={regCity}
+                        onChange={(e) => setRegCity(e.target.value)}
+                        placeholder="e.g. Jaipur"
+                        className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
                       />
                     </div>
                   </div>
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Staff PIN (Optional)
+                      Number of Tables *
                     </label>
                     <div className="relative">
-                      <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <Hash className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                       <input
-                        type="password"
-                        inputMode="numeric"
-                        maxLength={6}
-                        autoComplete="new-password"
-                        value={regStaffPin}
-                        onChange={(e) =>
-                          setRegStaffPin(e.target.value.replace(/\D/g, '').slice(0, 6))
-                        }
-                        placeholder="••••••"
-                        className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm font-bold tracking-widest outline-none transition"
+                        type="number"
+                        min={1}
+                        max={100}
+                        required
+                        value={regTables || ''}
+                        onChange={(e) => setRegTables(parseInt(e.target.value, 10) || 0)}
+                        className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
                       />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-1 border-t border-slate-100 space-y-3">
+                  <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+                    Login Credentials
+                  </p>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Owner Mobile Number (10-Digit) *
+                    </label>
+                    <div className="relative">
+                      <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="tel"
+                        inputMode="numeric"
+                        maxLength={10}
+                        required
+                        value={regPhone}
+                        onChange={(e) => {
+                          setRegPhone(e.target.value.replace(/\D/g, '').slice(0, 10));
+                          setRegError('');
+                        }}
+                        placeholder="10-digit mobile number"
+                        className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Email Address *
+                    </label>
+                    <div className="relative">
+                      <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="email"
+                        required
+                        value={regEmail}
+                        onChange={(e) => {
+                          setRegEmail(e.target.value);
+                          setRegError('');
+                        }}
+                        placeholder="e.g. owner@restro.com"
+                        className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Password (Min 4 Chars) *
+                      </label>
+                      <div className="relative">
+                        <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="password"
+                          required
+                          minLength={4}
+                          autoComplete="new-password"
+                          value={regPassword}
+                          onChange={(e) => {
+                            setRegPassword(e.target.value);
+                            setRegError('');
+                          }}
+                          placeholder="Create password"
+                          className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Confirm Password *
+                      </label>
+                      <div className="relative">
+                        <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="password"
+                          required
+                          minLength={4}
+                          autoComplete="new-password"
+                          value={regConfirmPassword}
+                          onChange={(e) => {
+                            setRegConfirmPassword(e.target.value);
+                            setRegError('');
+                          }}
+                          placeholder="Re-enter password"
+                          className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-1 border-t border-slate-100 space-y-3">
+                  <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+                    POS &amp; Kitchen Access PINs
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Branch PIN (6-Digit) *
+                      </label>
+                      <div className="relative">
+                        <KeyRound className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="password"
+                          inputMode="numeric"
+                          maxLength={6}
+                          required
+                          autoComplete="new-password"
+                          value={regOwnerPin}
+                          onChange={(e) =>
+                            setRegOwnerPin(e.target.value.replace(/\D/g, '').slice(0, 6))
+                          }
+                          placeholder="••••••"
+                          className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm font-bold tracking-widest outline-none transition"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Kitchen Staff PIN (Optional)
+                      </label>
+                      <div className="relative">
+                        <KeyRound className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="password"
+                          inputMode="numeric"
+                          maxLength={6}
+                          autoComplete="new-password"
+                          value={regStaffPin}
+                          onChange={(e) =>
+                            setRegStaffPin(e.target.value.replace(/\D/g, '').slice(0, 6))
+                          }
+                          placeholder="••••••"
+                          className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm font-bold tracking-widest outline-none transition"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1672,6 +2355,7 @@ export default function HomePage() {
         </div>
       )}
 
+      {/* Outlet Limit Dialog */}
       {limitDialog.open && (
         <div
           onClick={() => setLimitDialog((prev) => ({ ...prev, open: false }))}
@@ -1723,6 +2407,7 @@ export default function HomePage() {
         </div>
       )}
 
+      {/* PIN / Master Password / Forgot PIN Modal */}
       {selectedRestaurant && (
         <div
           onClick={handleClosePinModal}
@@ -1754,6 +2439,12 @@ export default function HomePage() {
               {formatRestaurantDisplayName(selectedRestaurant)}
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">{selectedRestaurant.city}</p>
+
+            {isSelectedLifetimePlan && (
+              <span className="inline-flex items-center gap-1 mt-2 text-[11px] font-extrabold text-amber-900 bg-amber-100 border border-amber-300 px-3 py-0.5 rounded-full">
+                <Crown className="w-3 h-3 text-amber-700" /> Lifetime Plan Active
+              </span>
+            )}
 
             {isSelectedMultiOutlet && loginStep === 'choose_role' && !isForgotMode ? (
               <div className="mt-5 space-y-3 text-left">
@@ -1804,8 +2495,8 @@ export default function HomePage() {
                 className="mt-5 space-y-3.5 text-left"
               >
                 <p className="text-xs text-slate-500 text-center">
-                  Verify your registered <strong>Owner Mobile Number</strong> to set a new 6-digit{' '}
-                  <strong>{activeResetLabel} PIN</strong>.
+                  Verify your registered <strong>Owner Mobile Number</strong> to set a new
+                  6-digit <strong>{activeResetLabel} PIN</strong>.
                 </p>
 
                 <div>
@@ -1887,7 +2578,11 @@ export default function HomePage() {
                 </div>
               </form>
             ) : isSelectedMultiOutlet && loginStep === 'malik_master' ? (
-              <form onSubmit={handleMalikMasterLogin} autoComplete="off" className="mt-5 space-y-4">
+              <form
+                onSubmit={handleMalikMasterLogin}
+                autoComplete="off"
+                className="mt-5 space-y-4"
+              >
                 <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
                   {isSettingMalikPass
                     ? 'Set Malik Master Password (min 4 chars)'
@@ -1909,17 +2604,21 @@ export default function HomePage() {
                 {errorMsg && (
                   <div className="text-xs font-bold text-red-600 bg-red-50 py-2.5 px-3 rounded-xl space-y-2">
                     <p>{errorMsg}</p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        handleClosePinModal();
-                        setPricingTab('multiple');
-                        document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' });
-                      }}
-                      className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-2 rounded-xl text-xs transition"
-                    >
-                      Pay / Upgrade Plan Now →
-                    </button>
+                    {!isSelectedLifetimePlan && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleClosePinModal();
+                          setPricingTab('multiple');
+                          document
+                            .getElementById('pricing')
+                            ?.scrollIntoView({ behavior: 'smooth' });
+                        }}
+                        className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-2 rounded-xl text-xs transition"
+                      >
+                        Pay / Upgrade Plan Now →
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -1970,17 +2669,21 @@ export default function HomePage() {
                 {errorMsg && (
                   <div className="text-xs font-bold text-red-600 bg-red-50 py-2.5 px-3 rounded-xl space-y-2">
                     <p>{errorMsg}</p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        handleClosePinModal();
-                        setPricingTab(isSelectedMultiOutlet ? 'multiple' : 'single');
-                        document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' });
-                      }}
-                      className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-2 rounded-xl text-xs transition"
-                    >
-                      Pay / Upgrade Plan Now →
-                    </button>
+                    {!isSelectedLifetimePlan && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleClosePinModal();
+                          setPricingTab(isSelectedMultiOutlet ? 'multiple' : 'single');
+                          document
+                            .getElementById('pricing')
+                            ?.scrollIntoView({ behavior: 'smooth' });
+                        }}
+                        className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-2 rounded-xl text-xs transition"
+                      >
+                        Pay / Upgrade Plan Now →
+                      </button>
+                    )}
                   </div>
                 )}
 
