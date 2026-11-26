@@ -86,19 +86,6 @@ function getShortBillNumber(orderId: string): string {
   return `BILL-${orderId.slice(0, 6).toUpperCase()}`;
 }
 
-function shouldShowStaffKotButton(searchParams: URLSearchParams | null): boolean {
-  const isQrCustomerParam =
-    searchParams?.get('qr') === '1' ||
-    searchParams?.get('source') === 'qr' ||
-    searchParams?.get('mode') === 'customer';
-
-  if (isQrCustomerParam) {
-    return false;
-  }
-
-  return true;
-}
-
 function CustomerOrderContent() {
   const params = useParams();
   const searchParams = useSearchParams();
@@ -109,7 +96,6 @@ function CustomerOrderContent() {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasStaffSession, setHasStaffSession] = useState(false);
-  const [showStaffKot, setShowStaffKot] = useState(true);
 
   // Filter States
   const [searchQuery, setSearchQuery] = useState('');
@@ -134,12 +120,15 @@ function CustomerOrderContent() {
   const [tableOrders, setTableOrders] = useState<ActiveOrder[]>([]);
 
   useEffect(() => {
-    const saved = localStorage.getItem('restro_session');
-    if (saved) {
-      setHasStaffSession(true);
-    }
+    // Default is false (Customer). Only true when explicitly opened in staff/manager mode.
+    const isStaffUrl =
+      searchParams?.get('staff') === '1' ||
+      searchParams?.get('mode') === 'staff';
+    const isStaffFlag =
+      sessionStorage.getItem('restro_staff_mode') === 'true' ||
+      localStorage.getItem('restro_staff_mode') === 'true';
 
-    setShowStaffKot(shouldShowStaffKotButton(searchParams));
+    setHasStaffSession(Boolean(isStaffUrl || isStaffFlag));
 
     const savedCust = sessionStorage.getItem('restro_customer_info');
     if (savedCust) {
@@ -558,7 +547,7 @@ function CustomerOrderContent() {
   };
 
   const handleDirectStaffOrder = async () => {
-    if (!showStaffKot) return;
+    if (!hasStaffSession) return;
     setFormError(null);
     setPlacingOrder(true);
     await saveOrderToDatabase('unpaid', 'unpaid');
@@ -1205,7 +1194,7 @@ function CustomerOrderContent() {
                     </button>
                   )}
 
-                  {showStaffKot && (
+                  {hasStaffSession && (
                     <button
                       onClick={handleDirectStaffOrder}
                       disabled={placingOrder}
@@ -1403,7 +1392,7 @@ function CustomerOrderContent() {
                 </button>
               )}
 
-              {showStaffKot && (
+              {hasStaffSession && (
                 <button
                   onClick={handleDirectStaffOrder}
                   disabled={placingOrder}
