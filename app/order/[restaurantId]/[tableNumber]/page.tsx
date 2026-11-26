@@ -86,27 +86,44 @@ function getShortBillNumber(orderId: string): string {
   return `BILL-${orderId.slice(0, 6).toUpperCase()}`;
 }
 
-function isValidStaffOrAuthorizedSession(raw: string | null): boolean {
-  if (!raw) return false;
-  try {
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object') {
-      const role = String(parsed.role || parsed.user_role || '').toLowerCase();
-      const isLoggedIn =
-        parsed.isAuthenticated === true ||
-        parsed.loggedIn === true ||
-        Boolean(parsed.pinVerified) ||
-        Boolean(parsed.staffId) ||
-        Boolean(parsed.userId) ||
-        Boolean(parsed.id) ||
-        Boolean(parsed.phone);
-      const allowedRoles = ['staff', 'captain', 'waiter', 'manager', 'owner', 'admin'];
-      return isLoggedIn && (!role || allowedRoles.includes(role));
+function hasActiveStaffOrManagerSession(): boolean {
+  if (typeof window === 'undefined') return false;
+
+  const candidateKeys = [
+    'restro_staff_session',
+    'restro_session',
+    'staff_session',
+    'manager_session',
+    'restro_user',
+    'restro_auth',
+  ];
+
+  for (const key of candidateKeys) {
+    const raw =
+      window.sessionStorage.getItem(key) || window.localStorage.getItem(key);
+    if (!raw || raw === 'null' || raw === 'undefined' || raw === 'false') {
+      continue;
     }
-  } catch {
-    // If stored as a non-empty token/flag string, accept only explicit staff/session keys
-    return raw.trim().length > 0 && raw !== 'false' && raw !== 'null' && raw !== 'undefined';
+
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        const role = String(
+          parsed.role || parsed.user_role || parsed.type || ''
+        ).toLowerCase();
+        const blockedRoles = ['customer', 'guest', 'qr_customer'];
+        if (role && blockedRoles.includes(role)) {
+          continue;
+        }
+        return true;
+      }
+    } catch {
+      if (raw.trim().length > 0) {
+        return true;
+      }
+    }
   }
+
   return false;
 }
 
@@ -147,15 +164,8 @@ function CustomerOrderContent() {
     const queryStaffMode =
       searchParams?.get('staff') === '1' ||
       searchParams?.get('mode') === 'staff';
-    const savedLocal = localStorage.getItem('restro_session');
-    const savedSession = sessionStorage.getItem('restro_staff_session');
 
-    const activeStaff =
-      queryStaffMode ||
-      isValidStaffOrAuthorizedSession(savedSession) ||
-      isValidStaffOrAuthorizedSession(savedLocal);
-
-    setHasStaffSession(activeStaff);
+    setHasStaffSession(queryStaffMode || hasActiveStaffOrManagerSession());
 
     const savedCust = sessionStorage.getItem('restro_customer_info');
     if (savedCust) {
