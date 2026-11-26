@@ -1447,11 +1447,11 @@ export default function HomePage() {
       {showRegisterModal && (
         <div
           onClick={() => setShowRegisterModal(false)}
-          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 overscroll-none touch-none"
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 overscroll-contain"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-7 shadow-2xl relative max-h-[92vh] overflow-y-auto overscroll-contain touch-pan-y"
+            className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-7 shadow-2xl relative max-h-[92vh] overflow-y-auto overscroll-contain"
           >
             <button
               type="button"
