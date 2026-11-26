@@ -1383,27 +1383,29 @@ export default function HomePage() {
       {showRegisterModal && (
         <div
           onClick={() => !registering && setShowRegisterModal(false)}
-          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 overscroll-contain"
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overscroll-contain"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-7 shadow-2xl relative max-h-[92vh] overflow-y-auto overscroll-contain"
+            className="bg-white rounded-3xl max-w-md w-full shadow-2xl relative max-h-[92vh] flex flex-col overflow-hidden"
           >
-            <button
-              type="button"
-              disabled={registering}
-              onClick={() => setShowRegisterModal(false)}
-              className="absolute right-4 top-4 p-2 rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 disabled:opacity-40 transition"
-            >
-              <X className="w-5 h-5" />
-            </button>
+            <div className="px-5 sm:px-7 pt-5 sm:pt-6 pb-3.5 border-b border-slate-100 shrink-0 relative text-center">
+              <button
+                type="button"
+                disabled={registering}
+                onClick={() => setShowRegisterModal(false)}
+                className="absolute right-4 top-4 p-2 rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 disabled:opacity-40 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
 
-            <div className="text-center mb-5 pr-6">
               <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-orange-700 bg-orange-50 border border-orange-200 px-3 py-1 rounded-full mb-2">
                 <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />{' '}
                 {isTrialFlow ? '7-Day Free Trial' : selectedPlanLabel}
               </span>
-              <h3 className="text-xl font-extrabold text-slate-900">Register Restaurant</h3>
+              <h3 className="text-lg sm:text-xl font-extrabold text-slate-900">
+                Register Restaurant
+              </h3>
               <p className="text-xs text-slate-500 mt-0.5">
                 {isTrialFlow
                   ? '7-day free trial (1 per mobile). 8th day requires payment to login.'
@@ -1411,250 +1413,260 @@ export default function HomePage() {
               </p>
             </div>
 
-            <form onSubmit={handleRegisterRestaurant} autoComplete="off" className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Restaurant Setup Type *
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    disabled={isSingleLocked || registering}
-                    onClick={() => {
-                      if (isSingleLocked) return;
-                      setOutletMode('single');
-                      setOutletLabel('');
-                      setRegError('');
-                    }}
-                    className={`py-2.5 px-3 rounded-xl border text-xs font-extrabold transition ${
-                      outletMode === 'single'
-                        ? 'bg-orange-50 border-orange-500 text-orange-700'
-                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                    } ${
-                      isSingleLocked
-                        ? 'opacity-45 cursor-not-allowed bg-slate-100 text-slate-400 hover:bg-slate-100'
-                        : ''
-                    }`}
-                  >
-                    Single Outlet
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isMultipleLocked || registering}
-                    onClick={() => {
-                      if (isMultipleLocked) return;
-                      setOutletMode('multiple');
-                      setRegError('');
-                    }}
-                    className={`py-2.5 px-3 rounded-xl border text-xs font-extrabold transition ${
-                      outletMode === 'multiple'
-                        ? 'bg-orange-50 border-orange-500 text-orange-700'
-                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                    } ${
-                      isMultipleLocked
-                        ? 'opacity-45 cursor-not-allowed bg-slate-100 text-slate-400 hover:bg-slate-100'
-                        : ''
-                    }`}
-                  >
-                    Multiple Outlets
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Restaurant / Brand Name *
-                </label>
-                <div className="relative">
-                  <Building2 className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    required
-                    value={regName}
-                    onChange={(e) => setRegName(e.target.value)}
-                    placeholder="e.g. Spice Garden Cafe"
-                    className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
-                  />
-                </div>
-              </div>
-
-              {outletMode === 'multiple' && (
-                <>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      1st Outlet / Location Name *
-                    </label>
-                    <div className="relative">
-                      <Store className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                      <input
-                        type="text"
-                        required
-                        value={outletLabel}
-                        onChange={(e) => setOutletLabel(e.target.value)}
-                        placeholder="e.g. Location A (Vaishali Nagar)"
-                        className="w-full pl-10 pr-3.5 py-2.5 border border-orange-300 focus:border-orange-500 rounded-xl text-sm outline-none transition"
-                      />
-                    </div>
+            <form
+              onSubmit={handleRegisterRestaurant}
+              autoComplete="off"
+              className="flex-1 min-h-0 flex flex-col"
+            >
+              <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 sm:px-7 py-4 space-y-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    Restaurant Setup Type *
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      disabled={isSingleLocked || registering}
+                      onClick={() => {
+                        if (isSingleLocked) return;
+                        setOutletMode('single');
+                        setOutletLabel('');
+                        setRegError('');
+                      }}
+                      className={`py-2.5 px-3 rounded-xl border text-xs font-extrabold transition ${
+                        outletMode === 'single'
+                          ? 'bg-orange-50 border-orange-500 text-orange-700'
+                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                      } ${
+                        isSingleLocked
+                          ? 'opacity-45 cursor-not-allowed bg-slate-100 text-slate-400 hover:bg-slate-100'
+                          : ''
+                      }`}
+                    >
+                      Single Outlet
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isMultipleLocked || registering}
+                      onClick={() => {
+                        if (isMultipleLocked) return;
+                        setOutletMode('multiple');
+                        setRegError('');
+                      }}
+                      className={`py-2.5 px-3 rounded-xl border text-xs font-extrabold transition ${
+                        outletMode === 'multiple'
+                          ? 'bg-orange-50 border-orange-500 text-orange-700'
+                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                      } ${
+                        isMultipleLocked
+                          ? 'opacity-45 cursor-not-allowed bg-slate-100 text-slate-400 hover:bg-slate-100'
+                          : ''
+                      }`}
+                    >
+                      Multiple Outlets
+                    </button>
                   </div>
+                </div>
 
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Restaurant / Brand Name *
+                  </label>
+                  <div className="relative">
+                    <Building2 className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      required
+                      value={regName}
+                      onChange={(e) => setRegName(e.target.value)}
+                      placeholder="e.g. Spice Garden Cafe"
+                      className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
+                    />
+                  </div>
+                </div>
+
+                {outletMode === 'multiple' && (
+                  <>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        1st Outlet / Location Name *
+                      </label>
+                      <div className="relative">
+                        <Store className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          required
+                          value={outletLabel}
+                          onChange={(e) => setOutletLabel(e.target.value)}
+                          placeholder="e.g. Location A (Vaishali Nagar)"
+                          className="w-full pl-10 pr-3.5 py-2.5 border border-orange-300 focus:border-orange-500 rounded-xl text-sm outline-none transition"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Set Malik Master Password (Min 4 Chars) *
+                      </label>
+                      <div className="relative">
+                        <ShieldCheck className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="password"
+                          required
+                          minLength={4}
+                          autoComplete="new-password"
+                          value={regMalikPassword}
+                          onChange={(e) => {
+                            setRegMalikPassword(e.target.value);
+                            setRegError('');
+                          }}
+                          placeholder="Set master password for all outlets"
+                          className="w-full pl-10 pr-3.5 py-2.5 border border-orange-300 focus:border-orange-500 rounded-xl text-sm font-semibold outline-none transition"
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    City *
+                  </label>
+                  <div className="relative">
+                    <MapPin className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      required
+                      value={regCity}
+                      onChange={(e) => setRegCity(e.target.value)}
+                      placeholder="e.g. Jaipur"
+                      className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Owner Mobile Number (For Forgot PIN &amp; Combined Sales) *
+                  </label>
+                  <div className="relative">
+                    <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="tel"
+                      inputMode="numeric"
+                      maxLength={10}
+                      required
+                      value={regPhone}
+                      onChange={(e) => {
+                        setRegPhone(e.target.value.replace(/\D/g, '').slice(0, 10));
+                        setRegError('');
+                      }}
+                      placeholder="10-digit mobile number"
+                      className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Number of Tables *
+                  </label>
+                  <div className="relative">
+                    <Hash className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      required
+                      value={regTables || ''}
+                      onChange={(e) => setRegTables(parseInt(e.target.value, 10) || 0)}
+                      className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Set Malik Master Password (Min 4 Chars) *
+                      Branch PIN (6-Digit) *
                     </label>
                     <div className="relative">
-                      <ShieldCheck className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                       <input
                         type="password"
+                        inputMode="numeric"
+                        maxLength={6}
                         required
-                        minLength={4}
                         autoComplete="new-password"
-                        value={regMalikPassword}
-                        onChange={(e) => {
-                          setRegMalikPassword(e.target.value);
-                          setRegError('');
-                        }}
-                        placeholder="Set master password for all outlets"
-                        className="w-full pl-10 pr-3.5 py-2.5 border border-orange-300 focus:border-orange-500 rounded-xl text-sm font-semibold outline-none transition"
+                        value={regOwnerPin}
+                        onChange={(e) =>
+                          setRegOwnerPin(e.target.value.replace(/\D/g, '').slice(0, 6))
+                        }
+                        placeholder="••••••"
+                        className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm font-bold tracking-widest outline-none transition"
                       />
                     </div>
                   </div>
-                </>
-              )}
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">City *</label>
-                <div className="relative">
-                  <MapPin className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    required
-                    value={regCity}
-                    onChange={(e) => setRegCity(e.target.value)}
-                    placeholder="e.g. Jaipur"
-                    className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Owner Mobile Number (For Forgot PIN &amp; Combined Sales) *
-                </label>
-                <div className="relative">
-                  <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="tel"
-                    inputMode="numeric"
-                    maxLength={10}
-                    required
-                    value={regPhone}
-                    onChange={(e) => {
-                      setRegPhone(e.target.value.replace(/\D/g, '').slice(0, 10));
-                      setRegError('');
-                    }}
-                    placeholder="10-digit mobile number"
-                    className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Number of Tables *
-                </label>
-                <div className="relative">
-                  <Hash className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="number"
-                    min={1}
-                    max={100}
-                    required
-                    value={regTables || ''}
-                    onChange={(e) => setRegTables(parseInt(e.target.value, 10) || 0)}
-                    className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Branch PIN (6-Digit) *
-                  </label>
-                  <div className="relative">
-                    <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="password"
-                      inputMode="numeric"
-                      maxLength={6}
-                      required
-                      autoComplete="new-password"
-                      value={regOwnerPin}
-                      onChange={(e) =>
-                        setRegOwnerPin(e.target.value.replace(/\D/g, '').slice(0, 6))
-                      }
-                      placeholder="••••••"
-                      className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm font-bold tracking-widest outline-none transition"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Staff PIN (Optional)
-                  </label>
-                  <div className="relative">
-                    <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="password"
-                      inputMode="numeric"
-                      maxLength={6}
-                      autoComplete="new-password"
-                      value={regStaffPin}
-                      onChange={(e) =>
-                        setRegStaffPin(e.target.value.replace(/\D/g, '').slice(0, 6))
-                      }
-                      placeholder="••••••"
-                      className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm font-bold tracking-widest outline-none transition"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {isPaidPlanSelected && (
-                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 flex items-center justify-between text-xs">
                   <div>
-                    <p className="font-bold text-slate-700">Selected Plan</p>
-                    <p className="text-[11px] text-slate-500">
-                      {outletMode === 'multiple' ? 'Multiple Outlets' : 'Single Outlet'} •{' '}
-                      {selectedPlanLabel}
-                    </p>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Staff PIN (Optional)
+                    </label>
+                    <div className="relative">
+                      <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="password"
+                        inputMode="numeric"
+                        maxLength={6}
+                        autoComplete="new-password"
+                        value={regStaffPin}
+                        onChange={(e) =>
+                          setRegStaffPin(e.target.value.replace(/\D/g, '').slice(0, 6))
+                        }
+                        placeholder="••••••"
+                        className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm font-bold tracking-widest outline-none transition"
+                      />
+                    </div>
                   </div>
-                  <span className="text-base font-extrabold text-orange-600">
-                    ₹{selectedPlanAmount.toLocaleString('en-IN')}
-                  </span>
                 </div>
-              )}
 
-              {regError && (
-                <p className="text-xs font-bold text-red-600 bg-red-50 py-2 px-3 rounded-xl text-center">
-                  {regError}
-                </p>
-              )}
+                {isPaidPlanSelected && (
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 flex items-center justify-between gap-2 text-xs">
+                    <div className="min-w-0">
+                      <p className="font-bold text-slate-700">Selected Plan</p>
+                      <p className="text-[11px] text-slate-500 truncate">
+                        {outletMode === 'multiple' ? 'Multiple Outlets' : 'Single Outlet'} •{' '}
+                        {selectedPlanLabel}
+                      </p>
+                    </div>
+                    <span className="text-base font-extrabold text-orange-600 shrink-0">
+                      ₹{selectedPlanAmount.toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                )}
+              </div>
 
-              <button
-                type="submit"
-                disabled={registering}
-                className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-orange-300 text-white font-extrabold py-3.5 rounded-2xl text-sm shadow-md transition"
-              >
-                {registering
-                  ? isPaidPlanSelected
-                    ? 'Processing Payment & Setup...'
-                    : 'Creating Restaurant...'
-                  : isPaidPlanSelected
-                  ? `Pay ₹${selectedPlanAmount.toLocaleString('en-IN')} & Open Dashboard →`
-                  : 'Start Free Trial & Open Dashboard →'}
-              </button>
+              <div className="px-5 sm:px-7 pt-3 pb-5 sm:pb-6 border-t border-slate-100 bg-white shrink-0 space-y-2.5">
+                {regError && (
+                  <p className="text-xs font-bold text-red-600 bg-red-50 py-2 px-3 rounded-xl text-center">
+                    {regError}
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={registering}
+                  className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-orange-300 text-white font-extrabold py-3.5 rounded-2xl text-sm shadow-md transition"
+                >
+                  {registering
+                    ? isPaidPlanSelected
+                      ? 'Processing Payment & Setup...'
+                      : 'Creating Restaurant...'
+                    : isPaidPlanSelected
+                    ? `Pay ₹${selectedPlanAmount.toLocaleString('en-IN')} & Open Dashboard →`
+                    : 'Start Free Trial & Open Dashboard →'}
+                </button>
+              </div>
             </form>
           </div>
         </div>
