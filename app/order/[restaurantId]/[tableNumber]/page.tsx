@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import {
   UtensilsCrossed,
@@ -86,8 +86,33 @@ function getShortBillNumber(orderId: string): string {
   return `BILL-${orderId.slice(0, 6).toUpperCase()}`;
 }
 
+function isValidStaffOrAuthorizedSession(raw: string | null): boolean {
+  if (!raw) return false;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      const role = String(parsed.role || parsed.user_role || '').toLowerCase();
+      const isLoggedIn =
+        parsed.isAuthenticated === true ||
+        parsed.loggedIn === true ||
+        Boolean(parsed.pinVerified) ||
+        Boolean(parsed.staffId) ||
+        Boolean(parsed.userId) ||
+        Boolean(parsed.id) ||
+        Boolean(parsed.phone);
+      const allowedRoles = ['staff', 'captain', 'waiter', 'manager', 'owner', 'admin'];
+      return isLoggedIn && (!role || allowedRoles.includes(role));
+    }
+  } catch {
+    // If stored as a non-empty token/flag string, accept only explicit staff/session keys
+    return raw.trim().length > 0 && raw !== 'false' && raw !== 'null' && raw !== 'undefined';
+  }
+  return false;
+}
+
 function CustomerOrderContent() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const restaurantId = params?.restaurantId as string;
   const tableNumber = Number(params?.tableNumber);
 
@@ -119,10 +144,18 @@ function CustomerOrderContent() {
   const [tableOrders, setTableOrders] = useState<ActiveOrder[]>([]);
 
   useEffect(() => {
-    const saved = localStorage.getItem('restro_session');
-    if (saved) {
-      setHasStaffSession(true);
-    }
+    const queryStaffMode =
+      searchParams?.get('staff') === '1' ||
+      searchParams?.get('mode') === 'staff';
+    const savedLocal = localStorage.getItem('restro_session');
+    const savedSession = sessionStorage.getItem('restro_staff_session');
+
+    const activeStaff =
+      queryStaffMode ||
+      isValidStaffOrAuthorizedSession(savedSession) ||
+      isValidStaffOrAuthorizedSession(savedLocal);
+
+    setHasStaffSession(activeStaff);
 
     const savedCust = sessionStorage.getItem('restro_customer_info');
     if (savedCust) {
@@ -134,7 +167,7 @@ function CustomerOrderContent() {
         // Ignore parse error
       }
     }
-  }, []);
+  }, [searchParams]);
 
   const fetchPageData = useCallback(async () => {
     if (!restaurantId) {
@@ -441,8 +474,6 @@ function CustomerOrderContent() {
     }
   };
 
-  // Only restaurants with Razorpay keys configured pay online via Razorpay;
-  // all other restaurants place the order directly with payment at Counter / Reception.
   const handleStartCustomerCheckout = async () => {
     const cartValues = Object.values(cart);
     if (cartValues.length === 0 || !restaurantId || !restaurant) return;
@@ -532,7 +563,6 @@ function CustomerOrderContent() {
       return;
     }
 
-    // No Razorpay keys: place order directly and pay at Counter / Reception
     setPlacingOrder(true);
     await saveOrderToDatabase('unpaid', 'cash');
   };
@@ -544,6 +574,7 @@ function CustomerOrderContent() {
   };
 
   const handleDirectStaffOrder = async () => {
+    if (!hasStaffSession) return;
     setFormError(null);
     setPlacingOrder(true);
     await saveOrderToDatabase('unpaid', 'unpaid');
@@ -567,7 +598,6 @@ function CustomerOrderContent() {
     );
   }
 
-  // Multi-outlet branch display title & location
   const cleanOutletLabel = restaurant.outlet_label?.trim() || '';
   const isMultiOutletBranch =
     restaurant.outlet_mode === 'multiple' && cleanOutletLabel.length > 0;
@@ -653,7 +683,6 @@ function CustomerOrderContent() {
 
       <header className="bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-30">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
-          {/* Mobile (< lg): Non-clickable so QR/mobile users cannot tap restaurant name */}
           <div className="flex lg:hidden items-center gap-2.5 text-left select-none cursor-default min-w-0 max-w-[70%]">
             <div className="bg-gradient-to-br from-orange-500 to-orange-600 text-white p-2.5 rounded-xl shadow-sm shrink-0">
               <UtensilsCrossed className="w-5 h-5" />
@@ -669,7 +698,6 @@ function CustomerOrderContent() {
             </div>
           </div>
 
-          {/* Desktop / Web (lg+): Clickable link to dashboard */}
           <Link
             href="/dashboard"
             className="hidden lg:flex items-center gap-2.5 text-left group cursor-pointer min-w-0 max-w-sm"
