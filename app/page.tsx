@@ -47,12 +47,13 @@ interface Restaurant {
   name: string;
   city: string;
   total_tables: number;
-  owner_pin: string;
+  owner_pin?: string | null;
   staff_pin?: string | null;
   phone?: string | null;
   owner_phone?: string | null;
   email?: string | null;
   login_password?: string | null;
+  master_password?: string | null;
   outlet_mode?: 'single' | 'multiple' | null;
   outlet_label?: string | null;
   subscription_status?: string | null;
@@ -88,7 +89,10 @@ const MALIK_VAULT_UNLOCKED_KEY = 'restro_malik_vault_unlocked';
 const ACCOUNT_PASSWORDS_STORAGE_KEY = 'restro_account_passwords_map';
 
 const GENERIC_LOGIN_ERROR =
-  'Incorrect Email/Mobile or Password/PIN. Please check and try again.';
+  'Incorrect Email/Mobile or Password. Please check and try again.';
+
+const RESTAURANT_SELECT_FIELDS =
+  'id, name, city, total_tables, phone, owner_phone, email, login_password, master_password, outlet_mode, outlet_label, subscription_status, plan_type, selected_plan, trial_ends_at';
 
 const FAQ_ITEMS = [
   {
@@ -96,12 +100,12 @@ const FAQ_ITEMS = [
     a: 'Each 10-digit mobile number gets one 7-day free trial so you can test QR ordering, live KDS, and billing before choosing a paid plan.',
   },
   {
-    q: 'How do owners and kitchen staff sign in?',
-    a: 'Owners can sign in using their registered Email or Mobile Number and Password/PIN, while kitchen/branch staff can use their assigned 6-digit PIN.',
+    q: 'How do owners and branch managers sign in?',
+    a: 'Sign in using your registered Email or Mobile Number and Password. Multi-outlet owners can also turn on Super Admin to use the Master Password.',
   },
   {
     q: 'Can I manage multiple outlets under one account?',
-    a: 'Yes, switch to the Multiple Outlets tab in Plans & Pricing to link outlets under your owner number and view combined or branch-wise sales.',
+    a: 'Yes, switch to the Multiple Outlets tab in Plans & Pricing to link outlets under your owner account and manage branch passwords from Settings.',
   },
   {
     q: 'What happens if I purchase a Lifetime plan?',
@@ -117,7 +121,9 @@ function isLifetimePlanRecord(rest: Restaurant | null): boolean {
   return (
     planType.includes('lifetime') ||
     selectedPlan.includes('lifetime') ||
-    subStatus === 'lifetime'
+    subStatus === 'lifetime' ||
+    selectedPlan.includes('19,999') ||
+    selectedPlan.includes('37,199')
   );
 }
 
@@ -179,7 +185,7 @@ const SINGLE_OUTLET_PLANS: PricingPlan[] = [
     features: [
       'QR Table Menu & Instant Cart',
       'Live Kitchen Display (KDS)',
-      'Owner & Staff 6-Digit PINs',
+      'Owner Password Login',
       'Daily Table Bill Settlement',
     ],
   },
@@ -197,7 +203,7 @@ const SINGLE_OUTLET_PLANS: PricingPlan[] = [
       '1-Click Dish Stock Toggle',
       'Cash & UPI Payment Split View',
       'Invoice, Bill & UTR Search',
-      'Mobile PIN Reset via Owner Phone',
+      'Direct Dashboard Access',
     ],
   },
   {
@@ -265,10 +271,10 @@ const MULTIPLE_OUTLET_PLANS: PricingPlan[] = [
     badge: 'Up to 2 Outlets',
     popular: false,
     features: [
-      'Link up to 2 Outlets by Phone',
+      'Link up to 2 Outlets Under 1 Account',
       'Combined Sales & Cash/UPI Split',
-      'Malik Master Password Vault',
-      'Branch & Staff PINs per Outlet',
+      'Super Admin Master Password Vault',
+      'Individual Branch Passwords in Settings',
     ],
   },
   {
@@ -382,7 +388,7 @@ export default function HomePage() {
     planLabel: '1 Month (₹1,115)',
   });
 
-  // Login Modal States (with top "Login as Super Admin" toggle)
+  // Login Modal States (with top "Login as Super Admin" toggle + branch selector fallback)
   const [showLoginLookupModal, setShowLoginLookupModal] = useState(false);
   const [isSuperAdminLoginToggle, setIsSuperAdminLoginToggle] = useState(false);
   const [loginLookupId, setLoginLookupId] = useState('');
@@ -390,6 +396,9 @@ export default function HomePage() {
   const [loginLookupError, setLoginLookupError] = useState('');
   const [loginMatchedLifetime, setLoginMatchedLifetime] = useState(false);
   const [loggingInDirect, setLoggingInDirect] = useState(false);
+  const [candidateOutletsForPicker, setCandidateOutletsForPicker] = useState<
+    Restaurant[]
+  >([]);
 
   const [selectedRestaurant, setSelectedRestaurant] = useState<Restaurant | null>(null);
   const [loginStep, setLoginStep] = useState<LoginStep>('branch_pin');
@@ -399,7 +408,7 @@ export default function HomePage() {
   const [verifying, setVerifying] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Forgot PIN States
+  // Forgot PIN States (kept intact for legacy modal)
   const [isForgotMode, setIsForgotMode] = useState(false);
   const [resetTargetRole, setResetTargetRole] = useState<ResetTargetRole>('owner');
   const [recoveryPhone, setRecoveryPhone] = useState('');
@@ -483,6 +492,7 @@ export default function HomePage() {
     setSelectedRestaurant(null);
     setShowLoginLookupModal(false);
     setIsSuperAdminLoginToggle(false);
+    setCandidateOutletsForPicker([]);
     setPin('');
     setVerifying(false);
     setErrorMsg('');
@@ -493,9 +503,7 @@ export default function HomePage() {
     const fetchRestaurants = async () => {
       const { data, error } = await supabase
         .from('restaurants')
-        .select(
-          'id, name, city, total_tables, owner_pin, staff_pin, phone, owner_phone, email, login_password, outlet_mode, outlet_label, subscription_status, plan_type, selected_plan, trial_ends_at'
-        )
+        .select(RESTAURANT_SELECT_FIELDS)
         .order('created_at', { ascending: false });
 
       if (!error && data) {
@@ -503,7 +511,7 @@ export default function HomePage() {
       } else {
         const { data: fallbackData } = await supabase
           .from('restaurants')
-          .select('id, name, city, total_tables, owner_pin, staff_pin, owner_phone')
+          .select('id, name, city, total_tables, owner_phone')
           .order('created_at', { ascending: false });
         if (fallbackData) {
           setRestaurants(fallbackData as Restaurant[]);
@@ -688,8 +696,53 @@ export default function HomePage() {
     }
   };
 
+  const getStoredPasswordForOutlet = (
+    outlet: Restaurant,
+    passMap: Record<string, string>
+  ): string | undefined => {
+    const cleanPhone = (outlet.owner_phone || outlet.phone || '').replace(
+      /\D/g,
+      ''
+    );
+    const cleanEmail = (outlet.email || '').trim().toLowerCase();
+    return (
+      outlet.login_password ||
+      passMap[`id:${outlet.id}`] ||
+      (cleanEmail ? passMap[`email:${cleanEmail}`] : undefined) ||
+      (cleanPhone ? passMap[`phone:${cleanPhone}`] : undefined)
+    );
+  };
+
+  const finalizeBranchLoginForOutlet = async (
+    outlet: Restaurant,
+    enteredSecret: string
+  ) => {
+    const allowedByTrial = await checkLoginTrialNotExpired(outlet, (msg) => {
+      setLoginLookupError(msg);
+      setLoggingInDirect(false);
+    });
+    if (!allowedByTrial) return;
+
+    const cleanPhoneMatch = (outlet.owner_phone || outlet.phone || '').replace(
+      /\D/g,
+      ''
+    );
+    const cleanEmailMatch = (outlet.email || '').trim().toLowerCase();
+    if (cleanEmailMatch && enteredSecret) {
+      saveLocalPasswordForRestaurant(
+        outlet.id,
+        cleanEmailMatch,
+        cleanPhoneMatch,
+        enteredSecret
+      );
+    }
+
+    await completeSessionAndNavigate(outlet, 'owner', false);
+  };
+
   const handleOpenLoginModal = () => {
     setIsSuperAdminLoginToggle(false);
+    setCandidateOutletsForPicker([]);
     setLoginLookupId('');
     setLoginAccountPassword('');
     setLoginLookupError('');
@@ -710,33 +763,32 @@ export default function HomePage() {
       return;
     }
     if (!enteredSecret) {
-      setLoginLookupError('Enter your Password or 6-digit PIN.');
+      setLoginLookupError('Enter your Password.');
       return;
     }
 
     setLoggingInDirect(true);
     setLoginLookupError('');
+    setCandidateOutletsForPicker([]);
     setLoginMatchedLifetime(false);
 
     const digitsOnly = rawInput.replace(/\D/g, '');
     const lowerInput = rawInput.toLowerCase();
 
-    const findMatchingRestaurant = (list: Restaurant[]) => {
-      const exactContactMatch = list.find((r) => {
+    const findMatchingOutlets = (list: Restaurant[]) => {
+      const contactMatches = list.filter((r) => {
         const p1 = (r.owner_phone || '').replace(/\D/g, '');
         const p2 = (r.phone || '').replace(/\D/g, '');
         const emailVal = (r.email || '').trim().toLowerCase();
         if (digitsOnly.length === 10 && (p1 === digitsOnly || p2 === digitsOnly)) {
           return true;
         }
-        if (emailVal && emailVal === lowerInput) {
-          return true;
-        }
-        return false;
+        return Boolean(emailVal && emailVal === lowerInput);
       });
-      if (exactContactMatch) return exactContactMatch;
 
-      return list.find((r) => {
+      if (contactMatches.length > 0) return contactMatches;
+
+      return list.filter((r) => {
         const restName = (r.name || '').trim().toLowerCase();
         const fullDisplay = formatRestaurantDisplayName(r).toLowerCase();
         return restName === lowerInput || fullDisplay === lowerInput;
@@ -744,135 +796,133 @@ export default function HomePage() {
     };
 
     let listToSearch = restaurants;
-    let matched = findMatchingRestaurant(listToSearch);
+    let matches = findMatchingOutlets(listToSearch);
 
-    if (!matched) {
+    if (matches.length === 0) {
       const { data: latestList } = await supabase
         .from('restaurants')
-        .select(
-          'id, name, city, total_tables, owner_pin, staff_pin, phone, owner_phone, email, login_password, outlet_mode, outlet_label, subscription_status, plan_type, selected_plan, trial_ends_at'
-        )
+        .select(RESTAURANT_SELECT_FIELDS)
         .order('created_at', { ascending: false });
 
       if (Array.isArray(latestList)) {
         listToSearch = latestList as Restaurant[];
         setRestaurants(listToSearch);
-        matched = findMatchingRestaurant(listToSearch);
+        matches = findMatchingOutlets(listToSearch);
       } else {
         const { data: fallbackList } = await supabase
           .from('restaurants')
-          .select(
-            'id, name, city, total_tables, owner_pin, staff_pin, phone, owner_phone, outlet_mode, outlet_label, subscription_status, plan_type, selected_plan, trial_ends_at'
-          )
+          .select('id, name, city, total_tables, phone, owner_phone')
           .order('created_at', { ascending: false });
         if (Array.isArray(fallbackList)) {
           listToSearch = fallbackList as Restaurant[];
           setRestaurants(listToSearch);
-          matched = findMatchingRestaurant(listToSearch);
+          matches = findMatchingOutlets(listToSearch);
         }
       }
     }
 
-    if (!matched) {
+    if (matches.length === 0) {
       setLoggingInDirect(false);
       setLoginLookupError(GENERIC_LOGIN_ERROR);
       return;
     }
 
-    const isMultiAccount = isMultiOutletAccount(matched);
-    setLoginMatchedLifetime(isLifetimePlanRecord(matched));
+    const multiMatches = matches.filter((r) => isMultiOutletAccount(r));
+    const singleMatches = matches.filter((r) => !isMultiOutletAccount(r));
 
-    // Single outlet (trial or paid) ONLY works in Normal Login (Toggle OFF)
-    if (isSuperAdminLoginToggle && !isMultiAccount) {
+    const anyLifetime = matches.some((r) => isLifetimePlanRecord(r));
+    setLoginMatchedLifetime(anyLifetime);
+
+    // Single-outlet accounts are ONLY allowed in normal login (Super Admin toggle OFF)
+    if (isSuperAdminLoginToggle && multiMatches.length === 0) {
       setLoggingInDirect(false);
       setLoginLookupError(GENERIC_LOGIN_ERROR);
       return;
     }
 
-    const allowedByTrial = await checkLoginTrialNotExpired(matched, (msg) => {
-      setLoginLookupError(msg);
-      setLoggingInDirect(false);
-    });
-    if (!allowedByTrial) return;
+    const poolForTrialCheck = isSuperAdminLoginToggle
+      ? multiMatches
+      : singleMatches.length > 0
+      ? singleMatches
+      : multiMatches;
+
+    for (const rec of poolForTrialCheck) {
+      const allowedByTrial = await checkLoginTrialNotExpired(rec, (msg) => {
+        setLoginLookupError(msg);
+        setLoggingInDirect(false);
+      });
+      if (!allowedByTrial) return;
+    }
 
     const passMap = readLocalPasswordMap();
-    const cleanPhoneMatch = (matched.owner_phone || matched.phone || '').replace(
-      /\D/g,
-      ''
-    );
-    const cleanEmailMatch = (matched.email || '').trim().toLowerCase();
-
-    const storedAccountPassword =
-      matched.login_password ||
-      passMap[`id:${matched.id}`] ||
-      (cleanEmailMatch ? passMap[`email:${cleanEmailMatch}`] : undefined) ||
-      (cleanPhoneMatch ? passMap[`phone:${cleanPhoneMatch}`] : undefined);
-
     const savedMaster =
       typeof window !== 'undefined'
         ? localStorage.getItem(MASTER_PASS_STORAGE_KEY)
         : null;
 
-    const matchesBranchPasswordOrPin =
-      (storedAccountPassword && enteredSecret === storedAccountPassword) ||
-      enteredSecret === matched.owner_pin;
-
+    const primaryMulti = multiMatches[0] || null;
+    const configuredMaster = primaryMulti?.master_password || savedMaster;
     const matchesMasterPassword =
-      isMultiAccount &&
-      savedMaster &&
+      Boolean(primaryMulti) &&
+      Boolean(configuredMaster) &&
       enteredSecret.length >= 4 &&
-      enteredSecret === savedMaster;
+      enteredSecret === configuredMaster;
 
-    // Multiple Outlets Account + Super Admin Toggle ON:
-    // - Master password -> Malik dashboard (unlockMalikVault = true)
-    // - Branch manager password / PIN -> Single-outlet style branch dashboard (unlockMalikVault = false)
-    if (isSuperAdminLoginToggle) {
+    // 1) Super Admin Toggle ON (Multiple Outlets)
+    if (isSuperAdminLoginToggle && primaryMulti) {
       if (matchesMasterPassword) {
-        await completeSessionAndNavigate(matched, 'owner', true);
-        return;
-      }
-
-      if (matchesBranchPasswordOrPin) {
-        if (cleanEmailMatch && storedAccountPassword) {
-          saveLocalPasswordForRestaurant(
-            matched.id,
-            cleanEmailMatch,
-            cleanPhoneMatch,
-            enteredSecret
-          );
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(MASTER_PASS_STORAGE_KEY, enteredSecret);
         }
-        await completeSessionAndNavigate(matched, 'owner', false);
+        await completeSessionAndNavigate(primaryMulti, 'owner', true);
         return;
       }
 
-      setLoggingInDirect(false);
-      setLoginLookupError(GENERIC_LOGIN_ERROR);
-      return;
-    }
+      const passwordMatchedOutlets = multiMatches.filter((out) => {
+        const storedOutPass = getStoredPasswordForOutlet(out, passMap);
+        return Boolean(storedOutPass && enteredSecret === storedOutPass);
+      });
 
-    // Normal Login (Toggle OFF):
-    // Master password is never accepted here
-    if (isMultiAccount && matchesMasterPassword) {
-      setLoggingInDirect(false);
-      setLoginLookupError(GENERIC_LOGIN_ERROR);
-      return;
-    }
-
-    if (matchesBranchPasswordOrPin) {
-      if (cleanEmailMatch && storedAccountPassword) {
-        saveLocalPasswordForRestaurant(
-          matched.id,
-          cleanEmailMatch,
-          cleanPhoneMatch,
+      if (passwordMatchedOutlets.length === 1) {
+        await finalizeBranchLoginForOutlet(
+          passwordMatchedOutlets[0],
           enteredSecret
         );
+        return;
       }
-      await completeSessionAndNavigate(matched, 'owner', false);
+
+      if (passwordMatchedOutlets.length > 1) {
+        setLoggingInDirect(false);
+        setCandidateOutletsForPicker(passwordMatchedOutlets);
+        return;
+      }
+
+      setLoggingInDirect(false);
+      setLoginLookupError(GENERIC_LOGIN_ERROR);
       return;
     }
 
-    if (matched.staff_pin && enteredSecret === matched.staff_pin) {
-      await completeSessionAndNavigate(matched, 'staff', false);
+    // 2) Normal Login (Super Admin Toggle OFF)
+    if (multiMatches.length > 0 && matchesMasterPassword) {
+      setLoggingInDirect(false);
+      setLoginLookupError(GENERIC_LOGIN_ERROR);
+      return;
+    }
+
+    const normalPool = singleMatches.length > 0 ? singleMatches : multiMatches;
+    const branchMatchedOutlets = normalPool.filter((out) => {
+      const storedOutPass = getStoredPasswordForOutlet(out, passMap);
+      return Boolean(storedOutPass && enteredSecret === storedOutPass);
+    });
+
+    if (branchMatchedOutlets.length === 1) {
+      await finalizeBranchLoginForOutlet(branchMatchedOutlets[0], enteredSecret);
+      return;
+    }
+
+    if (branchMatchedOutlets.length > 1) {
+      setLoggingInDirect(false);
+      setCandidateOutletsForPicker(branchMatchedOutlets);
       return;
     }
 
@@ -914,7 +964,8 @@ export default function HomePage() {
     }
 
     const savedMaster = localStorage.getItem(MASTER_PASS_STORAGE_KEY);
-    if (savedMaster && cleanPass !== savedMaster) {
+    const expectedMaster = selectedRestaurant.master_password || savedMaster;
+    if (expectedMaster && cleanPass !== expectedMaster) {
       setErrorMsg('Incorrect Master Password!');
       return;
     }
@@ -928,10 +979,7 @@ export default function HomePage() {
     });
     if (!allowedByTrial) return;
 
-    if (!savedMaster) {
-      localStorage.setItem(MASTER_PASS_STORAGE_KEY, cleanPass);
-    }
-
+    localStorage.setItem(MASTER_PASS_STORAGE_KEY, cleanPass);
     await completeSessionAndNavigate(selectedRestaurant, 'owner', true);
   };
 
@@ -949,7 +997,8 @@ export default function HomePage() {
     });
     if (!allowedByTrial) return;
 
-    const isOwner = activePin === selectedRestaurant.owner_pin;
+    const isOwner =
+      selectedRestaurant.owner_pin && activePin === selectedRestaurant.owner_pin;
     const isStaff =
       selectedRestaurant.staff_pin && activePin === selectedRestaurant.staff_pin;
 
@@ -1197,8 +1246,6 @@ export default function HomePage() {
       phone: cleanPhone,
       owner_phone: cleanPhone,
       total_tables: finalTables,
-      owner_pin: regOwnerPin,
-      staff_pin: regStaffPin || null,
       subscription_status: isPaidForThisPlan ? 'active' : 'free_trial',
       plan_type: selectedPlanId,
       selected_plan: selectedPlanLabel,
@@ -1208,11 +1255,14 @@ export default function HomePage() {
     let savedOutletMode: OutletTabMode = outletMode;
     let savedOutletLabel: string | null =
       outletMode === 'multiple' ? cleanOutletLabel : null;
+    const savedMasterPassword =
+      outletMode === 'multiple' ? regMalikPassword.trim() || null : null;
 
     const fullPayload = {
       ...basePayload,
       email: cleanEmail || null,
       login_password: cleanPassword || null,
+      master_password: savedMasterPassword,
       outlet_mode: outletMode,
       outlet_label: savedOutletLabel,
     };
@@ -1230,6 +1280,7 @@ export default function HomePage() {
         errText.includes('outlet_label') ||
         errText.includes('email') ||
         errText.includes('login_password') ||
+        errText.includes('master_password') ||
         errText.includes('column') ||
         errText.includes('schema cache');
 
@@ -1272,6 +1323,7 @@ export default function HomePage() {
       ...(data as Restaurant),
       email: cleanEmail || null,
       login_password: cleanPassword || null,
+      master_password: savedMasterPassword,
       outlet_mode: savedOutletMode,
       outlet_label: savedOutletLabel,
     };
@@ -1337,14 +1389,6 @@ export default function HomePage() {
     }
     if (cleanPassword !== cleanConfirmPassword) {
       setRegError('Password and Confirm Password do not match.');
-      return;
-    }
-    if (regOwnerPin.length !== 6) {
-      setRegError('Setting a 6-digit Owner PIN is required.');
-      return;
-    }
-    if (regStaffPin && regStaffPin.length !== 6) {
-      setRegError('Staff PIN must also be 6 digits (or left blank).');
       return;
     }
 
@@ -1495,7 +1539,7 @@ export default function HomePage() {
           </h1>
 
           <p className="text-sm sm:text-base text-slate-600 mt-4 max-w-2xl mx-auto leading-relaxed">
-            Sign in with your Email or Mobile Number &amp; Password/PIN, or sign up in minutes to
+            Sign in with your Email or Mobile Number &amp; Password, or sign up in minutes to
             manage Table Orders, QR Menus, and Live Kitchen Display in real time.
           </p>
 
@@ -1605,7 +1649,7 @@ export default function HomePage() {
                 Register &amp; Configure Tables
               </h3>
               <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                Create your restaurant account, set your login credentials &amp; PINs, and enter
+                Create your restaurant account, set your login credentials &amp; passwords, and enter
                 your table count.
               </p>
             </div>
@@ -1856,7 +1900,7 @@ export default function HomePage() {
               </div>
               <h3 className="font-extrabold text-slate-900 text-sm">Multi-Outlet Brands</h3>
               <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                Centralized owner oversight across branches with individual branch &amp; staff PINs.
+                Centralized owner oversight across branches with individual branch passwords.
               </p>
             </div>
           </div>
@@ -1948,7 +1992,7 @@ export default function HomePage() {
         </div>
       </footer>
 
-      {/* Account Login Modal (Direct Fields + Top-Left "Login as Super Admin" & Top-Right Toggle) */}
+      {/* Account Login Modal (Direct Fields + Top-Left "Login as Super Admin" & Top-Right Toggle + Branch Picker Fallback) */}
       {showLoginLookupModal && (
         <div
           onClick={() => !loggingInDirect && setShowLoginLookupModal(false)}
@@ -1967,7 +2011,6 @@ export default function HomePage() {
               <X className="w-5 h-5" />
             </button>
 
-            {/* Top Row inside Login Form: Left "Login as Super Admin" + Right Toggle */}
             <div className="flex items-center justify-between gap-2 pr-8 mb-3 text-left">
               <div className="flex items-center gap-1.5 min-w-0">
                 <ShieldCheck
@@ -1987,6 +2030,7 @@ export default function HomePage() {
                 disabled={loggingInDirect}
                 onClick={() => {
                   setIsSuperAdminLoginToggle((prev) => !prev);
+                  setCandidateOutletsForPicker([]);
                   setLoginLookupError('');
                   setLoginMatchedLifetime(false);
                   setLoginAccountPassword('');
@@ -2018,105 +2062,153 @@ export default function HomePage() {
             </div>
 
             <h3 className="text-lg font-extrabold text-slate-900">
-              {isSuperAdminLoginToggle ? 'Super Admin Login' : 'Account Login'}
+              {candidateOutletsForPicker.length > 0
+                ? 'Select Outlet'
+                : isSuperAdminLoginToggle
+                ? 'Super Admin Login'
+                : 'Account Login'}
             </h3>
             <p className="text-xs text-slate-500 mt-1">
-              Enter your registered Email or Mobile Number and Password/PIN to sign in.
+              {candidateOutletsForPicker.length > 0
+                ? 'Multiple outlets matched this password. Choose which outlet to open:'
+                : 'Enter your registered Email or Mobile Number and Password to sign in.'}
             </p>
 
-            <form
-              onSubmit={handleLoginLookupSubmit}
-              autoComplete="off"
-              className="mt-5 space-y-3.5 text-left"
-            >
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Email or Mobile Number *
-                </label>
-                <div className="relative">
-                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    autoFocus
-                    required
-                    value={loginLookupId}
-                    onChange={(e) => {
-                      setLoginLookupId(e.target.value);
-                      setLoginLookupError('');
+            {candidateOutletsForPicker.length > 0 ? (
+              <div className="mt-5 space-y-2.5 text-left">
+                {candidateOutletsForPicker.map((out) => (
+                  <button
+                    key={out.id}
+                    type="button"
+                    disabled={loggingInDirect}
+                    onClick={() => {
+                      setLoggingInDirect(true);
+                      finalizeBranchLoginForOutlet(
+                        out,
+                        loginAccountPassword.trim()
+                      );
                     }}
-                    placeholder="e.g. owner@restro.com or 98XXXXXXXX"
-                    className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
-                  />
+                    className="w-full p-3.5 rounded-2xl border-2 border-slate-200 hover:border-orange-500 hover:bg-orange-50/50 transition flex items-center justify-between gap-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-extrabold text-sm text-slate-900 truncate">
+                        {formatRestaurantDisplayName(out)}
+                      </p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        {out.city} • {out.total_tables} Tables
+                      </p>
+                    </div>
+                    <ArrowRight className="w-4 h-4 text-orange-600 shrink-0" />
+                  </button>
+                ))}
+
+                <div className="text-center pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setCandidateOutletsForPicker([])}
+                    className="text-xs font-bold text-slate-500 hover:text-slate-800 transition"
+                  >
+                    &larr; Back to Credentials
+                  </button>
                 </div>
               </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Password / PIN *
-                </label>
-                <div className="relative">
-                  <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="password"
-                    required
-                    autoComplete="current-password"
-                    value={loginAccountPassword}
-                    onChange={(e) => {
-                      setLoginAccountPassword(e.target.value);
-                      setLoginLookupError('');
-                    }}
-                    placeholder="Enter your password or PIN"
-                    className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
-                  />
-                </div>
-              </div>
-
-              {loginLookupError && (
-                <div className="text-xs font-bold text-red-600 bg-red-50 py-2.5 px-3 rounded-xl space-y-2 text-center">
-                  <p>{loginLookupError}</p>
-                  {isSuperAdminLoginToggle && !loginMatchedLifetime && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowLoginLookupModal(false);
-                        setPricingTab('multiple');
-                        document
-                          .getElementById('pricing')
-                          ?.scrollIntoView({ behavior: 'smooth' });
-                      }}
-                      className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-2 rounded-xl text-xs transition"
-                    >
-                      Pay / Upgrade Plan Now →
-                    </button>
-                  )}
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={loggingInDirect}
-                className={`w-full disabled:opacity-50 text-white font-extrabold py-3.5 rounded-2xl text-sm shadow-md transition ${
-                  isSuperAdminLoginToggle
-                    ? 'bg-slate-900 hover:bg-slate-800'
-                    : 'bg-orange-600 hover:bg-orange-700'
-                }`}
+            ) : (
+              <form
+                onSubmit={handleLoginLookupSubmit}
+                autoComplete="off"
+                className="mt-5 space-y-3.5 text-left"
               >
-                {loggingInDirect ? 'Signing In...' : 'Login to Dashboard →'}
-              </button>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Email or Mobile Number *
+                  </label>
+                  <div className="relative">
+                    <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      autoFocus
+                      required
+                      value={loginLookupId}
+                      onChange={(e) => {
+                        setLoginLookupId(e.target.value);
+                        setLoginLookupError('');
+                      }}
+                      placeholder="e.g. owner@restro.com or 98XXXXXXXX"
+                      className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
+                    />
+                  </div>
+                </div>
 
-              <div className="text-center pt-1">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    {isSuperAdminLoginToggle
+                      ? 'Master or Branch Password *'
+                      : 'Password *'}
+                  </label>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="password"
+                      required
+                      autoComplete="current-password"
+                      value={loginAccountPassword}
+                      onChange={(e) => {
+                        setLoginAccountPassword(e.target.value);
+                        setLoginLookupError('');
+                      }}
+                      placeholder="Enter your password"
+                      className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
+                    />
+                  </div>
+                </div>
+
+                {loginLookupError && (
+                  <div className="text-xs font-bold text-red-600 bg-red-50 py-2.5 px-3 rounded-xl space-y-2 text-center">
+                    <p>{loginLookupError}</p>
+                    {isSuperAdminLoginToggle && !loginMatchedLifetime && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowLoginLookupModal(false);
+                          setPricingTab('multiple');
+                          document
+                            .getElementById('pricing')
+                            ?.scrollIntoView({ behavior: 'smooth' });
+                        }}
+                        className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-2 rounded-xl text-xs transition"
+                      >
+                        Pay / Upgrade Plan Now →
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 <button
-                  type="button"
-                  onClick={() => {
-                    setShowLoginLookupModal(false);
-                    handleOpenRegisterModal('7-Day Trial', 'single', '1_month', 599, true);
-                  }}
-                  className="text-xs font-bold text-slate-500 hover:text-orange-600 transition"
+                  type="submit"
+                  disabled={loggingInDirect}
+                  className={`w-full disabled:opacity-50 text-white font-extrabold py-3.5 rounded-2xl text-sm shadow-md transition ${
+                    isSuperAdminLoginToggle
+                      ? 'bg-slate-900 hover:bg-slate-800'
+                      : 'bg-orange-600 hover:bg-orange-700'
+                  }`}
                 >
-                  New here? Sign Up for Free Trial &rarr;
+                  {loggingInDirect ? 'Signing In...' : 'Login to Dashboard →'}
                 </button>
-              </div>
-            </form>
+
+                <div className="text-center pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowLoginLookupModal(false);
+                      handleOpenRegisterModal('7-Day Trial', 'single', '1_month', 599, true);
+                    }}
+                    className="text-xs font-bold text-slate-500 hover:text-orange-600 transition"
+                  >
+                    New here? Sign Up for Free Trial &rarr;
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}
@@ -2401,57 +2493,6 @@ export default function HomePage() {
                   </div>
                 </div>
 
-                <div className="pt-1 border-t border-slate-100 space-y-3">
-                  <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
-                    POS &amp; Kitchen Access PINs
-                  </p>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Branch PIN (6-Digit) *
-                      </label>
-                      <div className="relative">
-                        <KeyRound className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                        <input
-                          type="password"
-                          inputMode="numeric"
-                          maxLength={6}
-                          required
-                          autoComplete="new-password"
-                          value={regOwnerPin}
-                          onChange={(e) =>
-                            setRegOwnerPin(e.target.value.replace(/\D/g, '').slice(0, 6))
-                          }
-                          placeholder="••••••"
-                          className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm font-bold tracking-widest outline-none transition"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Kitchen Staff PIN (Optional)
-                      </label>
-                      <div className="relative">
-                        <KeyRound className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                        <input
-                          type="password"
-                          inputMode="numeric"
-                          maxLength={6}
-                          autoComplete="new-password"
-                          value={regStaffPin}
-                          onChange={(e) =>
-                            setRegStaffPin(e.target.value.replace(/\D/g, '').slice(0, 6))
-                          }
-                          placeholder="••••••"
-                          className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm font-bold tracking-widest outline-none transition"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
                 {isPaidPlanSelected && (
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 flex items-center justify-between gap-2 text-xs">
                     <div className="min-w-0">
@@ -2546,7 +2587,7 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* PIN / Master Password / Forgot PIN Modal */}
+      {/* Legacy PIN / Master Password / Forgot PIN Modal */}
       {selectedRestaurant && (
         <div
           onClick={handleClosePinModal}

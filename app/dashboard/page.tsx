@@ -56,6 +56,8 @@ import {
   Store,
   Filter,
   RotateCcw,
+  Settings,
+  Save,
 } from "lucide-react";
 
 interface SessionData {
@@ -77,8 +79,18 @@ interface OutletMeta {
   total_tables?: number;
   outlet_mode?: string | null;
   outlet_label?: string | null;
-  owner_pin?: string | null;
-  staff_pin?: string | null;
+  login_password?: string | null;
+  master_password?: string | null;
+  email?: string | null;
+  owner_phone?: string | null;
+}
+
+interface EditableOutletProfile {
+  id: string;
+  outlet_label: string;
+  city: string;
+  total_tables: number;
+  login_password: string;
 }
 
 interface SubscriptionInfo {
@@ -142,6 +154,7 @@ interface UpgradePlanOption {
 }
 
 const ADMIN_WHATSAPP = "919079083101";
+const MASTER_PASS_STORAGE_KEY = "restro_master_sales_password";
 const MALIK_VAULT_UNLOCKED_KEY = "restro_malik_vault_unlocked";
 
 const SINGLE_UPGRADE_PLANS: UpgradePlanOption[] = [
@@ -284,7 +297,7 @@ export default function DashboardPage() {
 
   // Malik (Super Owner) Mode
   const [isMalikMode, setIsMalikMode] = useState(false);
-  const [showOutletPins, setShowOutletPins] = useState(false);
+  const [showOutletPasswords, setShowOutletPasswords] = useState(false);
   const [malikReportFilter, setMalikReportFilter] = useState<
     "today" | "7days" | "all" | "custom"
   >("today");
@@ -293,6 +306,17 @@ export default function DashboardPage() {
   const [selectedOutletDropdown, setSelectedOutletDropdown] =
     useState<string>("all");
   const [malikBillSearch, setMalikBillSearch] = useState<string>("");
+
+  // Super Admin Settings Modal States
+  const [showMalikSettingsModal, setShowMalikSettingsModal] = useState(false);
+  const [settingsBrandName, setSettingsBrandName] = useState("");
+  const [settingsMasterPassword, setSettingsMasterPassword] = useState("");
+  const [editableOutlets, setEditableOutlets] = useState<
+    EditableOutletProfile[]
+  >([]);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsError, setSettingsError] = useState("");
+  const [settingsSuccess, setSettingsSuccess] = useState("");
 
   // Deleted Outlets Archive State
   const [archivedOutlets, setArchivedOutlets] = useState<
@@ -306,13 +330,12 @@ export default function DashboardPage() {
     null,
   );
 
-  // Add Linked Outlet Modal (Malik-only)
+  // Add Linked Outlet Modal (Malik-only, Password-based)
   const [showAddOutletModal, setShowAddOutletModal] = useState(false);
   const [newOutletLabel, setNewOutletLabel] = useState("");
   const [newOutletCity, setNewOutletCity] = useState("");
   const [newOutletTables, setNewOutletTables] = useState<number>(10);
-  const [newOutletOwnerPin, setNewOutletOwnerPin] = useState("");
-  const [newOutletStaffPin, setNewOutletStaffPin] = useState("");
+  const [newOutletPassword, setNewOutletPassword] = useState("");
   const [addingOutlet, setAddingOutlet] = useState(false);
   const [addOutletError, setAddOutletError] = useState("");
 
@@ -447,6 +470,7 @@ export default function DashboardPage() {
     const anyModalOpen =
       showSalesModal ||
       showUpgradeModal ||
+      showMalikSettingsModal ||
       showAddOutletModal ||
       outletToRemove !== null ||
       showDeletedOutletsModal ||
@@ -471,6 +495,7 @@ export default function DashboardPage() {
   }, [
     showSalesModal,
     showUpgradeModal,
+    showMalikSettingsModal,
     showAddOutletModal,
     outletToRemove,
     showDeletedOutletsModal,
@@ -583,7 +608,7 @@ export default function DashboardPage() {
       supabase
         .from("restaurants")
         .select(
-          "id, name, city, total_tables, owner_phone, outlet_mode, outlet_label, owner_pin, staff_pin, subscription_status, plan_type, selected_plan, trial_ends_at, razorpay_key_id, razorpay_key_secret, upi_id, bank_account_name",
+          "id, name, city, total_tables, owner_phone, outlet_mode, outlet_label, login_password, master_password, subscription_status, plan_type, selected_plan, trial_ends_at, razorpay_key_id, razorpay_key_secret, upi_id, bank_account_name",
         )
         .eq("id", session.restaurantId)
         .single(),
@@ -706,7 +731,7 @@ export default function DashboardPage() {
       const { data: siblingOutlets } = await supabase
         .from("restaurants")
         .select(
-          "id, name, city, total_tables, outlet_mode, outlet_label, owner_pin, staff_pin",
+          "id, name, city, total_tables, outlet_mode, outlet_label, login_password, master_password, email, owner_phone",
         )
         .eq("owner_phone", resolvedOwnerPhone);
 
@@ -793,6 +818,149 @@ export default function DashboardPage() {
   const isAtOutletLimit =
     maxAllowedOutlets !== null && currentOutletCount >= maxAllowedOutlets;
 
+  // Open Super Admin Settings Modal
+  const handleOpenMalikSettingsModal = () => {
+    if (!session) return;
+    const brand =
+      session.brandName ||
+      ownerOutlets[0]?.name ||
+      session.restaurantName.split(" — ")[0];
+    const currentMaster =
+      ownerOutlets.find((o) => o.master_password)?.master_password ||
+      (typeof window !== "undefined"
+        ? localStorage.getItem(MASTER_PASS_STORAGE_KEY) || ""
+        : "");
+
+    setSettingsBrandName(brand);
+    setSettingsMasterPassword(currentMaster);
+    setEditableOutlets(
+      (ownerOutlets.length > 0
+        ? ownerOutlets
+        : [
+            {
+              id: session.restaurantId,
+              name: brand,
+              city: session.city,
+              total_tables: session.totalTables,
+              outlet_label: session.outletLabel,
+              login_password: "",
+            },
+          ]
+      ).map((out) => ({
+        id: out.id,
+        outlet_label: out.outlet_label || out.name,
+        city: out.city || session.city,
+        total_tables: Number(out.total_tables || 10),
+        login_password: out.login_password || "",
+      })),
+    );
+    setSettingsError("");
+    setSettingsSuccess("");
+    setShowMalikSettingsModal(true);
+  };
+
+  const handleSaveMalikSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!session || savingSettings) return;
+
+    setSettingsError("");
+    setSettingsSuccess("");
+
+    const cleanBrand = settingsBrandName.trim();
+    const cleanMaster = settingsMasterPassword.trim();
+
+    if (!cleanBrand) {
+      setSettingsError("Brand / Restaurant Name is required.");
+      return;
+    }
+    if (cleanMaster.length < 4) {
+      setSettingsError("Master Password must be at least 4 characters.");
+      return;
+    }
+
+    for (const out of editableOutlets) {
+      if (!out.outlet_label.trim()) {
+        setSettingsError("Every outlet must have a branch/outlet name.");
+        return;
+      }
+      if (!out.city.trim()) {
+        setSettingsError("City is required for every outlet.");
+        return;
+      }
+      if (out.login_password.trim().length < 4) {
+        setSettingsError(
+          `Branch password for "${out.outlet_label.trim()}" must be at least 4 characters.`,
+        );
+        return;
+      }
+    }
+
+    setSavingSettings(true);
+
+    const outletIds = editableOutlets.map((o) => o.id);
+    if (outletIds.length > 0) {
+      await supabase
+        .from("restaurants")
+        .update({
+          name: cleanBrand,
+          master_password: cleanMaster,
+        })
+        .in("id", outletIds);
+    }
+
+    for (const out of editableOutlets) {
+      await supabase
+        .from("restaurants")
+        .update({
+          name: cleanBrand,
+          outlet_label: out.outlet_label.trim(),
+          city: out.city.trim(),
+          total_tables: out.total_tables > 0 ? out.total_tables : 10,
+          login_password: out.login_password.trim(),
+          master_password: cleanMaster,
+        })
+        .eq("id", out.id);
+    }
+
+    if (typeof window !== "undefined") {
+      localStorage.setItem(MASTER_PASS_STORAGE_KEY, cleanMaster);
+    }
+
+    const currentEdited =
+      editableOutlets.find((o) => o.id === session.restaurantId) ||
+      editableOutlets[0];
+
+    if (currentEdited) {
+      const updatedDisplayName =
+        session.outletMode === "multiple" && currentEdited.outlet_label.trim()
+          ? `${cleanBrand} — ${currentEdited.outlet_label.trim()}`
+          : cleanBrand;
+
+      const nextSession: SessionData = {
+        ...session,
+        brandName: cleanBrand,
+        restaurantName: updatedDisplayName,
+        outletLabel: currentEdited.outlet_label.trim(),
+        city: currentEdited.city.trim(),
+        totalTables:
+          currentEdited.total_tables > 0 ? currentEdited.total_tables : 10,
+      };
+      setSession(nextSession);
+      setActualTablesCount(nextSession.totalTables);
+      localStorage.setItem("restro_session", JSON.stringify(nextSession));
+    }
+
+    setSavingSettings(false);
+    setSettingsSuccess(
+      "Brand profile, Master Password, and all Branch Passwords updated!",
+    );
+    fetchDashboardData();
+    setTimeout(() => {
+      setSettingsSuccess("");
+      setShowMalikSettingsModal(false);
+    }, 1200);
+  };
+
   const handleOpenAddOutletModal = () => {
     if (!session) return;
     if (isAtOutletLimit) {
@@ -813,8 +981,7 @@ export default function DashboardPage() {
     setNewOutletLabel("");
     setNewOutletCity(session.city || "");
     setNewOutletTables(10);
-    setNewOutletOwnerPin("");
-    setNewOutletStaffPin("");
+    setNewOutletPassword("");
     setAddOutletError("");
     setShowAddOutletModal(true);
   };
@@ -833,7 +1000,16 @@ export default function DashboardPage() {
 
     const cleanLabel = newOutletLabel.trim();
     const cleanCity = newOutletCity.trim();
+    const cleanBranchPass = newOutletPassword.trim();
     const cleanPhone = (session.ownerPhone || "").replace(/\D/g, "");
+    const primaryOutlet = ownerOutlets[0];
+    const cleanEmail = (primaryOutlet?.email || "").trim().toLowerCase() || null;
+    const cleanMaster =
+      primaryOutlet?.master_password ||
+      (typeof window !== "undefined"
+        ? localStorage.getItem(MASTER_PASS_STORAGE_KEY)
+        : null) ||
+      null;
 
     if (!cleanLabel) {
       setAddOutletError("Please enter an Outlet / Branch Name.");
@@ -843,18 +1019,16 @@ export default function DashboardPage() {
       setAddOutletError("City is required.");
       return;
     }
-    if (cleanPhone.length !== 10) {
+    if (cleanBranchPass.length < 4) {
       setAddOutletError(
-        "Registered owner phone missing. Please re-login from home.",
+        "Please set a Branch Manager Password (minimum 4 characters).",
       );
       return;
     }
-    if (newOutletOwnerPin.length !== 6) {
-      setAddOutletError("Enter a 6-digit Branch PIN for this outlet.");
-      return;
-    }
-    if (newOutletStaffPin && newOutletStaffPin.length !== 6) {
-      setAddOutletError("Staff PIN must be 6 digits (or left blank).");
+    if (cleanPhone.length !== 10 && !cleanEmail) {
+      setAddOutletError(
+        "Registered owner contact missing. Please re-login from home.",
+      );
       return;
     }
 
@@ -870,11 +1044,12 @@ export default function DashboardPage() {
         {
           name: brandName,
           city: cleanCity,
-          phone: cleanPhone,
-          owner_phone: cleanPhone,
+          phone: cleanPhone || null,
+          owner_phone: cleanPhone || null,
+          email: cleanEmail,
+          login_password: cleanBranchPass,
+          master_password: cleanMaster,
           total_tables: tablesVal,
-          owner_pin: newOutletOwnerPin,
-          staff_pin: newOutletStaffPin || null,
           outlet_mode: "multiple",
           outlet_label: cleanLabel,
           subscription_status: subInfo.status,
@@ -894,7 +1069,7 @@ export default function DashboardPage() {
 
     setShowAddOutletModal(false);
     setUpgradeSuccessBanner(
-      `New outlet "${brandName} — ${cleanLabel}" added under your owner account!`,
+      `New outlet "${brandName} — ${cleanLabel}" added with its own branch password!`,
     );
     setTimeout(() => setUpgradeSuccessBanner(null), 6000);
     fetchDashboardData();
@@ -1020,9 +1195,10 @@ export default function DashboardPage() {
           city: record.outlet.city || session.city,
           phone: cleanPhone || null,
           owner_phone: cleanPhone || null,
+          email: record.outlet.email || null,
+          login_password: record.outlet.login_password || null,
+          master_password: record.outlet.master_password || null,
           total_tables: record.outlet.total_tables || 10,
-          owner_pin: record.outlet.owner_pin || "123456",
-          staff_pin: record.outlet.staff_pin || null,
           outlet_mode: record.outlet.outlet_mode || "multiple",
           outlet_label: record.outlet.outlet_label || null,
           subscription_status: subInfo.status,
@@ -1897,10 +2073,10 @@ export default function DashboardPage() {
                 >
                   <ShieldCheck className="w-3 h-3" />{" "}
                   {isMalikMode
-                    ? `Super Admin • ${multiCaps.tierName}`
+                    ? `Malik • ${multiCaps.tierName}`
                     : isMultiOutletMode
                       ? "Branch Manager"
-                      : "Branch Manager"}
+                      : "Owner"}
                 </span>
               </div>
               <p className="text-xs text-slate-500 truncate">
@@ -1963,6 +2139,15 @@ export default function DashboardPage() {
                     <span>Upgrade Plan</span>
                   </button>
                 )}
+
+                <button
+                  type="button"
+                  onClick={handleOpenMalikSettingsModal}
+                  className="bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition"
+                >
+                  <Settings className="w-4 h-4 text-slate-700 shrink-0" />
+                  <span>Settings</span>
+                </button>
 
                 <button
                   type="button"
@@ -2349,18 +2534,18 @@ export default function DashboardPage() {
                   <div className="flex items-center gap-2 flex-wrap shrink-0">
                     <button
                       type="button"
-                      onClick={() => setShowOutletPins((prev) => !prev)}
+                      onClick={() => setShowOutletPasswords((prev) => !prev)}
                       className="bg-slate-100 hover:bg-slate-200 text-slate-800 px-3 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition"
                     >
-                      {showOutletPins ? (
+                      {showOutletPasswords ? (
                         <>
                           <EyeOff className="w-3.5 h-3.5" />
-                          <span>Hide PINs</span>
+                          <span>Hide Password</span>
                         </>
                       ) : (
                         <>
                           <Eye className="w-3.5 h-3.5" />
-                          <span>Show PINs</span>
+                          <span>Show Password</span>
                         </>
                       )}
                     </button>
@@ -2385,16 +2570,10 @@ export default function DashboardPage() {
 
                 <div className="flex flex-wrap items-center gap-2 text-xs font-mono bg-slate-50 border border-slate-200 rounded-2xl p-3">
                   <span className="bg-white border border-slate-200 text-slate-800 px-3 py-1 rounded-lg font-bold">
-                    Branch PIN:{" "}
-                    {showOutletPins
-                      ? selectedOutletMeta.owner_pin || "—"
-                      : "••••••"}
-                  </span>
-                  <span className="bg-white border border-slate-200 text-slate-800 px-3 py-1 rounded-lg font-bold">
-                    Staff PIN:{" "}
-                    {showOutletPins
-                      ? selectedOutletMeta.staff_pin || "None"
-                      : "••••••"}
+                    Branch Password:{" "}
+                    {showOutletPasswords
+                      ? selectedOutletMeta.login_password || "Not Set"
+                      : "••••••••"}
                   </span>
                 </div>
 
@@ -2533,18 +2712,18 @@ export default function DashboardPage() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <button
                       type="button"
-                      onClick={() => setShowOutletPins((prev) => !prev)}
+                      onClick={() => setShowOutletPasswords((prev) => !prev)}
                       className="bg-slate-100 hover:bg-slate-200 text-slate-800 px-3 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition"
                     >
-                      {showOutletPins ? (
+                      {showOutletPasswords ? (
                         <>
                           <EyeOff className="w-3.5 h-3.5" />
-                          <span>Hide PINs</span>
+                          <span>Hide Password</span>
                         </>
                       ) : (
                         <>
                           <Eye className="w-3.5 h-3.5" />
-                          <span>Show PINs</span>
+                          <span>Show Password</span>
                         </>
                       )}
                     </button>
@@ -2659,18 +2838,12 @@ export default function DashboardPage() {
                         </div>
 
                         <div className="flex items-center justify-between gap-2 text-[11px] font-mono pt-1 flex-wrap">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="bg-white border border-slate-200 text-slate-700 px-2.5 py-1 rounded-lg font-bold">
-                              Branch PIN:{" "}
-                              {showOutletPins ? out.owner_pin || "—" : "••••••"}
-                            </span>
-                            <span className="bg-white border border-slate-200 text-slate-700 px-2.5 py-1 rounded-lg font-bold">
-                              Staff PIN:{" "}
-                              {showOutletPins
-                                ? out.staff_pin || "None"
-                                : "••••••"}
-                            </span>
-                          </div>
+                          <span className="bg-white border border-slate-200 text-slate-700 px-2.5 py-1 rounded-lg font-bold">
+                            Branch Pass:{" "}
+                            {showOutletPasswords
+                              ? out.login_password || "Not Set"
+                              : "••••••••"}
+                          </span>
                           <span className="font-sans text-[11px] font-extrabold text-orange-600 shrink-0">
                             {multiCaps.canInspectOutletCustomers
                               ? "Details →"
@@ -3134,6 +3307,224 @@ export default function DashboardPage() {
         )}
       </main>
 
+      {/* Malik-Only Settings Modal (Brand, Master Password & Outlet Profiles/Passwords) */}
+      {isMalikMode && showMalikSettingsModal && (
+        <div
+          onClick={() => !savingSettings && setShowMalikSettingsModal(false)}
+          className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-[1028] overscroll-none touch-none"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-3xl max-w-2xl w-full p-5 sm:p-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto overscroll-contain touch-pan-y"
+          >
+            <div className="flex items-center justify-between pb-3.5 border-b border-slate-200">
+              <div>
+                <h3 className="text-base sm:text-lg font-extrabold text-slate-900 flex items-center gap-2">
+                  <Settings className="w-5 h-5 text-orange-600" /> Super Admin
+                  Settings
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Manage brand profile, Master Password, and each outlet&apos;s
+                  login password
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={savingSettings}
+                onClick={() => setShowMalikSettingsModal(false)}
+                className="p-2 rounded-full hover:bg-slate-100 text-slate-500"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={handleSaveMalikSettings}
+              className="pt-4 space-y-5"
+            >
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3.5">
+                <p className="text-xs font-extrabold uppercase tracking-wider text-slate-600">
+                  Brand &amp; Master Security
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Restaurant / Brand Name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={settingsBrandName}
+                      onChange={(e) => setSettingsBrandName(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-white border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Super Admin Master Password (Min 4 Chars) *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      minLength={4}
+                      value={settingsMasterPassword}
+                      onChange={(e) => setSettingsMasterPassword(e.target.value)}
+                      placeholder="Enter master password"
+                      className="w-full px-3.5 py-2.5 bg-white border border-slate-200 focus:border-orange-500 rounded-xl text-sm font-mono font-bold outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-xs font-extrabold uppercase tracking-wider text-slate-600">
+                  Outlet Profiles &amp; Branch Passwords ({editableOutlets.length})
+                </p>
+
+                <div className="space-y-3">
+                  {editableOutlets.map((out, index) => (
+                    <div
+                      key={out.id}
+                      className="bg-white border-2 border-slate-200 rounded-2xl p-3.5 space-y-3"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-extrabold text-slate-900">
+                          Outlet #{index + 1}
+                        </span>
+                        <span className="text-[11px] font-mono text-slate-400">
+                          ID: {out.id.slice(0, 8)}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                            Branch / Outlet Name *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={out.outlet_label}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setEditableOutlets((prev) =>
+                                prev.map((item) =>
+                                  item.id === out.id
+                                    ? { ...item, outlet_label: val }
+                                    : item,
+                                ),
+                              );
+                            }}
+                            className="w-full px-3 py-2 border border-slate-200 focus:border-orange-500 rounded-xl text-xs font-semibold outline-none"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                            City *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={out.city}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setEditableOutlets((prev) =>
+                                prev.map((item) =>
+                                  item.id === out.id
+                                    ? { ...item, city: val }
+                                    : item,
+                                ),
+                              );
+                            }}
+                            className="w-full px-3 py-2 border border-slate-200 focus:border-orange-500 rounded-xl text-xs font-semibold outline-none"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                            Tables *
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={100}
+                            required
+                            value={out.total_tables || ""}
+                            onChange={(e) => {
+                              const num = parseInt(e.target.value, 10) || 0;
+                              setEditableOutlets((prev) =>
+                                prev.map((item) =>
+                                  item.id === out.id
+                                    ? { ...item, total_tables: num }
+                                    : item,
+                                ),
+                              );
+                            }}
+                            className="w-full px-3 py-2 border border-slate-200 focus:border-orange-500 rounded-xl text-xs font-semibold outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                          Branch Manager Password (Min 4 Chars) *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          minLength={4}
+                          value={out.login_password}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setEditableOutlets((prev) =>
+                              prev.map((item) =>
+                                item.id === out.id
+                                  ? { ...item, login_password: val }
+                                  : item,
+                              ),
+                            );
+                          }}
+                          placeholder="Set branch login password"
+                          className="w-full px-3 py-2 bg-orange-50/40 focus:bg-white border border-orange-300 focus:border-orange-500 rounded-xl text-xs font-mono font-bold outline-none"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {settingsError && (
+                <p className="text-xs font-bold text-red-600 bg-red-50 py-2.5 px-3 rounded-xl text-center">
+                  {settingsError}
+                </p>
+              )}
+
+              {settingsSuccess && (
+                <p className="text-xs font-bold text-emerald-700 bg-emerald-50 py-2.5 px-3 rounded-xl text-center">
+                  {settingsSuccess}
+                </p>
+              )}
+
+              <button
+                type="submit"
+                disabled={savingSettings}
+                className="w-full bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-extrabold py-3 rounded-xl text-xs shadow-sm flex items-center justify-center gap-1.5 transition"
+              >
+                <Save className="w-4 h-4 text-amber-400" />
+                <span>
+                  {savingSettings
+                    ? "Saving Settings..."
+                    : "Save All Changes ✓"}
+                </span>
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Malik-Only Deleted Outlets Archive Modal (6 Months+ Archive, Yearly+ Restore) */}
       {isMalikMode &&
         showDeletedOutletsModal &&
@@ -3395,7 +3786,7 @@ export default function DashboardPage() {
           );
         })()}
 
-      {/* Malik-Only Add Outlet Modal */}
+      {/* Malik-Only Add Outlet Modal (Password-Based) */}
       {isMalikMode && showAddOutletModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-[1020] overscroll-none touch-none">
           <div className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto overscroll-contain touch-pan-y">
@@ -3452,65 +3843,38 @@ export default function DashboardPage() {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Number of Tables *
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  max={100}
-                  required
-                  value={newOutletTables || ""}
-                  onChange={(e) =>
-                    setNewOutletTables(parseInt(e.target.value, 10) || 0)
-                  }
-                  className="w-full px-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Branch PIN (6-Digit) *
+                    Number of Tables *
                   </label>
-                  <div className="relative">
-                    <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="password"
-                      inputMode="numeric"
-                      maxLength={6}
-                      required
-                      value={newOutletOwnerPin}
-                      onChange={(e) =>
-                        setNewOutletOwnerPin(
-                          e.target.value.replace(/\D/g, "").slice(0, 6),
-                        )
-                      }
-                      placeholder="••••••"
-                      className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm font-bold tracking-widest outline-none"
-                    />
-                  </div>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    required
+                    value={newOutletTables || ""}
+                    onChange={(e) =>
+                      setNewOutletTables(parseInt(e.target.value, 10) || 0)
+                    }
+                    className="w-full px-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none"
+                  />
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Staff PIN (Optional)
+                    Branch Password (Min 4 Chars) *
                   </label>
                   <div className="relative">
                     <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
                       type="password"
-                      inputMode="numeric"
-                      maxLength={6}
-                      value={newOutletStaffPin}
-                      onChange={(e) =>
-                        setNewOutletStaffPin(
-                          e.target.value.replace(/\D/g, "").slice(0, 6),
-                        )
-                      }
-                      placeholder="••••••"
-                      className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm font-bold tracking-widest outline-none"
+                      minLength={4}
+                      required
+                      value={newOutletPassword}
+                      onChange={(e) => setNewOutletPassword(e.target.value)}
+                      placeholder="Set branch password"
+                      className="w-full pl-9 pr-3 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm font-semibold outline-none"
                     />
                   </div>
                 </div>
