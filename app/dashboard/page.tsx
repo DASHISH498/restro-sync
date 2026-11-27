@@ -1900,7 +1900,7 @@ export default function DashboardPage() {
                     ? `Super Admin• ${multiCaps.tierName}`
                     : isMultiOutletMode
                       ? "Branch Manager"
-                      : "Owner"}
+                      : "Multiple Outlet Branch Manager"}
                 </span>
               </div>
               <p className="text-xs text-slate-500 truncate">
