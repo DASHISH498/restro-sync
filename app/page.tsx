@@ -118,6 +118,21 @@ function isLifetimePlanRecord(rest: Restaurant | null): boolean {
   );
 }
 
+function isMultiOutletAccount(rest: Restaurant): boolean {
+  if (rest.outlet_mode === 'multiple') return true;
+  const planType = (rest.plan_type || '').toLowerCase();
+  const selectedPlan = (rest.selected_plan || '').toLowerCase();
+  return (
+    planType.startsWith('multi_') ||
+    selectedPlan.includes('multiple') ||
+    selectedPlan.includes('up to 2 outlets') ||
+    selectedPlan.includes('up to 5 outlets') ||
+    selectedPlan.includes('up to 8 outlets') ||
+    selectedPlan.includes('up to 15 outlets') ||
+    selectedPlan.includes('unlimited outlets')
+  );
+}
+
 function readLocalPasswordMap(): Record<string, string> {
   if (typeof window === 'undefined') return {};
   try {
@@ -364,11 +379,13 @@ export default function HomePage() {
     planLabel: '1 Month (₹1,115)',
   });
 
-  // Login Modal States (Email or Mobile + Password/PIN directly inside)
+  // Login Modal States (with top "Login as Super Admin" toggle)
   const [showLoginLookupModal, setShowLoginLookupModal] = useState(false);
+  const [isSuperAdminLoginToggle, setIsSuperAdminLoginToggle] = useState(false);
   const [loginLookupId, setLoginLookupId] = useState('');
   const [loginAccountPassword, setLoginAccountPassword] = useState('');
   const [loginLookupError, setLoginLookupError] = useState('');
+  const [loginMatchedLifetime, setLoginMatchedLifetime] = useState(false);
   const [loggingInDirect, setLoggingInDirect] = useState(false);
 
   const [selectedRestaurant, setSelectedRestaurant] = useState<Restaurant | null>(null);
@@ -462,6 +479,7 @@ export default function HomePage() {
   useEffect(() => {
     setSelectedRestaurant(null);
     setShowLoginLookupModal(false);
+    setIsSuperAdminLoginToggle(false);
     setPin('');
     setVerifying(false);
     setErrorMsg('');
@@ -665,9 +683,11 @@ export default function HomePage() {
   };
 
   const handleOpenLoginModal = () => {
+    setIsSuperAdminLoginToggle(false);
     setLoginLookupId('');
     setLoginAccountPassword('');
     setLoginLookupError('');
+    setLoginMatchedLifetime(false);
     setLoggingInDirect(false);
     setShowLoginLookupModal(true);
   };
@@ -680,22 +700,34 @@ export default function HomePage() {
     const enteredSecret = loginAccountPassword.trim();
 
     if (!rawInput) {
-      setLoginLookupError('Enter your registered Email or 10-digit Mobile Number.');
+      setLoginLookupError(
+        isSuperAdminLoginToggle
+          ? 'Enter your registered Owner Mobile Number or Email.'
+          : 'Enter your registered Email or 10-digit Mobile Number.'
+      );
       return;
     }
     if (!enteredSecret) {
-      setLoginLookupError('Enter your Password or 6-digit PIN.');
+      setLoginLookupError(
+        isSuperAdminLoginToggle
+          ? 'Enter your Super Admin Master Password (min 4 chars).'
+          : 'Enter your Password or 6-digit PIN.'
+      );
+      return;
+    }
+    if (isSuperAdminLoginToggle && enteredSecret.length < 4) {
+      setLoginLookupError('Super Admin Master Password must be at least 4 characters.');
       return;
     }
 
     setLoggingInDirect(true);
     setLoginLookupError('');
+    setLoginMatchedLifetime(false);
 
     const digitsOnly = rawInput.replace(/\D/g, '');
     const lowerInput = rawInput.toLowerCase();
 
     const findMatchingRestaurant = (list: Restaurant[]) => {
-      // 1. Exact phone or email match
       const exactContactMatch = list.find((r) => {
         const p1 = (r.owner_phone || '').replace(/\D/g, '');
         const p2 = (r.phone || '').replace(/\D/g, '');
@@ -710,7 +742,6 @@ export default function HomePage() {
       });
       if (exactContactMatch) return exactContactMatch;
 
-      // 2. Fallback match by restaurant name when email wasn't stored in DB yet
       return list.find((r) => {
         const restName = (r.name || '').trim().toLowerCase();
         const fullDisplay = formatRestaurantDisplayName(r).toLowerCase();
@@ -756,6 +787,17 @@ export default function HomePage() {
       return;
     }
 
+    setLoginMatchedLifetime(isLifetimePlanRecord(matched));
+
+    // Block Single Outlet accounts when Super Admin toggle is ON
+    if (isSuperAdminLoginToggle && !isMultiOutletAccount(matched)) {
+      setLoggingInDirect(false);
+      setLoginLookupError(
+        'Super Admin login is only for Multiple Outlets plans. Turn off "Login as Super Admin" to sign in to your Single Outlet account.'
+      );
+      return;
+    }
+
     const allowedByTrial = await checkLoginTrialNotExpired(matched, (msg) => {
       setLoginLookupError(msg);
       setLoggingInDirect(false);
@@ -780,6 +822,27 @@ export default function HomePage() {
         ? localStorage.getItem(MASTER_PASS_STORAGE_KEY)
         : null;
 
+    if (isSuperAdminLoginToggle) {
+      const isValidMaster =
+        (savedMaster && enteredSecret === savedMaster) ||
+        (!savedMaster &&
+          ((storedAccountPassword && enteredSecret === storedAccountPassword) ||
+            enteredSecret === matched.owner_pin));
+
+      if (!isValidMaster) {
+        setLoggingInDirect(false);
+        setLoginLookupError('Incorrect Super Admin Master Password!');
+        return;
+      }
+
+      if (!savedMaster) {
+        localStorage.setItem(MASTER_PASS_STORAGE_KEY, enteredSecret);
+      }
+
+      await completeSessionAndNavigate(matched, 'owner', true);
+      return;
+    }
+
     if (storedAccountPassword && enteredSecret === storedAccountPassword) {
       if (cleanEmailMatch) {
         saveLocalPasswordForRestaurant(
@@ -792,13 +855,13 @@ export default function HomePage() {
       await completeSessionAndNavigate(
         matched,
         'owner',
-        matched.outlet_mode === 'multiple'
+        isMultiOutletAccount(matched)
       );
       return;
     }
 
     if (
-      matched.outlet_mode === 'multiple' &&
+      isMultiOutletAccount(matched) &&
       savedMaster &&
       enteredSecret === savedMaster
     ) {
@@ -1890,7 +1953,7 @@ export default function HomePage() {
         </div>
       </footer>
 
-      {/* Account Login Modal (Email or Mobile Number + Password/PIN Directly Below) */}
+      {/* Account Login Modal (Direct Fields + Top-Left "Login as Super Admin" & Top-Right Toggle) */}
       {showLoginLookupModal && (
         <div
           onClick={() => !loggingInDirect && setShowLoginLookupModal(false)}
@@ -1909,13 +1972,63 @@ export default function HomePage() {
               <X className="w-5 h-5" />
             </button>
 
-            <div className="w-12 h-12 rounded-2xl bg-orange-100 text-orange-600 flex items-center justify-center mx-auto mb-3">
-              <LogIn className="w-6 h-6" />
+            {/* Top Row inside Login Form: Left "Login as Super Admin" + Right Toggle */}
+            <div className="flex items-center justify-between gap-2 pr-8 mb-3 text-left">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <ShieldCheck
+                  className={`w-4 h-4 shrink-0 ${
+                    isSuperAdminLoginToggle ? 'text-orange-600' : 'text-slate-400'
+                  }`}
+                />
+                <span className="text-xs font-extrabold text-slate-800 truncate">
+                  Login as Super Admin
+                </span>
+              </div>
+
+              <button
+                type="button"
+                role="switch"
+                aria-checked={isSuperAdminLoginToggle}
+                disabled={loggingInDirect}
+                onClick={() => {
+                  setIsSuperAdminLoginToggle((prev) => !prev);
+                  setLoginLookupError('');
+                  setLoginMatchedLifetime(false);
+                  setLoginAccountPassword('');
+                }}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${
+                  isSuperAdminLoginToggle ? 'bg-orange-600' : 'bg-slate-200'
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
+                    isSuperAdminLoginToggle ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
             </div>
 
-            <h3 className="text-lg font-extrabold text-slate-900">Account Login</h3>
+            <div
+              className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3 ${
+                isSuperAdminLoginToggle
+                  ? 'bg-slate-900 text-amber-400'
+                  : 'bg-orange-100 text-orange-600'
+              }`}
+            >
+              {isSuperAdminLoginToggle ? (
+                <ShieldCheck className="w-6 h-6" />
+              ) : (
+                <LogIn className="w-6 h-6" />
+              )}
+            </div>
+
+            <h3 className="text-lg font-extrabold text-slate-900">
+              {isSuperAdminLoginToggle ? 'Super Admin Login' : 'Account Login'}
+            </h3>
             <p className="text-xs text-slate-500 mt-1">
-              Enter your registered Email or Mobile Number and Password/PIN to sign in.
+              {isSuperAdminLoginToggle
+                ? 'Enter registered Owner Mobile/Email and Super Admin Master Password.'
+                : 'Enter your registered Email or Mobile Number and Password/PIN to sign in.'}
             </p>
 
             <form
@@ -1925,7 +2038,9 @@ export default function HomePage() {
             >
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Email or Mobile Number *
+                  {isSuperAdminLoginToggle
+                    ? 'Registered Owner Mobile or Email *'
+                    : 'Email or Mobile Number *'}
                 </label>
                 <div className="relative">
                   <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -1938,7 +2053,11 @@ export default function HomePage() {
                       setLoginLookupId(e.target.value);
                       setLoginLookupError('');
                     }}
-                    placeholder="e.g. owner@restro.com or 98XXXXXXXX"
+                    placeholder={
+                      isSuperAdminLoginToggle
+                        ? '10-digit mobile or owner@restro.com'
+                        : 'e.g. owner@restro.com or 98XXXXXXXX'
+                    }
                     className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
                   />
                 </div>
@@ -1946,37 +2065,67 @@ export default function HomePage() {
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Password / PIN *
+                  {isSuperAdminLoginToggle
+                    ? 'Super Admin Master Password (Min 4 Chars) *'
+                    : 'Password / PIN *'}
                 </label>
                 <div className="relative">
                   <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
                     type="password"
                     required
+                    minLength={isSuperAdminLoginToggle ? 4 : undefined}
                     autoComplete="current-password"
                     value={loginAccountPassword}
                     onChange={(e) => {
                       setLoginAccountPassword(e.target.value);
                       setLoginLookupError('');
                     }}
-                    placeholder="Enter your password or PIN"
+                    placeholder={
+                      isSuperAdminLoginToggle
+                        ? 'Enter super admin master password'
+                        : 'Enter your password or PIN'
+                    }
                     className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
                   />
                 </div>
               </div>
 
               {loginLookupError && (
-                <p className="text-xs font-bold text-red-600 bg-red-50 py-2 px-3 rounded-xl text-center">
-                  {loginLookupError}
-                </p>
+                <div className="text-xs font-bold text-red-600 bg-red-50 py-2.5 px-3 rounded-xl space-y-2 text-center">
+                  <p>{loginLookupError}</p>
+                  {isSuperAdminLoginToggle && !loginMatchedLifetime && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowLoginLookupModal(false);
+                        setPricingTab('multiple');
+                        document
+                          .getElementById('pricing')
+                          ?.scrollIntoView({ behavior: 'smooth' });
+                      }}
+                      className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-2 rounded-xl text-xs transition"
+                    >
+                      Pay / Upgrade Plan Now →
+                    </button>
+                  )}
+                </div>
               )}
 
               <button
                 type="submit"
                 disabled={loggingInDirect}
-                className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-orange-300 text-white font-extrabold py-3.5 rounded-2xl text-sm shadow-md transition"
+                className={`w-full disabled:opacity-50 text-white font-extrabold py-3.5 rounded-2xl text-sm shadow-md transition ${
+                  isSuperAdminLoginToggle
+                    ? 'bg-slate-900 hover:bg-slate-800'
+                    : 'bg-orange-600 hover:bg-orange-700'
+                }`}
               >
-                {loggingInDirect ? 'Signing In...' : 'Login to Dashboard →'}
+                {loggingInDirect
+                  ? 'Signing In...'
+                  : isSuperAdminLoginToggle
+                  ? 'Open Super Admin Dashboard →'
+                  : 'Login to Dashboard →'}
               </button>
 
               <div className="text-center pt-1">
