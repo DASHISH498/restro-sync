@@ -787,13 +787,24 @@ export default function HomePage() {
       return;
     }
 
+    const isMultiAccount = isMultiOutletAccount(matched);
     setLoginMatchedLifetime(isLifetimePlanRecord(matched));
 
-    // Block Single Outlet accounts when Super Admin toggle is ON
-    if (isSuperAdminLoginToggle && !isMultiOutletAccount(matched)) {
+    // Strict separation:
+    // 1) Single Outlet accounts cannot log in when Super Admin toggle is ON
+    if (isSuperAdminLoginToggle && !isMultiAccount) {
       setLoggingInDirect(false);
       setLoginLookupError(
         'Super Admin login is only for Multiple Outlets plans. Turn off "Login as Super Admin" to sign in to your Single Outlet account.'
+      );
+      return;
+    }
+
+    // 2) Multiple Outlets accounts cannot log in when Super Admin toggle is OFF
+    if (!isSuperAdminLoginToggle && isMultiAccount) {
+      setLoggingInDirect(false);
+      setLoginLookupError(
+        'This account is registered under a Multiple Outlets plan. Please turn on "Login as Super Admin" at the top and enter your Super Admin Master Password.'
       );
       return;
     }
@@ -843,6 +854,7 @@ export default function HomePage() {
       return;
     }
 
+    // Normal Single Outlet login (Toggle OFF)
     if (storedAccountPassword && enteredSecret === storedAccountPassword) {
       if (cleanEmailMatch) {
         saveLocalPasswordForRestaurant(
@@ -852,20 +864,7 @@ export default function HomePage() {
           enteredSecret
         );
       }
-      await completeSessionAndNavigate(
-        matched,
-        'owner',
-        isMultiOutletAccount(matched)
-      );
-      return;
-    }
-
-    if (
-      isMultiOutletAccount(matched) &&
-      savedMaster &&
-      enteredSecret === savedMaster
-    ) {
-      await completeSessionAndNavigate(matched, 'owner', true);
+      await completeSessionAndNavigate(matched, 'owner', false);
       return;
     }
 
@@ -2028,7 +2027,7 @@ export default function HomePage() {
             <p className="text-xs text-slate-500 mt-1">
               {isSuperAdminLoginToggle
                 ? 'Enter registered Owner Mobile/Email and Super Admin Master Password.'
-                : 'Enter your registered Email or Mobile Number and Password/PIN to sign in.'}
+                : 'Enter your registered Single Outlet Email or Mobile Number and Password/PIN.'}
             </p>
 
             <form
