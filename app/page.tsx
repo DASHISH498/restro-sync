@@ -87,6 +87,9 @@ const MASTER_PASS_STORAGE_KEY = 'restro_master_sales_password';
 const MALIK_VAULT_UNLOCKED_KEY = 'restro_malik_vault_unlocked';
 const ACCOUNT_PASSWORDS_STORAGE_KEY = 'restro_account_passwords_map';
 
+const GENERIC_LOGIN_ERROR =
+  'Incorrect Email/Mobile or Password/PIN. Please check and try again.';
+
 const FAQ_ITEMS = [
   {
     q: 'How does the 7-day free trial work?',
@@ -659,7 +662,10 @@ export default function HomePage() {
 
     await claimSingleRoleSession(rest.id, role);
 
+    const effectiveOutletMode: OutletTabMode =
+      unlockMalikVault && isMultiOutletAccount(rest) ? 'multiple' : 'single';
     const displayName = formatRestaurantDisplayName(rest);
+
     localStorage.setItem(
       'restro_session',
       JSON.stringify({
@@ -667,7 +673,7 @@ export default function HomePage() {
         restaurantName: displayName,
         brandName: rest.name,
         outletLabel: rest.outlet_label || null,
-        outletMode: rest.outlet_mode || 'single',
+        outletMode: effectiveOutletMode,
         ownerPhone: rest.owner_phone || null,
         city: rest.city,
         totalTables: rest.total_tables,
@@ -700,19 +706,11 @@ export default function HomePage() {
     const enteredSecret = loginAccountPassword.trim();
 
     if (!rawInput) {
-      setLoginLookupError(
-        isSuperAdminLoginToggle
-          ? 'Enter your registered Owner Mobile Number or Email.'
-          : 'Enter your registered Email or 10-digit Mobile Number.'
-      );
+      setLoginLookupError('Enter your registered Email or 10-digit Mobile Number.');
       return;
     }
     if (!enteredSecret) {
-      setLoginLookupError(
-        isSuperAdminLoginToggle
-          ? 'Enter your Super Admin Master Password or Branch Password/PIN.'
-          : 'Enter your Password or 6-digit PIN.'
-      );
+      setLoginLookupError('Enter your Password or 6-digit PIN.');
       return;
     }
 
@@ -777,21 +775,17 @@ export default function HomePage() {
 
     if (!matched) {
       setLoggingInDirect(false);
-      setLoginLookupError(
-        'No account found with this Email or Mobile Number. Please Sign Up first.'
-      );
+      setLoginLookupError(GENERIC_LOGIN_ERROR);
       return;
     }
 
     const isMultiAccount = isMultiOutletAccount(matched);
     setLoginMatchedLifetime(isLifetimePlanRecord(matched));
 
-    // Single outlet accounts are ONLY allowed in normal login (Toggle OFF)
+    // Single outlet (trial or paid) ONLY works in Normal Login (Toggle OFF)
     if (isSuperAdminLoginToggle && !isMultiAccount) {
       setLoggingInDirect(false);
-      setLoginLookupError(
-        'Super Admin login is only for Multiple Outlets plans. Turn off "Login as Super Admin" to sign in to your Single Outlet account.'
-      );
+      setLoginLookupError(GENERIC_LOGIN_ERROR);
       return;
     }
 
@@ -829,7 +823,9 @@ export default function HomePage() {
       enteredSecret.length >= 4 &&
       enteredSecret === savedMaster;
 
-    // Case 1: Super Admin Toggle is ON (Multiple Outlets account)
+    // Multiple Outlets Account + Super Admin Toggle ON:
+    // - Master password -> Malik dashboard (unlockMalikVault = true)
+    // - Branch manager password / PIN -> Single-outlet style branch dashboard (unlockMalikVault = false)
     if (isSuperAdminLoginToggle) {
       if (matchesMasterPassword) {
         await completeSessionAndNavigate(matched, 'owner', true);
@@ -850,18 +846,15 @@ export default function HomePage() {
       }
 
       setLoggingInDirect(false);
-      setLoginLookupError(
-        'Incorrect password. Enter Super Admin Master Password for Malik dashboard or Branch Owner password/PIN for outlet dashboard.'
-      );
+      setLoginLookupError(GENERIC_LOGIN_ERROR);
       return;
     }
 
-    // Case 2: Super Admin Toggle is OFF (Normal Login)
+    // Normal Login (Toggle OFF):
+    // Master password is never accepted here
     if (isMultiAccount && matchesMasterPassword) {
       setLoggingInDirect(false);
-      setLoginLookupError(
-        'This is the Master Password for Multiple Outlets. Turn on "Login as Super Admin" at the top to open the Malik dashboard.'
-      );
+      setLoginLookupError(GENERIC_LOGIN_ERROR);
       return;
     }
 
@@ -884,9 +877,7 @@ export default function HomePage() {
     }
 
     setLoggingInDirect(false);
-    setLoginLookupError(
-      'Incorrect Email/Mobile or Password/PIN. Please check and try again.'
-    );
+    setLoginLookupError(GENERIC_LOGIN_ERROR);
   };
 
   const handleClosePinModal = () => {
@@ -2030,9 +2021,7 @@ export default function HomePage() {
               {isSuperAdminLoginToggle ? 'Super Admin Login' : 'Account Login'}
             </h3>
             <p className="text-xs text-slate-500 mt-1">
-              {isSuperAdminLoginToggle
-                ? 'Master Password opens Malik dashboard; Branch password/PIN opens outlet dashboard.'
-                : 'Enter your registered Email or Mobile Number and Password/PIN to sign in.'}
+              Enter your registered Email or Mobile Number and Password/PIN to sign in.
             </p>
 
             <form
@@ -2042,9 +2031,7 @@ export default function HomePage() {
             >
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  {isSuperAdminLoginToggle
-                    ? 'Registered Owner Mobile or Email *'
-                    : 'Email or Mobile Number *'}
+                  Email or Mobile Number *
                 </label>
                 <div className="relative">
                   <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -2057,11 +2044,7 @@ export default function HomePage() {
                       setLoginLookupId(e.target.value);
                       setLoginLookupError('');
                     }}
-                    placeholder={
-                      isSuperAdminLoginToggle
-                        ? '10-digit mobile or owner@restro.com'
-                        : 'e.g. owner@restro.com or 98XXXXXXXX'
-                    }
+                    placeholder="e.g. owner@restro.com or 98XXXXXXXX"
                     className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
                   />
                 </div>
@@ -2069,9 +2052,7 @@ export default function HomePage() {
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  {isSuperAdminLoginToggle
-                    ? 'Master Password or Branch Password/PIN *'
-                    : 'Password / PIN *'}
+                  Password / PIN *
                 </label>
                 <div className="relative">
                   <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -2084,11 +2065,7 @@ export default function HomePage() {
                       setLoginAccountPassword(e.target.value);
                       setLoginLookupError('');
                     }}
-                    placeholder={
-                      isSuperAdminLoginToggle
-                        ? 'Enter master or branch password/PIN'
-                        : 'Enter your password or PIN'
-                    }
+                    placeholder="Enter your password or PIN"
                     className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
                   />
                 </div>
@@ -2124,11 +2101,7 @@ export default function HomePage() {
                     : 'bg-orange-600 hover:bg-orange-700'
                 }`}
               >
-                {loggingInDirect
-                  ? 'Signing In...'
-                  : isSuperAdminLoginToggle
-                  ? 'Continue to Dashboard →'
-                  : 'Login to Dashboard →'}
+                {loggingInDirect ? 'Signing In...' : 'Login to Dashboard →'}
               </button>
 
               <div className="text-center pt-1">
