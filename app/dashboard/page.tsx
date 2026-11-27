@@ -230,6 +230,19 @@ const MULTI_UPGRADE_PLANS: UpgradePlanOption[] = [
   },
 ];
 
+function isLifetimeSubscription(sub: SubscriptionInfo): boolean {
+  const pt = (sub.planType || "").toLowerCase();
+  const sp = (sub.selectedPlan || "").toLowerCase();
+  const st = (sub.status || "").toLowerCase();
+  return (
+    pt.includes("lifetime") ||
+    sp.includes("lifetime") ||
+    st === "lifetime" ||
+    sp.includes("19,999") ||
+    sp.includes("37,199")
+  );
+}
+
 function formatOutletTitle(outlet: {
   name: string;
   city?: string;
@@ -368,8 +381,10 @@ export default function DashboardPage() {
     subInfo.selectedPlan,
     session?.outletMode,
   );
+  const isLifetimePlanActive = isLifetimeSubscription(subInfo);
 
   const openUpgradeForMultiFeature = (reason: string) => {
+    if (isLifetimePlanActive) return;
     setUpgradeErrorMsg(reason);
     setUpgradeModeTab("multiple");
     setShowUpgradeModal(true);
@@ -624,9 +639,20 @@ export default function DashboardPage() {
         }
       }
 
-      setSubInfo({ status, planType, selectedPlan, daysLeft, isExpired });
+      const nextSubInfo: SubscriptionInfo = {
+        status,
+        planType,
+        selectedPlan,
+        daysLeft,
+        isExpired,
+      };
+      setSubInfo(nextSubInfo);
 
-      if (isExpired && session.role === "owner") {
+      if (
+        isExpired &&
+        session.role === "owner" &&
+        !isLifetimeSubscription(nextSubInfo)
+      ) {
         setUpgradeErrorMsg(
           "Your 7-day free trial has ended (8th day). Please complete payment below to continue.",
         );
@@ -770,6 +796,12 @@ export default function DashboardPage() {
   const handleOpenAddOutletModal = () => {
     if (!session) return;
     if (isAtOutletLimit) {
+      if (isLifetimePlanActive) {
+        setAddOutletError(
+          `Outlet limit reached (${maxAllowedOutlets} outlets max).`,
+        );
+        return;
+      }
       openUpgradeForMultiFeature(
         `Your ${multiCaps.tierName} plan (${subInfo.selectedPlan}) allows up to ${maxAllowedOutlets} outlet${
           maxAllowedOutlets === 1 ? "" : "s"
@@ -1917,18 +1949,20 @@ export default function DashboardPage() {
                   )}
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setUpgradeErrorMsg(null);
-                    setUpgradeModeTab("multiple");
-                    setShowUpgradeModal(true);
-                  }}
-                  className="bg-slate-900 hover:bg-slate-800 text-white px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition"
-                >
-                  <Crown className="w-4 h-4 text-amber-400 shrink-0" />
-                  <span>Upgrade Plan</span>
-                </button>
+                {!isLifetimePlanActive && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUpgradeErrorMsg(null);
+                      setUpgradeModeTab("multiple");
+                      setShowUpgradeModal(true);
+                    }}
+                    className="bg-slate-900 hover:bg-slate-800 text-white px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition"
+                  >
+                    <Crown className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>Upgrade Plan</span>
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -2022,62 +2056,65 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {isOwner && subInfo.status !== "active" && canShowPlanDetails && (
-          <section
-            className={`rounded-2xl p-4 border flex flex-wrap items-center justify-between gap-3 shadow-sm ${
-              subInfo.isExpired
-                ? "bg-red-50 border-red-300 text-red-900"
-                : "bg-gradient-to-r from-slate-900 to-slate-800 border-slate-700 text-white"
-            }`}
-          >
-            <div className="flex items-center gap-3">
-              <div
-                className={`p-2.5 rounded-xl ${
-                  subInfo.isExpired
-                    ? "bg-red-100 text-red-600"
-                    : "bg-amber-400/20 text-amber-300"
-                }`}
-              >
-                {subInfo.isExpired ? (
-                  <AlertTriangle className="w-5 h-5" />
-                ) : (
-                  <Crown className="w-5 h-5" />
-                )}
-              </div>
-              <div>
-                <p className="text-xs sm:text-sm font-extrabold">
-                  {subInfo.isExpired
-                    ? "Your 7-Day Free Trial Has Ended!"
-                    : `7-Day Free Trial Active • ${subInfo.daysLeft} Day${
-                        subInfo.daysLeft === 1 ? "" : "s"
-                      } Left`}
-                </p>
-                <p
-                  className={`text-[11px] mt-0.5 ${
-                    subInfo.isExpired ? "text-red-700" : "text-slate-300"
+        {isOwner &&
+          !isLifetimePlanActive &&
+          subInfo.status !== "active" &&
+          canShowPlanDetails && (
+            <section
+              className={`rounded-2xl p-4 border flex flex-wrap items-center justify-between gap-3 shadow-sm ${
+                subInfo.isExpired
+                  ? "bg-red-50 border-red-300 text-red-900"
+                  : "bg-gradient-to-r from-slate-900 to-slate-800 border-slate-700 text-white"
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <div
+                  className={`p-2.5 rounded-xl ${
+                    subInfo.isExpired
+                      ? "bg-red-100 text-red-600"
+                      : "bg-amber-400/20 text-amber-300"
                   }`}
                 >
-                  {subInfo.isExpired
-                    ? "8th day reached — complete payment to unlock your account."
-                    : `Plan: ${subInfo.selectedPlan} • Pay anytime for full calendar duration.`}
-                </p>
+                  {subInfo.isExpired ? (
+                    <AlertTriangle className="w-5 h-5" />
+                  ) : (
+                    <Crown className="w-5 h-5" />
+                  )}
+                </div>
+                <div>
+                  <p className="text-xs sm:text-sm font-extrabold">
+                    {subInfo.isExpired
+                      ? "Your 7-Day Free Trial Has Ended!"
+                      : `7-Day Free Trial Active • ${subInfo.daysLeft} Day${
+                          subInfo.daysLeft === 1 ? "" : "s"
+                        } Left`}
+                  </p>
+                  <p
+                    className={`text-[11px] mt-0.5 ${
+                      subInfo.isExpired ? "text-red-700" : "text-slate-300"
+                    }`}
+                  >
+                    {subInfo.isExpired
+                      ? "8th day reached — complete payment to unlock your account."
+                      : `Plan: ${subInfo.selectedPlan} • Pay anytime for full calendar duration.`}
+                  </p>
+                </div>
               </div>
-            </div>
 
-            <button
-              type="button"
-              onClick={() => {
-                setUpgradeErrorMsg(null);
-                setUpgradeModeTab(isMalikMode ? "multiple" : "single");
-                setShowUpgradeModal(true);
-              }}
-              className="bg-orange-600 hover:bg-orange-700 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center gap-1.5"
-            >
-              <Crown className="w-3.5 h-3.5" />
-              <span>Upgrade / Activate Plan</span>
-            </button>
-          </section>
-        )}
+              <button
+                type="button"
+                onClick={() => {
+                  setUpgradeErrorMsg(null);
+                  setUpgradeModeTab(isMalikMode ? "multiple" : "single");
+                  setShowUpgradeModal(true);
+                }}
+                className="bg-orange-600 hover:bg-orange-700 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center gap-1.5"
+              >
+                <Crown className="w-3.5 h-3.5" />
+                <span>Upgrade / Activate Plan</span>
+              </button>
+            </section>
+          )}
 
         {/* ==================== MALIK COMMAND VIEW ==================== */}
         {isMalikMode ? (
@@ -3551,7 +3588,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {isOwner && showUpgradeModal && (
+      {isOwner && !isLifetimePlanActive && showUpgradeModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-[1030] overscroll-none touch-none">
           <div className="bg-white rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl max-h-[85vh] overflow-y-auto overscroll-contain touch-pan-y border border-slate-200">
             <div className="flex items-center justify-between pb-4 border-b border-slate-200">
