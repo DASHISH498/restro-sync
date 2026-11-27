@@ -710,13 +710,9 @@ export default function HomePage() {
     if (!enteredSecret) {
       setLoginLookupError(
         isSuperAdminLoginToggle
-          ? 'Enter your Super Admin Master Password (min 4 chars).'
+          ? 'Enter your Super Admin Master Password or Branch Password/PIN.'
           : 'Enter your Password or 6-digit PIN.'
       );
-      return;
-    }
-    if (isSuperAdminLoginToggle && enteredSecret.length < 4) {
-      setLoginLookupError('Super Admin Master Password must be at least 4 characters.');
       return;
     }
 
@@ -790,21 +786,11 @@ export default function HomePage() {
     const isMultiAccount = isMultiOutletAccount(matched);
     setLoginMatchedLifetime(isLifetimePlanRecord(matched));
 
-    // Strict separation:
-    // 1) Single Outlet accounts cannot log in when Super Admin toggle is ON
+    // Single outlet accounts are ONLY allowed in normal login (Toggle OFF)
     if (isSuperAdminLoginToggle && !isMultiAccount) {
       setLoggingInDirect(false);
       setLoginLookupError(
         'Super Admin login is only for Multiple Outlets plans. Turn off "Login as Super Admin" to sign in to your Single Outlet account.'
-      );
-      return;
-    }
-
-    // 2) Multiple Outlets accounts cannot log in when Super Admin toggle is OFF
-    if (!isSuperAdminLoginToggle && isMultiAccount) {
-      setLoggingInDirect(false);
-      setLoginLookupError(
-        'This account is registered under a Multiple Outlets plan. Please turn on "Login as Super Admin" at the top and enter your Super Admin Master Password.'
       );
       return;
     }
@@ -833,30 +819,54 @@ export default function HomePage() {
         ? localStorage.getItem(MASTER_PASS_STORAGE_KEY)
         : null;
 
-    if (isSuperAdminLoginToggle) {
-      const isValidMaster =
-        (savedMaster && enteredSecret === savedMaster) ||
-        (!savedMaster &&
-          ((storedAccountPassword && enteredSecret === storedAccountPassword) ||
-            enteredSecret === matched.owner_pin));
+    const matchesBranchPasswordOrPin =
+      (storedAccountPassword && enteredSecret === storedAccountPassword) ||
+      enteredSecret === matched.owner_pin;
 
-      if (!isValidMaster) {
-        setLoggingInDirect(false);
-        setLoginLookupError('Incorrect Super Admin Master Password!');
+    const matchesMasterPassword =
+      isMultiAccount &&
+      savedMaster &&
+      enteredSecret.length >= 4 &&
+      enteredSecret === savedMaster;
+
+    // Case 1: Super Admin Toggle is ON (Multiple Outlets account)
+    if (isSuperAdminLoginToggle) {
+      if (matchesMasterPassword) {
+        await completeSessionAndNavigate(matched, 'owner', true);
         return;
       }
 
-      if (!savedMaster) {
-        localStorage.setItem(MASTER_PASS_STORAGE_KEY, enteredSecret);
+      if (matchesBranchPasswordOrPin) {
+        if (cleanEmailMatch && storedAccountPassword) {
+          saveLocalPasswordForRestaurant(
+            matched.id,
+            cleanEmailMatch,
+            cleanPhoneMatch,
+            enteredSecret
+          );
+        }
+        await completeSessionAndNavigate(matched, 'owner', false);
+        return;
       }
 
-      await completeSessionAndNavigate(matched, 'owner', true);
+      setLoggingInDirect(false);
+      setLoginLookupError(
+        'Incorrect password. Enter Super Admin Master Password for Malik dashboard or Branch Owner password/PIN for outlet dashboard.'
+      );
       return;
     }
 
-    // Normal Single Outlet login (Toggle OFF)
-    if (storedAccountPassword && enteredSecret === storedAccountPassword) {
-      if (cleanEmailMatch) {
+    // Case 2: Super Admin Toggle is OFF (Normal Login)
+    if (isMultiAccount && matchesMasterPassword) {
+      setLoggingInDirect(false);
+      setLoginLookupError(
+        'This is the Master Password for Multiple Outlets. Turn on "Login as Super Admin" at the top to open the Malik dashboard.'
+      );
+      return;
+    }
+
+    if (matchesBranchPasswordOrPin) {
+      if (cleanEmailMatch && storedAccountPassword) {
         saveLocalPasswordForRestaurant(
           matched.id,
           cleanEmailMatch,
@@ -864,11 +874,6 @@ export default function HomePage() {
           enteredSecret
         );
       }
-      await completeSessionAndNavigate(matched, 'owner', false);
-      return;
-    }
-
-    if (enteredSecret === matched.owner_pin) {
       await completeSessionAndNavigate(matched, 'owner', false);
       return;
     }
@@ -2026,8 +2031,8 @@ export default function HomePage() {
             </h3>
             <p className="text-xs text-slate-500 mt-1">
               {isSuperAdminLoginToggle
-                ? 'Enter registered Owner Mobile/Email and Super Admin Master Password.'
-                : 'Enter your registered Single Outlet Email or Mobile Number and Password/PIN.'}
+                ? 'Master Password opens Malik dashboard; Branch password/PIN opens outlet dashboard.'
+                : 'Enter your registered Email or Mobile Number and Password/PIN to sign in.'}
             </p>
 
             <form
@@ -2065,7 +2070,7 @@ export default function HomePage() {
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
                   {isSuperAdminLoginToggle
-                    ? 'Super Admin Master Password (Min 4 Chars) *'
+                    ? 'Master Password or Branch Password/PIN *'
                     : 'Password / PIN *'}
                 </label>
                 <div className="relative">
@@ -2073,7 +2078,6 @@ export default function HomePage() {
                   <input
                     type="password"
                     required
-                    minLength={isSuperAdminLoginToggle ? 4 : undefined}
                     autoComplete="current-password"
                     value={loginAccountPassword}
                     onChange={(e) => {
@@ -2082,7 +2086,7 @@ export default function HomePage() {
                     }}
                     placeholder={
                       isSuperAdminLoginToggle
-                        ? 'Enter super admin master password'
+                        ? 'Enter master or branch password/PIN'
                         : 'Enter your password or PIN'
                     }
                     className="w-full pl-10 pr-3.5 py-2.5 border border-slate-200 focus:border-orange-500 rounded-xl text-sm outline-none transition"
@@ -2123,7 +2127,7 @@ export default function HomePage() {
                 {loggingInDirect
                   ? 'Signing In...'
                   : isSuperAdminLoginToggle
-                  ? 'Open Super Admin Dashboard →'
+                  ? 'Continue to Dashboard →'
                   : 'Login to Dashboard →'}
               </button>
 
