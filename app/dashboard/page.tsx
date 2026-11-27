@@ -755,6 +755,8 @@ export default function DashboardPage() {
   const isOwner = session?.role === "owner";
   const isMultiOutletMode =
     isOwner && (session?.outletMode === "multiple" || ownerOutlets.length > 1);
+  // Plan name (Yearly / Lifetime / etc.) is shown only to Malik (Master Password mode)
+  const canShowPlanDetails = isMalikMode;
 
   const maxAllowedOutlets = getMaxOutletsForPlan(
     subInfo.planType,
@@ -1871,8 +1873,16 @@ export default function DashboardPage() {
               </div>
               <p className="text-xs text-slate-500 truncate">
                 {isMalikMode
-                  ? `${outletsForDisplay.length} Linked Outlet(s) • ${subInfo.selectedPlan}`
-                  : `${session.city} • ${actualTablesCount} Tables • ${subInfo.selectedPlan}`}
+                  ? `${outletsForDisplay.length} Linked Outlet(s)${
+                      canShowPlanDetails && subInfo.selectedPlan
+                        ? ` • ${subInfo.selectedPlan}`
+                        : ""
+                    }`
+                  : `${session.city} • ${actualTablesCount} Tables${
+                      canShowPlanDetails && subInfo.selectedPlan
+                        ? ` • ${subInfo.selectedPlan}`
+                        : ""
+                    }`}
               </p>
             </div>
           </div>
@@ -2012,7 +2022,7 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {isOwner && subInfo.status !== "active" && (
+        {isOwner && subInfo.status !== "active" && canShowPlanDetails && (
           <section
             className={`rounded-2xl p-4 border flex flex-wrap items-center justify-between gap-3 shadow-sm ${
               subInfo.isExpired
