@@ -1897,7 +1897,7 @@ export default function DashboardPage() {
                 >
                   <ShieldCheck className="w-3 h-3" />{" "}
                   {isMalikMode
-                    ? `Super Admin• ${multiCaps.tierName}`
+                    ? `Super Admin • ${multiCaps.tierName}`
                     : isMultiOutletMode
                       ? "Branch Manager"
                       : "Branch Manager"}
