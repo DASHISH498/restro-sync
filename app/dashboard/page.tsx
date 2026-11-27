@@ -1897,10 +1897,10 @@ export default function DashboardPage() {
                 >
                   <ShieldCheck className="w-3 h-3" />{" "}
                   {isMalikMode
-                    ? `Malik • ${multiCaps.tierName}`
+                    ? `Super • ${multiCaps.tierName}`
                     : isMultiOutletMode
                       ? "Branch Manager"
-                      : "Owner"}
+                      : "Admin"}
                 </span>
               </div>
               <p className="text-xs text-slate-500 truncate">
